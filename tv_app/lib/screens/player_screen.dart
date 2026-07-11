@@ -58,7 +58,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ..loadRequest(
         Uri.parse(widget.streamUrl),
         headers: {
-          'Referer': 'https://vidsrc.me/',
+          'Referer': 'https://${Uri.parse(widget.streamUrl).host}/',
         },
       );
   }

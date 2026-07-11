@@ -1,6 +1,9 @@
 import asyncio
 import logging
 from app.scrapers.providers.vidsrc import VidSrcScraper
+from app.scrapers.providers.vidsrcto import VidSrcToScraper
+from app.scrapers.providers.isaimini import IsaiminiScraper
+from app.services.tmdb import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -8,8 +11,12 @@ class ScraperManager:
     def __init__(self):
         # Register active scraper instances
         self.scrapers = [
-            VidSrcScraper()
+            VidSrcScraper(),
+            VidSrcToScraper(),
+            IsaiminiScraper()
         ]
+        # Cache resolved stream links for 5 hours to speed up details loading
+        self._stream_cache = TTLCache(ttl_seconds=18000)
 
     async def get_streams(
         self,
@@ -23,7 +30,14 @@ class ScraperManager:
     ) -> list[dict]:
         """
         Runs all registered scrapers concurrently to find streaming links.
+        Serves from cache when available.
         """
+        cache_key = f"{tmdb_id}_{season}_{episode}"
+        cached_result = self._stream_cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Serving streams for TMDB {tmdb_id} from manager cache")
+            return cached_result
+
         logger.info(f"Orchestrating scrapers for: {title} ({year}) | Type: {media_type} | TMDb: {tmdb_id} | IMDb: {imdb_id}")
         
         tasks = []
@@ -69,6 +83,11 @@ class ScraperManager:
                 seen_urls.add(url)
                 deduplicated.append(item)
 
+        # Sort so that Isaimini streams are placed first
+        deduplicated.sort(key=lambda x: 0 if "Isaimini" in x.get("provider", "") else 1)
+
+        # Cache the deduplicated results
+        self._stream_cache.set(cache_key, deduplicated)
         return deduplicated
 
 scraper_manager = ScraperManager()

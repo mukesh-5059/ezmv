@@ -27,12 +27,12 @@ class VidSrcScraper(BaseScraper):
             return results
 
         if media_type == "movie":
-            url = f"https://vidsrc.me/embed/movie?imdb={imdb_id}"
+            url = f"https://vidsrcme.ru/embed/movie?imdb={imdb_id}"
         else:
             if season is None or episode is None:
                 logger.warning(f"{self.name} TV request requires season and episode.")
                 return results
-            url = f"https://vidsrc.me/embed/tv?imdb={imdb_id}&season={season}&episode={episode}"
+            url = f"https://vidsrcme.ru/embed/tv?imdb={imdb_id}&season={season}&episode={episode}"
 
         try:
             from app.core.session import get_session
@@ -53,7 +53,7 @@ class VidSrcScraper(BaseScraper):
                     if src.startswith("//"):
                         src = f"https:{src}"
                     results.append({
-                        "provider": "VidSrc (Primary Player)",
+                        "provider": "VidSrc (Server 1 - Direct)",
                         "url": src,
                         "quality": "Auto",
                         "type": "embed",
@@ -74,6 +74,39 @@ class VidSrcScraper(BaseScraper):
                                 "type": "embed",
                                 "subtitles": []
                             })
+
+            # Append fallback direct mirrors (Server 3 & Server 4)
+            if media_type == "movie":
+                results.append({
+                    "provider": "VidSrc (Server 3 - Mirror)",
+                    "url": f"https://vidsrcme.su/embed/movie?imdb={imdb_id}",
+                    "quality": "Auto",
+                    "type": "embed",
+                    "subtitles": []
+                })
+                results.append({
+                    "provider": "VidSrc (Server 4 - Mirror)",
+                    "url": f"https://vsrc.su/embed/movie?imdb={imdb_id}",
+                    "quality": "Auto",
+                    "type": "embed",
+                    "subtitles": []
+                })
+            else:
+                if season is not None and episode is not None:
+                    results.append({
+                        "provider": "VidSrc (Server 3 - Mirror)",
+                        "url": f"https://vidsrcme.su/embed/tv?imdb={imdb_id}&season={season}&episode={episode}",
+                        "quality": "Auto",
+                        "type": "embed",
+                        "subtitles": []
+                    })
+                    results.append({
+                        "provider": "VidSrc (Server 4 - Mirror)",
+                        "url": f"https://vsrc.su/embed/tv?imdb={imdb_id}&season={season}&episode={episode}",
+                        "quality": "Auto",
+                        "type": "embed",
+                        "subtitles": []
+                    })
 
         except Exception as e:
             logger.error(f"Error scraping {self.name}: {e}", exc_info=True)
