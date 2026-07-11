@@ -1,9 +1,32 @@
 import logging
-from curl_cffi import CurlOpt
-from curl_cffi.requests import AsyncSession
+import time
 from app.core.config import settings
+from app.core.session import get_session
 
 logger = logging.getLogger(__name__)
+
+class TTLCache:
+    """
+    A lightweight, in-memory key-value cache with TTL expiration.
+    """
+    def __init__(self, ttl_seconds: int):
+        self.ttl = ttl_seconds
+        self.cache = {}
+
+    def get(self, key):
+        if key in self.cache:
+            expire_time, val = self.cache[key]
+            if time.time() < expire_time:
+                return val
+            else:
+                del self.cache[key]  # Clean up expired entry
+        return None
+
+    def set(self, key, val):
+        self.cache[key] = (time.time() + self.ttl, val)
+
+    def clear(self):
+        self.cache.clear()
 
 class TMDBClient:
     BASE_URL = "https://api.themoviedb.org/3"
@@ -13,33 +36,47 @@ class TMDBClient:
             "Authorization": f"Bearer {settings.ReadAccessToken}",
             "accept": "application/json"
         }
-        # Native DNS-over-HTTPS configuration for libcurl
-        self.curl_options = {
-            CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query"
-        }
+        
+        # Initialize Cache instances (TTL: 1 hour for searches, 24 hours for discover/popular/details)
+        self._search_cache = TTLCache(ttl_seconds=3600)
+        self._popular_cache = TTLCache(ttl_seconds=86400)
+        self._discover_cache = TTLCache(ttl_seconds=86400)
+        self._details_cache = TTLCache(ttl_seconds=86400)
 
-    async def search_movie(self, query: str, year: int = None) -> list[dict]:
+    async def search_movie(self, query: str, year: int = None, page: int = 1) -> list[dict]:
         """
-        Search for movies on TMDB.
+        Search for movies on TMDB, with in-memory TTL caching.
         """
+        cache_key = f"{query}_{year}_{page}"
+        cached_result = self._search_cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Serving search query '{query}' (page: {page}) from TMDB cache")
+            return cached_result
+
         url = f"{self.BASE_URL}/search/movie"
-        params = {"query": query}
+        params = {
+            "query": query,
+            "page": str(page)
+        }
         if year:
             params["year"] = str(year)
 
         try:
             from datetime import date
-            async with AsyncSession(curl_options=self.curl_options) as client:
-                resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-                resp.raise_for_status()
-                results = resp.json().get("results", [])
-                
-                # Filter out unreleased movies (where release_date is empty or in the future)
-                today_str = date.today().isoformat()
-                return [
-                    m for m in results
-                    if m.get("release_date") and m.get("release_date") <= today_str
-                ]
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            
+            # Filter out unreleased movies (where release_date is empty or in the future)
+            today_str = date.today().isoformat()
+            filtered_results = [
+                m for m in results
+                if m.get("release_date") and m.get("release_date") <= today_str
+            ]
+            
+            self._search_cache.set(cache_key, filtered_results)
+            return filtered_results
         except Exception as e:
             logger.error(f"TMDB movie search failed for '{query}': {e}")
             return []
@@ -54,42 +91,49 @@ class TMDBClient:
             params["first_air_date_year"] = str(year)
 
         try:
-            async with AsyncSession(curl_options=self.curl_options) as client:
-                resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-                resp.raise_for_status()
-                return resp.json().get("results", [])
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            return resp.json().get("results", [])
         except Exception as e:
             logger.error(f"TMDB TV search failed for '{query}': {e}")
             return []
 
     async def get_movie_details(self, movie_id: int) -> dict | None:
         """
-        Get full details for a movie, including external IDs.
+        Get full details for a movie, with in-memory TTL caching.
         """
+        cached_result = self._details_cache.get(movie_id)
+        if cached_result is not None:
+            return cached_result
+
         url = f"{self.BASE_URL}/movie/{movie_id}"
         params = {"append_to_response": "external_ids"}
 
         try:
-            async with AsyncSession(curl_options=self.curl_options) as client:
-                resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-                resp.raise_for_status()
-                return resp.json()
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            details = resp.json()
+            
+            self._details_cache.set(movie_id, details)
+            return details
         except Exception as e:
             logger.error(f"Failed to fetch TMDB movie details for id {movie_id}: {e}")
             return None
 
     async def get_tv_details(self, tv_id: int) -> dict | None:
         """
-        Get full details for a TV show, including external IDs.
+        Get full details for a TV show.
         """
         url = f"{self.BASE_URL}/tv/{tv_id}"
         params = {"append_to_response": "external_ids"}
 
         try:
-            async with AsyncSession(curl_options=self.curl_options) as client:
-                resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-                resp.raise_for_status()
-                return resp.json()
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            return resp.json()
         except Exception as e:
             logger.error(f"Failed to fetch TMDB TV details for id {tv_id}: {e}")
             return None
@@ -98,9 +142,13 @@ class TMDBClient:
         """
         Get popular movies from TMDB whose original language matches the requested language code.
         """
+        cache_key = f"{language}_{page}"
+        cached_result = self._popular_cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Serving popular movies (language: {language}, page: {page}) from TMDB cache")
+            return cached_result
+
         url = f"{self.BASE_URL}/discover/movie"
-        
-        # Extract the base language code (e.g., 'hi' from 'hi-IN')
         lang_code = language.split("-")[0] if "-" in language else language
         
         from datetime import date
@@ -114,19 +162,28 @@ class TMDBClient:
         }
 
         try:
-            async with AsyncSession(curl_options=self.curl_options) as client:
-                resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-                resp.raise_for_status()
-                return resp.json().get("results", [])
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            
+            self._popular_cache.set(cache_key, results)
+            return results
         except Exception as e:
             logger.error(f"Failed to fetch popular movies for original language '{lang_code}': {e}")
             return []
 
-    async def discover_movies(self, language: str = "en-US", year: int | None = None, page: int = 1) -> list[dict]:
+    async def discover_movies(self, language: str = "en-US", year: int | None = None, genre: int | None = None, page: int = 1) -> list[dict]:
         """
-        Discover movies filterable by original language and/or primary release year.
+        Discover movies filterable by original language, primary release year, and/or genre ID.
         If no year is specified, sorts by latest release date.
         """
+        cache_key = f"{language}_{year}_{genre}_{page}"
+        cached_result = self._discover_cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(f"Serving discovered movies (language: {language}, year: {year}, genre: {genre}, page: {page}) from TMDB cache")
+            return cached_result
+
         url = f"{self.BASE_URL}/discover/movie"
         lang_code = language.split("-")[0] if "-" in language else language
         
@@ -139,6 +196,9 @@ class TMDBClient:
             "primary_release_date.lte": today_str
         }
         
+        if genre:
+            params["with_genres"] = str(genre)
+            
         if year:
             params["primary_release_year"] = str(year)
             params["sort_by"] = "popularity.desc"
@@ -146,12 +206,15 @@ class TMDBClient:
             params["sort_by"] = "primary_release_date.desc"
 
         try:
-            async with AsyncSession(curl_options=self.curl_options) as client:
-                resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-                resp.raise_for_status()
-                return resp.json().get("results", [])
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            
+            self._discover_cache.set(cache_key, results)
+            return results
         except Exception as e:
-            logger.error(f"TMDB discover failed for lang '{lang_code}', year '{year}': {e}")
+            logger.error(f"TMDB discover failed for lang '{lang_code}', year '{year}', genre '{genre}': {e}")
             return []
 
 tmdb_client = TMDBClient()

@@ -23,9 +23,9 @@ class ApiClient {
     _currentBaseUrl = newUrl;
   }
 
-  // Search movies
-  static Future<List<Movie>> searchMovies(String query) async {
-    final url = Uri.parse('$_currentBaseUrl/movies/search?query=${Uri.encodeComponent(query)}&media_type=movie');
+  // Search movies with page support
+  static Future<List<Movie>> searchMovies(String query, {int page = 1}) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/search?query=${Uri.encodeComponent(query)}&media_type=movie&page=$page');
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
@@ -55,11 +55,14 @@ class ApiClient {
     return [];
   }
 
-  // Discover movies filterable by language and optional release year
-  static Future<List<Movie>> discoverMovies({required String language, int? year, int page = 1}) async {
+  // Discover movies filterable by language, release year, and genre
+  static Future<List<Movie>> discoverMovies({required String language, int? year, int? genreId, int page = 1}) async {
     var queryParams = 'language=$language&page=$page';
     if (year != null) {
       queryParams += '&year=$year';
+    }
+    if (genreId != null) {
+      queryParams += '&genre=$genreId';
     }
     final url = Uri.parse('$_currentBaseUrl/movies/discover?$queryParams');
     try {

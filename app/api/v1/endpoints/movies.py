@@ -7,13 +7,14 @@ router = APIRouter()
 async def search_movies_or_tv(
     query: str = Query(..., description="The title of the movie or show to search for"),
     media_type: str = Query("movie", enum=["movie", "tv"], description="Media type: movie or tv"),
-    year: int | None = Query(None, description="Year of release (or first air date for TV)")
+    year: int | None = Query(None, description="Year of release (or first air date for TV)"),
+    page: int = Query(1, ge=1, description="Page number to fetch")
 ):
     """
     Search for movies or TV shows on TMDB.
     """
     if media_type == "movie":
-        results = await tmdb_client.search_movie(query=query, year=year)
+        results = await tmdb_client.search_movie(query=query, year=year, page=page)
     else:
         results = await tmdb_client.search_tv(query=query, year=year)
     
@@ -65,13 +66,14 @@ async def get_popular(
 async def discover(
     language: str = Query("ta-IN", description="Language code to query (e.g. ta-IN, hi-IN, en-US)"),
     year: int | None = Query(None, description="Release year to filter by"),
+    genre: int | None = Query(None, description="Genre ID to filter by"),
     page: int = Query(1, ge=1, description="Page number to fetch")
 ):
     """
-    Discover movies from TMDB, filterable by original language and release year.
+    Discover movies from TMDB, filterable by original language, release year, and genre.
     Returns latest movies if year is not provided.
     """
-    results = await tmdb_client.discover_movies(language=language, year=year, page=page)
+    results = await tmdb_client.discover_movies(language=language, year=year, genre=genre, page=page)
     
     formatted_results = []
     for item in results:

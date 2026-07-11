@@ -18,7 +18,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Movie> _latestTamil = [];
   List<Movie> _tamil = [];
   List<Movie> _popular = [];
-  List<Movie> _searchResults = [];
+  List<Movie> _searchTamilResults = [];
+  List<Movie> _searchGeneralResults = [];
   
   Movie? _focusedMovie;
   bool _isLoading = true;
@@ -29,6 +30,13 @@ class _HomeScreenState extends State<HomeScreen> {
   int _latestTamilPage = 1;
   int _tamilPage = 1;
   int _popularPage = 1;
+  int _searchTamilPage = 1;
+  int _searchGeneralPage = 1;
+  
+  String? _activeSearchText;
+  int? _activeSearchYear;
+  int? _activeSearchGenreId;
+  
   bool _isLoadingMore = false;
 
   final TextEditingController _ipController = TextEditingController();
@@ -47,7 +55,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _latestTamilPage = 1;
       _tamilPage = 1;
       _popularPage = 1;
-      _searchResults = [];
+      _searchTamilPage = 1;
+      _searchGeneralPage = 1;
+      _activeSearchText = null;
+      _activeSearchYear = null;
+      _activeSearchGenreId = null;
+      _searchTamilResults = [];
+      _searchGeneralResults = [];
       _searchQuery = "";
     });
     
@@ -144,36 +158,167 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // Paginate Tamil Search Results
+  Future<void> _loadMoreSearchTamil() async {
+    if (_isLoadingMore) return;
+    setState(() => _isLoadingMore = true);
+
+    final nextPage = _searchTamilPage + 1;
+    List<Movie> newMovies = [];
+
+    if (_activeSearchText != null) {
+      final allResults = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
+      newMovies = allResults.where((m) => m.originalLanguage == 'ta').toList();
+    } else {
+      newMovies = await ApiClient.discoverMovies(
+        language: 'ta-IN',
+        year: _activeSearchYear,
+        genreId: _activeSearchGenreId,
+        page: nextPage,
+      );
+    }
+
+    setState(() {
+      _searchTamilResults.addAll(newMovies);
+      _searchTamilPage = nextPage;
+      _isLoadingMore = false;
+    });
+  }
+
+  // Paginate General Search Results
+  Future<void> _loadMoreSearchGeneral() async {
+    if (_isLoadingMore) return;
+    setState(() => _isLoadingMore = true);
+
+    final nextPage = _searchGeneralPage + 1;
+    List<Movie> newMovies = [];
+
+    if (_activeSearchText != null) {
+      final allResults = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
+      newMovies = allResults.where((m) => m.originalLanguage != 'ta').toList();
+    } else {
+      newMovies = await ApiClient.discoverMovies(
+        language: 'en-US',
+        year: _activeSearchYear,
+        genreId: _activeSearchGenreId,
+        page: nextPage,
+      );
+    }
+
+    setState(() {
+      _searchGeneralResults.addAll(newMovies);
+      _searchGeneralPage = nextPage;
+      _isLoadingMore = false;
+    });
+  }
+
   // Search Movies Flow
   Future<void> _performSearch(String query) async {
     if (query.trim().isEmpty) return;
     setState(() {
       _isLoading = true;
       _searchQuery = query;
+      _searchTamilPage = 1;
+      _searchGeneralPage = 1;
+      _activeSearchText = query;
+      _activeSearchYear = null;
+      _activeSearchGenreId = null;
     });
 
     final results = await ApiClient.searchMovies(query);
+    final tamil = results.where((m) => m.originalLanguage == 'ta').toList();
+    final general = results.where((m) => m.originalLanguage != 'ta').toList();
 
     setState(() {
-      _searchResults = results;
+      _searchTamilResults = tamil;
+      _searchGeneralResults = general;
       _isLoading = false;
-      if (results.isNotEmpty) {
-        _focusedMovie = results.first;
+      if (tamil.isNotEmpty) {
+        _focusedMovie = tamil.first;
+      } else if (general.isNotEmpty) {
+        _focusedMovie = general.first;
+      }
+    });
+  }
+
+  // Discover movies filterable by genre or year for Quick Tags (Querying Tamil and English parallelly)
+  Future<void> _performDiscover(String label, {int? year, int? genreId}) async {
+    setState(() {
+      _isLoading = true;
+      _searchQuery = label;
+      _searchTamilPage = 1;
+      _searchGeneralPage = 1;
+      _activeSearchText = null;
+      _activeSearchYear = year;
+      _activeSearchGenreId = genreId;
+    });
+
+    final results = await Future.wait([
+      ApiClient.discoverMovies(language: 'ta-IN', year: year, genreId: genreId),
+      ApiClient.discoverMovies(language: 'en-US', year: year, genreId: genreId),
+    ]);
+
+    final tamil = results[0];
+    final general = results[1];
+
+    setState(() {
+      _searchTamilResults = tamil;
+      _searchGeneralResults = general;
+      _isLoading = false;
+      if (tamil.isNotEmpty) {
+        _focusedMovie = tamil.first;
+      } else if (general.isNotEmpty) {
+        _focusedMovie = general.first;
       }
     });
   }
 
   void _clearSearch() {
     setState(() {
-      _searchResults = [];
+      _searchTamilResults = [];
+      _searchGeneralResults = [];
+      _activeSearchText = null;
+      _activeSearchYear = null;
+      _activeSearchGenreId = null;
       _searchQuery = "";
-      if (_tamil.isNotEmpty) {
-        _focusedMovie = _tamil.first;
+      if (_latestTamil.isNotEmpty) {
+        _focusedMovie = _latestTamil.first;
       }
     });
   }
 
-  // Open Search Query input dialog
+  Widget _buildSearchTag(BuildContext context, String label, VoidCallback onTap) {
+    return Focus(
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return ActionChip(
+            backgroundColor: focused ? Colors.white : TVTheme.surface,
+            label: Text(
+              label,
+              style: TextStyle(
+                color: focused ? Colors.black : Colors.white,
+                fontWeight: focused ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(
+                color: focused ? Colors.white : Colors.grey.shade800,
+                width: 1,
+              ),
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              onTap();
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  // Open Search Query input dialog with focusable Quick Search tags
   void _showSearchDialog() {
     _searchController.clear();
     showDialog(
@@ -182,32 +327,151 @@ class _HomeScreenState extends State<HomeScreen> {
         return AlertDialog(
           backgroundColor: TVTheme.surface,
           title: const Text('Search Movies'),
-          content: TextField(
-            controller: _searchController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText: 'Enter movie title...',
-              border: OutlineInputBorder(),
+          content: SizedBox(
+            width: 750, // Wider for side-by-side split screen
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Left Column: Custom Text Input & Search/Cancel Buttons
+                SizedBox(
+                  width: 280,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Type Movie Title',
+                        style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _searchController,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Enter title...',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (val) {
+                          Navigator.pop(context);
+                          _performSearch(val);
+                        },
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Focus(
+                              child: Builder(
+                                builder: (context) {
+                                  final focused = Focus.of(context).hasFocus;
+                                  return TextButton(
+                                    style: TextButton.styleFrom(
+                                      backgroundColor: focused ? Colors.white.withOpacity(0.15) : Colors.transparent,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Focus(
+                              child: Builder(
+                                builder: (context) {
+                                  final focused = Focus.of(context).hasFocus;
+                                  return ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.pop(context);
+                                      _performSearch(_searchController.text);
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: focused ? Colors.white : TVTheme.accent,
+                                      foregroundColor: focused ? Colors.black : Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                    child: const Text('Search'),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Vertical Divider
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20.0),
+                  child: SizedBox(
+                    height: 280,
+                    child: VerticalDivider(color: Colors.grey, width: 1, thickness: 1),
+                  ),
+                ),
+                
+                // Right Column: All Quick Search Tags (Scrollable list of Genres and Years)
+                Expanded(
+                  child: SizedBox(
+                    height: 280,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Quick Search Genres',
+                            style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _buildSearchTag(context, 'Action', () => _performDiscover('Action', genreId: 28)),
+                              _buildSearchTag(context, 'Comedy', () => _performDiscover('Comedy', genreId: 35)),
+                              _buildSearchTag(context, 'Thriller', () => _performDiscover('Thriller', genreId: 53)),
+                              _buildSearchTag(context, 'Horror', () => _performDiscover('Horror', genreId: 27)),
+                              _buildSearchTag(context, 'Sci-Fi', () => _performDiscover('Sci-Fi', genreId: 878)),
+                              _buildSearchTag(context, 'Romance', () => _performDiscover('Romance', genreId: 10749)),
+                              _buildSearchTag(context, 'Animation', () => _performDiscover('Animation', genreId: 16)),
+                              _buildSearchTag(context, 'Drama', () => _performDiscover('Drama', genreId: 18)),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          const Text(
+                            'Quick Search Years',
+                            style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _buildSearchTag(context, '2026', () => _performDiscover('2026', year: 2026)),
+                              _buildSearchTag(context, '2025', () => _performDiscover('2025', year: 2025)),
+                              _buildSearchTag(context, '2024', () => _performDiscover('2024', year: 2024)),
+                              _buildSearchTag(context, '2023', () => _performDiscover('2023', year: 2023)),
+                              _buildSearchTag(context, '2022', () => _performDiscover('2022', year: 2022)),
+                              _buildSearchTag(context, '2021', () => _performDiscover('2021', year: 2021)),
+                              _buildSearchTag(context, '2020', () => _performDiscover('2020', year: 2020)),
+                              _buildSearchTag(context, '2019', () => _performDiscover('2019', year: 2019)),
+                              _buildSearchTag(context, '2018', () => _performDiscover('2018', year: 2018)),
+                              _buildSearchTag(context, '2015', () => _performDiscover('2015', year: 2015)),
+                              _buildSearchTag(context, '2010', () => _performDiscover('2010', year: 2010)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            onSubmitted: (val) {
-              Navigator.pop(context);
-              _performSearch(val);
-            },
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _performSearch(_searchController.text);
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: TVTheme.accent),
-              child: const Text('Search'),
-            )
-          ],
         );
       },
     );
@@ -613,7 +877,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               const SizedBox(height: 20),
 
                               // Lanes (Tamil Cinema placed at the top of remote lanes)
-                              _buildMovieRow('Search Results for "$_searchQuery"', _searchResults, showClear: _searchQuery.isNotEmpty),
+                              _buildMovieRow('Tamil Results for "$_searchQuery"', _searchTamilResults, onLoadMore: _loadMoreSearchTamil, showClear: _searchQuery.isNotEmpty),
+                              _buildMovieRow('English/General Results for "$_searchQuery"', _searchGeneralResults, onLoadMore: _loadMoreSearchGeneral, showClear: _searchQuery.isNotEmpty && _searchTamilResults.isEmpty),
                               _buildMovieRow('Resume Watching', _history),
                               _buildMovieRow('Latest Tamil Movies', _latestTamil, onLoadMore: _loadMoreLatestTamil),
                               _buildMovieRow('Tamil Cinema', _tamil, onLoadMore: _loadMoreTamil),

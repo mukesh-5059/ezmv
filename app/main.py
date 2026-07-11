@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
+from app.core.session import init_session, close_session
 
 # Setup basic logging
 logging.basicConfig(
@@ -15,10 +16,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup actions
     logger.info("Initializing application startup...")
+    await init_session()
     yield
     
     # Shutdown actions
     logger.info("Shutting down application...")
+    await close_session()
 
 app = FastAPI(
     title="Movie Streaming Backend API",
