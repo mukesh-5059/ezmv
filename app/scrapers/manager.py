@@ -15,8 +15,8 @@ class ScraperManager:
             VidSrcToScraper(),
             IsaiminiScraper()
         ]
-        # Cache resolved stream links for 5 hours to speed up details loading
-        self._stream_cache = TTLCache(ttl_seconds=18000)
+        # Cache resolved stream links for 3 hours to speed up details loading
+        self._stream_cache = TTLCache(ttl_seconds=10800)
 
     async def get_streams(
         self,
@@ -26,17 +26,19 @@ class ScraperManager:
         tmdb_id: int,
         imdb_id: str | None = None,
         season: int | None = None,
-        episode: int | None = None
+        episode: int | None = None,
+        bypass_cache: bool = False
     ) -> list[dict]:
         """
         Runs all registered scrapers concurrently to find streaming links.
         Serves from cache when available.
         """
         cache_key = f"{tmdb_id}_{season}_{episode}"
-        cached_result = self._stream_cache.get(cache_key)
-        if cached_result is not None:
-            logger.info(f"Serving streams for TMDB {tmdb_id} from manager cache")
-            return cached_result
+        if not bypass_cache:
+            cached_result = self._stream_cache.get(cache_key)
+            if cached_result is not None:
+                logger.info(f"Serving streams for TMDB {tmdb_id} from manager cache")
+                return cached_result
 
         logger.info(f"Orchestrating scrapers for: {title} ({year}) | Type: {media_type} | TMDb: {tmdb_id} | IMDb: {imdb_id}")
         

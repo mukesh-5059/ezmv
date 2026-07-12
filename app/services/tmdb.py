@@ -22,6 +22,16 @@ class TTLCache:
                 del self.cache[key]  # Clean up expired entry
         return None
 
+    def get_remaining_ttl(self, key) -> int:
+        if key in self.cache:
+            expire_time, _ = self.cache[key]
+            remaining = int(expire_time - time.time())
+            if remaining > 0:
+                return remaining
+            else:
+                del self.cache[key]
+        return 0
+
     def set(self, key, val):
         self.cache[key] = (time.time() + self.ttl, val)
 

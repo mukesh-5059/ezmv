@@ -11,7 +11,8 @@ async def get_streaming_links(
     tmdb_id: int = Query(..., description="TMDb ID of the movie or TV show"),
     media_type: str = Query("movie", enum=["movie", "tv"], description="Media type: movie or tv"),
     season: int | None = Query(None, description="Season number (required for TV shows)"),
-    episode: int | None = Query(None, description="Episode number (required for TV shows)")
+    episode: int | None = Query(None, description="Episode number (required for TV shows)"),
+    bypass_cache: bool = Query(False, description="Bypass manager cache and force re-scrape")
 ):
     """
     Search and return streaming links for a given movie or TV show.
@@ -53,11 +54,15 @@ async def get_streaming_links(
             tmdb_id=tmdb_id,
             imdb_id=imdb_id,
             season=season,
-            episode=episode
+            episode=episode,
+            bypass_cache=bypass_cache
         )
     except Exception as e:
         logger.error(f"Error executing scrapers: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal scraper failure occurred.")
+
+    cache_key = f"{tmdb_id}_{season}_{episode}"
+    remaining_ttl = scraper_manager._stream_cache.get_remaining_ttl(cache_key)
 
     return {
         "title": title,
@@ -67,5 +72,6 @@ async def get_streaming_links(
         "imdb_id": imdb_id,
         "season": season,
         "episode": episode,
+        "cache_expires_in": remaining_ttl,
         "streams": links
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
 import '../core/api_client.dart';
 import '../core/local_storage.dart';
@@ -17,6 +18,7 @@ class DetailsScreen extends StatefulWidget {
 class _DetailsScreenState extends State<DetailsScreen> {
   List<Map<String, dynamic>> _streams = [];
   bool _isLoadingStreams = true;
+  int _cacheExpiresIn = 0;
 
   @override
   void initState() {
@@ -24,22 +26,38 @@ class _DetailsScreenState extends State<DetailsScreen> {
     _fetchStreams();
   }
 
-  Future<void> _fetchStreams() async {
-    setState(() => _isLoadingStreams = true);
-    final streams = await ApiClient.getStreamLinks(widget.movie.tmdbId);
+  Future<void> _fetchStreams({bool bypassCache = false}) async {
     setState(() {
-      _streams = streams;
+      _isLoadingStreams = true;
+      _cacheExpiresIn = 0;
+    });
+    final response = await ApiClient.getStreamLinks(widget.movie.tmdbId, bypassCache: bypassCache);
+    setState(() {
+      final List streamList = response['streams'] ?? [];
+      _streams = List<Map<String, dynamic>>.from(streamList);
+      _cacheExpiresIn = response['cache_expires_in'] ?? 0;
       _isLoadingStreams = false;
     });
   }
 
-  void _startPlayback(String streamUrl) async {
-    // 1. Add movie to recently viewed history list
-    await LocalStorage.addToHistory(widget.movie);
+  String _formatCacheTime(int seconds) {
+    if (seconds <= 0) return '';
+    final int hours = seconds ~/ 3600;
+    final int minutes = (seconds % 3600) ~/ 60;
+    if (hours > 0) {
+      return 'Cache expires in: ${hours}h ${minutes}m';
+    } else if (minutes > 0) {
+      return 'Cache expires in: ${minutes}m';
+    } else {
+      return 'Cache expires in: ${seconds}s';
+    }
+  }
+
+  void _startPlayback(String streamUrl) {
+    // 1. Add movie to recently viewed history list asynchronously
+    LocalStorage.addToHistory(widget.movie);
     
-    if (!mounted) return;
-    
-    // 2. Play stream
+    // 2. Play stream immediately
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -142,9 +160,55 @@ class _DetailsScreenState extends State<DetailsScreen> {
                         const SizedBox(height: 40),
 
                         // Action Play & Stream Options
-                        const Text(
-                          'Select Server Source:',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Select Server Source:',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            if (!_isLoadingStreams)
+                              Row(
+                                children: [
+                                  if (_cacheExpiresIn > 0) ...[
+                                    Text(
+                                      _formatCacheTime(_cacheExpiresIn),
+                                      style: const TextStyle(color: Colors.white54, fontSize: 13),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  Focus(
+                                    onKey: (node, event) {
+                                      if (event is RawKeyDownEvent) {
+                                        if (event.logicalKey == LogicalKeyboardKey.select ||
+                                            event.logicalKey == LogicalKeyboardKey.enter ||
+                                            event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                            event.logicalKey == LogicalKeyboardKey.space) {
+                                          _fetchStreams(bypassCache: true);
+                                          return KeyEventResult.handled;
+                                        }
+                                      }
+                                      return KeyEventResult.ignored;
+                                    },
+                                    child: Builder(
+                                      builder: (context) {
+                                        final focused = Focus.of(context).hasFocus;
+                                        return IconButton(
+                                          icon: const Icon(Icons.refresh, size: 18),
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: focused ? Colors.red : Colors.white12,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.all(8),
+                                          ),
+                                          onPressed: () => _fetchStreams(bypassCache: true),
+                                          tooltip: 'Force re-scrape',
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                         if (_isLoadingStreams)
@@ -172,6 +236,18 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               ),
                               const SizedBox(height: 12),
                               Focus(
+                                onKey: (node, event) {
+                                  if (event is RawKeyDownEvent) {
+                                    if (event.logicalKey == LogicalKeyboardKey.select ||
+                                        event.logicalKey == LogicalKeyboardKey.enter ||
+                                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                        event.logicalKey == LogicalKeyboardKey.space) {
+                                      _fetchStreams(bypassCache: true);
+                                      return KeyEventResult.handled;
+                                    }
+                                  }
+                                  return KeyEventResult.ignored;
+                                },
                                 child: Builder(
                                   builder: (context) {
                                     final focused = Focus.of(context).hasFocus;
@@ -180,7 +256,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                         backgroundColor: focused ? Colors.white : TVTheme.surface,
                                         foregroundColor: focused ? Colors.black : Colors.white,
                                       ),
-                                      onPressed: _fetchStreams,
+                                      onPressed: () => _fetchStreams(bypassCache: true),
                                       icon: const Icon(Icons.refresh),
                                       label: const Text('Retry Fetching'),
                                     );
@@ -202,6 +278,18 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 final streamUrl = stream['url'] ?? '';
 
                                 return Focus(
+                                  onKey: (node, event) {
+                                    if (event is RawKeyDownEvent) {
+                                      if (event.logicalKey == LogicalKeyboardKey.select ||
+                                          event.logicalKey == LogicalKeyboardKey.enter ||
+                                          event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                          event.logicalKey == LogicalKeyboardKey.space) {
+                                        _startPlayback(streamUrl);
+                                        return KeyEventResult.handled;
+                                      }
+                                    }
+                                    return KeyEventResult.ignored;
+                                  },
                                   child: Builder(
                                     builder: (context) {
                                       final focused = Focus.of(context).hasFocus;

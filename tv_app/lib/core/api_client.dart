@@ -80,19 +80,18 @@ class ApiClient {
     return [];
   }
 
-  // Get scraped streaming links for a movie ID
-  static Future<List<Map<String, dynamic>>> getStreamLinks(int tmdbId) async {
-    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie');
+  // Get scraped streaming links for a movie ID with cache control support
+  static Future<Map<String, dynamic>> getStreamLinks(int tmdbId, {bool bypassCache = false}) async {
+    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache');
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final List streams = data['streams'] ?? [];
-        return List<Map<String, dynamic>>.from(streams);
+        return data as Map<String, dynamic>;
       }
     } catch (e) {
       print('Get streams failed: $e');
     }
-    return [];
+    return {};
   }
 }

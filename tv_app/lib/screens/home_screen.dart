@@ -292,6 +292,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSearchTag(BuildContext context, String label, VoidCallback onTap) {
     return Focus(
+      onKey: (node, event) {
+        if (event is RawKeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            Navigator.pop(context);
+            onTap();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
       child: Builder(
         builder: (context) {
           final focused = Focus.of(context).hasFocus;
@@ -324,6 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Open Search Query input dialog with focusable Quick Search tags
   void _showSearchDialog() {
     _searchController.clear();
+    final searchButtonFocusNode = FocusNode();
     showDialog(
       context: context,
       builder: (context) {
@@ -348,23 +362,47 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 12),
-                      TextField(
-                        controller: _searchController,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: 'Enter title...',
-                          border: OutlineInputBorder(),
-                        ),
-                        onSubmitted: (val) {
-                          Navigator.pop(context);
-                          _performSearch(val);
+                      Focus(
+                        onKey: (node, event) {
+                          if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                            searchButtonFocusNode.requestFocus();
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
                         },
+                        child: TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            hintText: 'Enter title...',
+                            border: OutlineInputBorder(),
+                          ),
+                          onSubmitted: (val) {
+                            Future.delayed(const Duration(milliseconds: 150), () {
+                              if (searchButtonFocusNode.canRequestFocus) {
+                                searchButtonFocusNode.requestFocus();
+                              }
+                            });
+                          },
+                        ),
                       ),
                       const SizedBox(height: 24),
                       Row(
                         children: [
                           Expanded(
                             child: Focus(
+                              onKey: (node, event) {
+                                if (event is RawKeyDownEvent) {
+                                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                                      event.logicalKey == LogicalKeyboardKey.enter ||
+                                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                      event.logicalKey == LogicalKeyboardKey.space) {
+                                    Navigator.pop(context);
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+                                return KeyEventResult.ignored;
+                              },
                               child: Builder(
                                 builder: (context) {
                                   final focused = Focus.of(context).hasFocus;
@@ -383,6 +421,20 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 16),
                           Expanded(
                             child: Focus(
+                              focusNode: searchButtonFocusNode,
+                              onKey: (node, event) {
+                                if (event is RawKeyDownEvent) {
+                                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                                      event.logicalKey == LogicalKeyboardKey.enter ||
+                                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                      event.logicalKey == LogicalKeyboardKey.space) {
+                                    Navigator.pop(context);
+                                    _performSearch(_searchController.text);
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+                                return KeyEventResult.ignored;
+                              },
                               child: Builder(
                                 builder: (context) {
                                   final focused = Focus.of(context).hasFocus;
@@ -477,7 +529,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
-    );
+    ).then((_) {
+      searchButtonFocusNode.dispose();
+    });
   }
 
   // Open API server settings modal (TV D-pad focus trap resolved)
@@ -509,6 +563,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   return KeyEventResult.ignored;
                 },
                 child: TextField(
+                  autofocus: true,
                   controller: _ipController,
                   decoration: const InputDecoration(
                     labelText: 'Server Base URL',
@@ -530,6 +585,19 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           actions: [
             Focus(
+              onKey: (node, event) {
+                if (event is RawKeyDownEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                      event.logicalKey == LogicalKeyboardKey.enter ||
+                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                      event.logicalKey == LogicalKeyboardKey.space) {
+                    saveFocusNode.dispose();
+                    Navigator.pop(context);
+                    return KeyEventResult.handled;
+                  }
+                }
+                return KeyEventResult.ignored;
+              },
               child: Builder(
                 builder: (context) {
                   final focused = Focus.of(context).hasFocus;
@@ -548,6 +616,23 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             Focus(
               focusNode: saveFocusNode,
+              onKey: (node, event) {
+                if (event is RawKeyDownEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                      event.logicalKey == LogicalKeyboardKey.enter ||
+                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                      event.logicalKey == LogicalKeyboardKey.space) {
+                    () async {
+                      await ApiClient.setBaseUrl(_ipController.text);
+                      saveFocusNode.dispose();
+                      Navigator.pop(context);
+                      _loadAllData();
+                    }();
+                    return KeyEventResult.handled;
+                  }
+                }
+                return KeyEventResult.ignored;
+              },
               child: Builder(
                 builder: (context) {
                   final focused = Focus.of(context).hasFocus;
@@ -710,6 +795,18 @@ class _HomeScreenState extends State<HomeScreen> {
     required VoidCallback onTap,
   }) {
     return Focus(
+      onKey: (node, event) {
+        if (event is RawKeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            onTap();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
       child: Builder(
         builder: (context) {
           final focused = Focus.of(context).hasFocus;

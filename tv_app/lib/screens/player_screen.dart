@@ -3,6 +3,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:video_player/video_player.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/local_storage.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -32,6 +33,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showControls = true;
   Timer? _hideTimer;
   Timer? _progressSaveTimer;
+  String? _errorMessage;
 
   // Check if link is a direct streamable file
   bool get _isDirectStream {
@@ -49,6 +51,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     
+    // Keep screen awake during video playback
+    WakelockPlus.enable();
+
     // Lock screen to fullscreen landscape
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([
@@ -65,7 +70,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // Initialize Native player
   void _initNativePlayer() {
-    _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.streamUrl))
+    VideoFormat? formatHint;
+    final lowercaseUrl = widget.streamUrl.toLowerCase();
+    if (lowercaseUrl.contains('.m3u8') || lowercaseUrl.contains('m3u8')) {
+      formatHint = VideoFormat.hls;
+    } else if (lowercaseUrl.contains('.mp4')) {
+      formatHint = VideoFormat.other;
+    }
+
+    _videoController = VideoPlayerController.networkUrl(
+      Uri.parse(widget.streamUrl),
+      formatHint: formatHint,
+      httpHeaders: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://${Uri.parse(widget.streamUrl).host}/',
+      },
+    )
       ..initialize().then((_) {
         setState(() {
           _isNativeLoading = false;
@@ -76,11 +96,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
         print("Native player initialization failed: $e");
         setState(() {
           _isNativeLoading = false;
+          _errorMessage = e.toString();
         });
       });
 
-    // Listen for progress change to update overlay UI
+    // Listen for progress change to update overlay UI and catch playback errors
     _videoController!.addListener(() {
+      if (_videoController!.value.hasError) {
+        setState(() {
+          _errorMessage = _videoController!.value.errorDescription ?? "Playback error";
+        });
+      }
       if (mounted) setState(() {});
     });
   }
@@ -101,14 +127,59 @@ class _PlayerScreenState extends State<PlayerScreen> {
               style: const TextStyle(color: Colors.white70),
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Start Over', style: TextStyle(color: Colors.red)),
+              Focus(
+                onKey: (node, event) {
+                  if (event is RawKeyDownEvent) {
+                    if (event.logicalKey == LogicalKeyboardKey.select ||
+                        event.logicalKey == LogicalKeyboardKey.enter ||
+                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                        event.logicalKey == LogicalKeyboardKey.space) {
+                      Navigator.pop(context, false);
+                      return KeyEventResult.handled;
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Builder(
+                  builder: (context) {
+                    final focused = Focus.of(context).hasFocus;
+                    return TextButton(
+                      style: TextButton.styleFrom(
+                        backgroundColor: focused ? Colors.white24 : Colors.transparent,
+                      ),
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Start Over', style: TextStyle(color: Colors.red)),
+                    );
+                  },
+                ),
               ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Resume', style: TextStyle(color: Colors.white)),
+              Focus(
+                autofocus: true,
+                onKey: (node, event) {
+                  if (event is RawKeyDownEvent) {
+                    if (event.logicalKey == LogicalKeyboardKey.select ||
+                        event.logicalKey == LogicalKeyboardKey.enter ||
+                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                        event.logicalKey == LogicalKeyboardKey.space) {
+                      Navigator.pop(context, true);
+                      return KeyEventResult.handled;
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Builder(
+                  builder: (context) {
+                    final focused = Focus.of(context).hasFocus;
+                    return ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: focused ? Colors.white : Colors.red,
+                        foregroundColor: focused ? Colors.black : Colors.white,
+                      ),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Resume'),
+                    );
+                  },
+                ),
               ),
             ],
           );
@@ -267,6 +338,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _progressSaveTimer?.cancel();
     _hideTimer?.cancel();
 
+    // Allow screen to go to sleep/screensaver again
+    WakelockPlus.disable();
+
     if (_videoController != null) {
       final currentSec = _videoController!.value.position.inSeconds;
       final durationSec = _videoController!.value.duration.inSeconds;
@@ -280,16 +354,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _videoController!.dispose();
     }
 
-    // Restore standard UI options & Portrait orientation on exit
+    // Restore standard UI options & unlock orientation on exit
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    SystemChrome.setPreferredOrientations([]);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_errorMessage != null) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: _buildErrorWidget(),
+      );
+    }
+
     if (_isDirectStream) {
       return Scaffold(
         backgroundColor: Colors.black,
@@ -306,9 +385,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Native player UI Layout
   Widget _buildNativePlayer() {
     if (_isNativeLoading || _videoController == null || !_videoController!.value.isInitialized) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.red),
-      );
+      return _buildLoadingWidget();
     }
 
     final duration = _videoController!.value.duration;
@@ -329,6 +406,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
 
+            // Buffering Overlay
+            if (_videoController!.value.isBuffering)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black45,
+                  child: const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: Colors.red, strokeWidth: 3),
+                        SizedBox(height: 12),
+                        Text(
+                          'Buffering...',
+                          style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
             // Controls Overlay
             AnimatedOpacity(
               opacity: _showControls ? 1.0 : 0.0,
@@ -347,6 +445,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         child: Row(
                           children: [
                             Focus(
+                              onKey: (node, event) {
+                                if (event is RawKeyDownEvent) {
+                                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                                      event.logicalKey == LogicalKeyboardKey.enter ||
+                                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                      event.logicalKey == LogicalKeyboardKey.space) {
+                                    Navigator.pop(context);
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+                                return KeyEventResult.ignored;
+                              },
                               child: Builder(
                                 builder: (context) {
                                   final focused = Focus.of(context).hasFocus;
@@ -458,6 +568,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
             left: 16,
             child: SafeArea(
               child: Focus(
+                onKey: (node, event) {
+                  if (event is RawKeyDownEvent) {
+                    if (event.logicalKey == LogicalKeyboardKey.select ||
+                        event.logicalKey == LogicalKeyboardKey.enter ||
+                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                        event.logicalKey == LogicalKeyboardKey.space) {
+                      Navigator.pop(context);
+                      return KeyEventResult.handled;
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
                 child: Builder(
                   builder: (context) {
                     final focused = Focus.of(context).hasFocus;
@@ -475,6 +597,91 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   },
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 64),
+            const SizedBox(height: 16),
+            const Text(
+              'Playback Error',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _errorMessage ?? 'An unknown error occurred.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 32),
+            Focus(
+              autofocus: true,
+              onKey: (node, event) {
+                if (event is RawKeyDownEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                      event.logicalKey == LogicalKeyboardKey.enter ||
+                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                      event.logicalKey == LogicalKeyboardKey.space) {
+                    Navigator.pop(context);
+                    return KeyEventResult.handled;
+                  }
+                }
+                return KeyEventResult.ignored;
+              },
+              child: Builder(
+                builder: (context) {
+                  final focused = Focus.of(context).hasFocus;
+                  return ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: focused ? Colors.white : Colors.red,
+                      foregroundColor: focused ? Colors.black : Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Go Back'),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingWidget() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(color: Colors.red, strokeWidth: 4),
+          const SizedBox(height: 24),
+          Text(
+            widget.movieTitle,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Connecting to server & loading stream...',
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 14,
             ),
           ),
         ],
