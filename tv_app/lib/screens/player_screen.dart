@@ -34,6 +34,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _hideTimer;
   Timer? _progressSaveTimer;
   String? _errorMessage;
+  bool _isShowingResumeDialog = false;
 
   // Check if link is a direct streamable file
   bool get _isDirectStream {
@@ -115,6 +116,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _checkResumeProgress() async {
     final savedSeconds = await LocalStorage.getProgress(widget.tmdbId);
     if (savedSeconds > 10 && mounted) {
+      setState(() {
+        _isShowingResumeDialog = true;
+      });
       final resume = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -185,6 +189,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           );
         },
       );
+
+      setState(() {
+        _isShowingResumeDialog = false;
+      });
 
       if (resume == true && _videoController != null) {
         await _videoController!.seekTo(Duration(seconds: savedSeconds));
@@ -392,8 +400,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final position = _videoController!.value.position;
 
     return Focus(
-      autofocus: true,
-      onKey: (node, event) => _handleKeyEvent(event),
+      autofocus: !_isShowingResumeDialog,
+      canRequestFocus: !_isShowingResumeDialog,
+      onKey: (node, event) {
+        if (_isShowingResumeDialog) return KeyEventResult.ignored;
+        return _handleKeyEvent(event);
+      },
       child: GestureDetector(
         onTap: _resetHideTimer,
         child: Stack(

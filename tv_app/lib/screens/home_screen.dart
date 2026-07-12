@@ -16,23 +16,35 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Movie> _history = [];
+  
+  // Tamil screen lists
+  List<Movie> _topTamil = [];
   List<Movie> _latestTamil = [];
-  List<Movie> _tamil = [];
-  List<Movie> _popular = [];
-  List<Movie> _searchTamilResults = [];
-  List<Movie> _searchGeneralResults = [];
+  List<Movie> _comedyTamil = [];
+  
+  // English screen lists
+  List<Movie> _topEnglish = [];
+  List<Movie> _latestEnglish = [];
+  List<Movie> _comedyEnglish = [];
+  
+  List<Movie> _searchResults = [];
   
   Movie? _focusedMovie;
   bool _isLoading = true;
   String? _errorMessage;
+  bool _isTamilSelected = true;
   
   // Search & Pagination states
   String _searchQuery = "";
+  int _searchPage = 1;
+  
+  int _topTamilPage = 1;
   int _latestTamilPage = 1;
-  int _tamilPage = 1;
-  int _popularPage = 1;
-  int _searchTamilPage = 1;
-  int _searchGeneralPage = 1;
+  int _comedyTamilPage = 1;
+  
+  int _topEnglishPage = 1;
+  int _latestEnglishPage = 1;
+  int _comedyEnglishPage = 1;
   
   String? _activeSearchText;
   int? _activeSearchYear;
@@ -53,16 +65,32 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _topTamilPage = 1;
       _latestTamilPage = 1;
-      _tamilPage = 1;
-      _popularPage = 1;
-      _searchTamilPage = 1;
-      _searchGeneralPage = 1;
-      _activeSearchText = null;
-      _activeSearchYear = null;
-      _activeSearchGenreId = null;
-      _searchTamilResults = [];
-      _searchGeneralResults = [];
+      _comedyTamilPage = 1;
+      _topEnglishPage = 1;
+      _latestEnglishPage = 1;
+      _comedyEnglishPage = 1;
+      _searchPage = 1;
+      _searchResults = [];
+      _searchQuery = "";
+    });
+    
+    await _fetchHomeMovies();
+  }
+
+  Future<void> _fetchHomeMovies() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+      _topTamilPage = 1;
+      _latestTamilPage = 1;
+      _comedyTamilPage = 1;
+      _topEnglishPage = 1;
+      _latestEnglishPage = 1;
+      _comedyEnglishPage = 1;
+      _searchPage = 1;
+      _searchResults = [];
       _searchQuery = "";
     });
     
@@ -70,29 +98,38 @@ class _HomeScreenState extends State<HomeScreen> {
       // Load local history
       final history = await LocalStorage.getHistory();
       
-      // Load remote Tamil (latest & popular) & Popular movies (page 1)
+      // Load Tamil lists
+      final topTamilList = await ApiClient.getPopularMovies(language: 'ta-IN', page: 1);
       final latestTamilList = await ApiClient.discoverMovies(language: 'ta-IN', page: 1);
-      final tamilList = await ApiClient.getPopularMovies(language: 'ta-IN', page: 1);
-      final popularList = await ApiClient.getPopularMovies(language: 'en-US', page: 1);
+      final comedyTamilList = await ApiClient.discoverMovies(language: 'ta-IN', genreId: 35, page: 1);
+      
+      // Load English lists
+      final topEnglishList = await ApiClient.getPopularMovies(language: 'en-US', page: 1);
+      final latestEnglishList = await ApiClient.discoverMovies(language: 'en-US', page: 1);
+      final comedyEnglishList = await ApiClient.discoverMovies(language: 'en-US', genreId: 35, page: 1);
 
       setState(() {
         _history = history;
+        _topTamil = topTamilList;
         _latestTamil = latestTamilList;
-        _tamil = tamilList;
-        _popular = popularList;
+        _comedyTamil = comedyTamilList;
+        
+        _topEnglish = topEnglishList;
+        _latestEnglish = latestEnglishList;
+        _comedyEnglish = comedyEnglishList;
+        
         _isLoading = false;
         
         // If remote queries returned nothing, it indicates a connection issue
-        if (latestTamilList.isEmpty && tamilList.isEmpty && popularList.isEmpty) {
+        if (topTamilList.isEmpty && topEnglishList.isEmpty) {
           _errorMessage = "Connection Error: Unable to reach the backend server at '${ApiClient.baseUrl}'.";
           _showSettingsDialog();
         }
         
-        // Default focused movie to the first Latest Tamil item
-        if (latestTamilList.isNotEmpty) {
-          _focusedMovie = latestTamilList.first;
-        } else if (tamilList.isNotEmpty) {
-          _focusedMovie = tamilList.first;
+        // Default focused movie based on initial language (Tamil)
+        final currentList = _isTamilSelected ? latestTamilList : latestEnglishList;
+        if (currentList.isNotEmpty) {
+          _focusedMovie = currentList.first;
         } else if (history.isNotEmpty) {
           _focusedMovie = history.first;
         } else {
@@ -116,14 +153,23 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Paginate Latest Tamil Movies
+  Future<void> _loadMoreTopTamil() async {
+    if (_isLoadingMore) return;
+    setState(() => _isLoadingMore = true);
+    final nextPage = _topTamilPage + 1;
+    final newMovies = await ApiClient.getPopularMovies(language: 'ta-IN', page: nextPage);
+    setState(() {
+      _topTamil.addAll(newMovies);
+      _topTamilPage = nextPage;
+      _isLoadingMore = false;
+    });
+  }
+
   Future<void> _loadMoreLatestTamil() async {
     if (_isLoadingMore) return;
     setState(() => _isLoadingMore = true);
-    
     final nextPage = _latestTamilPage + 1;
     final newMovies = await ApiClient.discoverMovies(language: 'ta-IN', page: nextPage);
-    
     setState(() {
       _latestTamil.addAll(newMovies);
       _latestTamilPage = nextPage;
@@ -131,86 +177,86 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Paginate Tamil Movies
-  Future<void> _loadMoreTamil() async {
+  Future<void> _loadMoreComedyTamil() async {
     if (_isLoadingMore) return;
     setState(() => _isLoadingMore = true);
-    
-    final nextPage = _tamilPage + 1;
-    final newMovies = await ApiClient.getPopularMovies(language: 'ta-IN', page: nextPage);
-    
+    final nextPage = _comedyTamilPage + 1;
+    final newMovies = await ApiClient.discoverMovies(language: 'ta-IN', genreId: 35, page: nextPage);
     setState(() {
-      _tamil.addAll(newMovies);
-      _tamilPage = nextPage;
+      _comedyTamil.addAll(newMovies);
+      _comedyTamilPage = nextPage;
       _isLoadingMore = false;
     });
   }
 
-  // Paginate Popular Movies
-  Future<void> _loadMorePopular() async {
+  Future<void> _loadMoreTopEnglish() async {
     if (_isLoadingMore) return;
     setState(() => _isLoadingMore = true);
-    
-    final nextPage = _popularPage + 1;
+    final nextPage = _topEnglishPage + 1;
     final newMovies = await ApiClient.getPopularMovies(language: 'en-US', page: nextPage);
-    
     setState(() {
-      _popular.addAll(newMovies);
-      _popularPage = nextPage;
+      _topEnglish.addAll(newMovies);
+      _topEnglishPage = nextPage;
       _isLoadingMore = false;
     });
   }
 
-  // Paginate Tamil Search Results
-  Future<void> _loadMoreSearchTamil() async {
+  Future<void> _loadMoreLatestEnglish() async {
     if (_isLoadingMore) return;
     setState(() => _isLoadingMore = true);
-
-    final nextPage = _searchTamilPage + 1;
-    List<Movie> newMovies = [];
-
-    if (_activeSearchText != null) {
-      final allResults = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
-      newMovies = allResults.where((m) => m.originalLanguage == 'ta').toList();
-    } else {
-      newMovies = await ApiClient.discoverMovies(
-        language: 'ta-IN',
-        year: _activeSearchYear,
-        genreId: _activeSearchGenreId,
-        page: nextPage,
-      );
-    }
-
+    final nextPage = _latestEnglishPage + 1;
+    final newMovies = await ApiClient.discoverMovies(language: 'en-US', page: nextPage);
     setState(() {
-      _searchTamilResults.addAll(newMovies);
-      _searchTamilPage = nextPage;
+      _latestEnglish.addAll(newMovies);
+      _latestEnglishPage = nextPage;
       _isLoadingMore = false;
     });
   }
 
-  // Paginate General Search Results
-  Future<void> _loadMoreSearchGeneral() async {
+  Future<void> _loadMoreComedyEnglish() async {
+    if (_isLoadingMore) return;
+    setState(() => _isLoadingMore = true);
+    final nextPage = _comedyEnglishPage + 1;
+    final newMovies = await ApiClient.discoverMovies(language: 'en-US', genreId: 35, page: nextPage);
+    setState(() {
+      _comedyEnglish.addAll(newMovies);
+      _comedyEnglishPage = nextPage;
+      _isLoadingMore = false;
+    });
+  }
+
+  Future<void> _loadMoreSearch() async {
     if (_isLoadingMore) return;
     setState(() => _isLoadingMore = true);
 
-    final nextPage = _searchGeneralPage + 1;
+    final nextPage = _searchPage + 1;
     List<Movie> newMovies = [];
 
     if (_activeSearchText != null) {
-      final allResults = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
-      newMovies = allResults.where((m) => m.originalLanguage != 'ta').toList();
+      newMovies = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
     } else {
-      newMovies = await ApiClient.discoverMovies(
-        language: 'en-US',
-        year: _activeSearchYear,
-        genreId: _activeSearchGenreId,
-        page: nextPage,
-      );
+      final results = await Future.wait([
+        ApiClient.discoverMovies(
+          language: 'ta-IN',
+          year: _activeSearchYear,
+          genreId: _activeSearchGenreId,
+          page: nextPage,
+        ),
+        ApiClient.discoverMovies(
+          language: 'en-US',
+          year: _activeSearchYear,
+          genreId: _activeSearchGenreId,
+          page: nextPage,
+        ),
+      ]);
+      final List<Movie> combined = [...results[0], ...results[1]];
+      final seen = <int>{};
+      newMovies = combined.where((m) => seen.add(m.tmdbId)).toList();
     }
 
     setState(() {
-      _searchGeneralResults.addAll(newMovies);
-      _searchGeneralPage = nextPage;
+      _searchResults.addAll(newMovies);
+      _searchPage = nextPage;
       _isLoadingMore = false;
     });
   }
@@ -221,25 +267,18 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true;
       _searchQuery = query;
-      _searchTamilPage = 1;
-      _searchGeneralPage = 1;
+      _searchPage = 1;
       _activeSearchText = query;
       _activeSearchYear = null;
       _activeSearchGenreId = null;
     });
 
     final results = await ApiClient.searchMovies(query);
-    final tamil = results.where((m) => m.originalLanguage == 'ta').toList();
-    final general = results.where((m) => m.originalLanguage != 'ta').toList();
-
     setState(() {
-      _searchTamilResults = tamil;
-      _searchGeneralResults = general;
+      _searchResults = results;
       _isLoading = false;
-      if (tamil.isNotEmpty) {
-        _focusedMovie = tamil.first;
-      } else if (general.isNotEmpty) {
-        _focusedMovie = general.first;
+      if (results.isNotEmpty) {
+        _focusedMovie = results.first;
       }
     });
   }
@@ -249,8 +288,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true;
       _searchQuery = label;
-      _searchTamilPage = 1;
-      _searchGeneralPage = 1;
+      _searchPage = 1;
       _activeSearchText = null;
       _activeSearchYear = year;
       _activeSearchGenreId = genreId;
@@ -261,31 +299,35 @@ class _HomeScreenState extends State<HomeScreen> {
       ApiClient.discoverMovies(language: 'en-US', year: year, genreId: genreId),
     ]);
 
-    final tamil = results[0];
-    final general = results[1];
+    final List<Movie> combined = [...results[0], ...results[1]];
+    final seen = <int>{};
+    final unique = combined.where((m) => seen.add(m.tmdbId)).toList();
 
     setState(() {
-      _searchTamilResults = tamil;
-      _searchGeneralResults = general;
+      _searchResults = unique;
       _isLoading = false;
-      if (tamil.isNotEmpty) {
-        _focusedMovie = tamil.first;
-      } else if (general.isNotEmpty) {
-        _focusedMovie = general.first;
+      if (unique.isNotEmpty) {
+        _focusedMovie = unique.first;
       }
     });
   }
 
   void _clearSearch() {
     setState(() {
-      _searchTamilResults = [];
-      _searchGeneralResults = [];
+      _searchQuery = "";
+      _searchResults = [];
+      _searchPage = 1;
       _activeSearchText = null;
       _activeSearchYear = null;
       _activeSearchGenreId = null;
-      _searchQuery = "";
-      if (_latestTamil.isNotEmpty) {
-        _focusedMovie = _latestTamil.first;
+      
+      final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
+      if (currentList.isNotEmpty) {
+        _focusedMovie = currentList.first;
+      } else if (_history.isNotEmpty) {
+        _focusedMovie = _history.first;
+      } else {
+        _focusedMovie = null;
       }
     });
   }
@@ -680,6 +722,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(right: 24.0),
                   child: Focus(
+                    onKey: (node, event) {
+                      if (event is RawKeyDownEvent) {
+                        if (event.logicalKey == LogicalKeyboardKey.select ||
+                            event.logicalKey == LogicalKeyboardKey.enter ||
+                            event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                            event.logicalKey == LogicalKeyboardKey.space) {
+                          _clearSearch();
+                          return KeyEventResult.handled;
+                        }
+                      }
+                      return KeyEventResult.ignored;
+                    },
                     child: Builder(
                       builder: (context) {
                         final focused = Focus.of(context).hasFocus;
@@ -867,6 +921,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   Row(
                     children: [
                       _buildTopBarAction(
+                        icon: Icons.language,
+                        label: _isTamilSelected ? 'Tamil Cinema' : 'English Cinema',
+                        onTap: () {
+                          setState(() {
+                            _isTamilSelected = !_isTamilSelected;
+                            // Update focused movie on category change
+                            final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
+                            if (currentList.isNotEmpty) {
+                              _focusedMovie = currentList.first;
+                            } else if (_history.isNotEmpty) {
+                              _focusedMovie = _history.first;
+                            } else {
+                              _focusedMovie = null;
+                            }
+                          });
+                        },
+                      ),
+                      _buildTopBarAction(
                         icon: Icons.search,
                         label: 'Search Movies',
                         onTap: _showSearchDialog,
@@ -1014,13 +1086,20 @@ class _HomeScreenState extends State<HomeScreen> {
                               
                               const SizedBox(height: 20),
 
-                              // Lanes (Tamil Cinema placed at the top of remote lanes)
-                              _buildMovieRow('Tamil Results for "$_searchQuery"', _searchTamilResults, onLoadMore: _loadMoreSearchTamil, showClear: _searchQuery.isNotEmpty),
-                              _buildMovieRow('English/General Results for "$_searchQuery"', _searchGeneralResults, onLoadMore: _loadMoreSearchGeneral, showClear: _searchQuery.isNotEmpty && _searchTamilResults.isEmpty),
+                              // Search results row (Tamil & English combined)
+                              _buildMovieRow('Search Results for "$_searchQuery"', _searchResults, onLoadMore: _loadMoreSearch, showClear: _searchQuery.isNotEmpty),
+                              
                               _buildMovieRow('Resume Watching', _history),
-                              _buildMovieRow('Latest Tamil Movies', _latestTamil, onLoadMore: _loadMoreLatestTamil),
-                              _buildMovieRow('Tamil Cinema', _tamil, onLoadMore: _loadMoreTamil),
-                              _buildMovieRow('Popular Movies', _popular, onLoadMore: _loadMorePopular),
+                              
+                              if (_isTamilSelected) ...[
+                                _buildMovieRow('Top Tamil Movies', _topTamil, onLoadMore: _loadMoreTopTamil),
+                                _buildMovieRow('Latest Tamil Movies', _latestTamil, onLoadMore: _loadMoreLatestTamil),
+                                _buildMovieRow('Tamil Comedy Movies', _comedyTamil, onLoadMore: _loadMoreComedyTamil),
+                              ] else ...[
+                                _buildMovieRow('Top English Movies', _topEnglish, onLoadMore: _loadMoreTopEnglish),
+                                _buildMovieRow('Latest English Movies', _latestEnglish, onLoadMore: _loadMoreLatestEnglish),
+                                _buildMovieRow('English Comedy Movies', _comedyEnglish, onLoadMore: _loadMoreComedyEnglish),
+                              ],
                               
                               const SizedBox(height: 40),
                             ],
