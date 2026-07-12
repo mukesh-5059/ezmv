@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
 import '../theme.dart';
 
@@ -31,6 +32,18 @@ class _MovieCardState extends State<MovieCard> {
         if (widget.onFocusChanged != null) {
           widget.onFocusChanged!(focused);
         }
+      },
+      onKey: (node, event) {
+        if (event is RawKeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
       },
       child: GestureDetector(
         onTap: widget.onTap,

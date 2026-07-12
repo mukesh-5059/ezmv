@@ -4,13 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/movie.model.dart';
 
 class ApiClient {
-  static const String defaultBaseUrl = 'http://127.0.0.1:8000/api/v1';
+  static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
   static String _currentBaseUrl = defaultBaseUrl;
 
   // Initialize and load the configured backend URL
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    _currentBaseUrl = prefs.getString('backend_url') ?? defaultBaseUrl;
+    // Overwrite cached URL with hardcoded URL for testing
+    await prefs.setString('backend_url', defaultBaseUrl);
+    _currentBaseUrl = defaultBaseUrl;
   }
 
   // Get current base URL
@@ -27,7 +29,7 @@ class ApiClient {
   static Future<List<Movie>> searchMovies(String query, {int page = 1}) async {
     final url = Uri.parse('$_currentBaseUrl/movies/search?query=${Uri.encodeComponent(query)}&media_type=movie&page=$page');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -43,7 +45,7 @@ class ApiClient {
   static Future<List<Movie>> getPopularMovies({required String language, int page = 1}) async {
     final url = Uri.parse('$_currentBaseUrl/movies/popular?language=$language&page=$page');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -66,7 +68,7 @@ class ApiClient {
     }
     final url = Uri.parse('$_currentBaseUrl/movies/discover?$queryParams');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 3));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -82,7 +84,7 @@ class ApiClient {
   static Future<List<Map<String, dynamic>>> getStreamLinks(int tmdbId) async {
     final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List streams = data['streams'] ?? [];

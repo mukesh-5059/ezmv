@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
 import '../core/api_client.dart';
 import '../core/local_storage.dart';
@@ -84,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // If remote queries returned nothing, it indicates a connection issue
         if (latestTamilList.isEmpty && tamilList.isEmpty && popularList.isEmpty) {
           _errorMessage = "Connection Error: Unable to reach the backend server at '${ApiClient.baseUrl}'.";
+          _showSettingsDialog();
         }
         
         // Default focused movie to the first Latest Tamil item
@@ -102,6 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
         _errorMessage = "Connection Error: $e";
       });
+      _showSettingsDialog();
     }
   }
 
@@ -477,9 +480,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Open API server settings modal
+  // Open API server settings modal (TV D-pad focus trap resolved)
   void _showSettingsDialog() {
     _ipController.text = ApiClient.baseUrl;
+    final saveFocusNode = FocusNode();
     showDialog(
       context: context,
       builder: (context) {
@@ -495,13 +499,31 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(color: TVTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: _ipController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Server Base URL',
-                  hintText: 'e.g., http://192.168.29.50:8000/api/v1',
-                  border: OutlineInputBorder(),
+              Focus(
+                onKey: (node, event) {
+                  if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                    // Force focus transition down to the Save button
+                    saveFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TextField(
+                  controller: _ipController,
+                  decoration: const InputDecoration(
+                    labelText: 'Server Base URL',
+                    hintText: 'e.g., http://192.168.29.50:8000/api/v1',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (val) {
+                    // Auto focus Save button when 'Done/OK' is pressed on virtual keyboard
+                    // Wrapped in Future.delayed to bypass Android keyboard dismissal focus resets
+                    Future.delayed(const Duration(milliseconds: 150), () {
+                      if (saveFocusNode.canRequestFocus) {
+                        saveFocusNode.requestFocus();
+                      }
+                    });
+                  },
                 ),
               ),
             ],
@@ -515,13 +537,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: TextButton.styleFrom(
                       backgroundColor: focused ? Colors.white.withOpacity(0.1) : Colors.transparent,
                     ),
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () {
+                      saveFocusNode.dispose();
+                      Navigator.pop(context);
+                    },
                     child: const Text('Cancel', style: TextStyle(color: Colors.white)),
                   );
                 },
               ),
             ),
             Focus(
+              focusNode: saveFocusNode,
               child: Builder(
                 builder: (context) {
                   final focused = Focus.of(context).hasFocus;
@@ -532,6 +558,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     onPressed: () async {
                       await ApiClient.setBaseUrl(_ipController.text);
+                      saveFocusNode.dispose();
                       Navigator.pop(context);
                       _loadAllData();
                     },
@@ -543,7 +570,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         );
       },
-    );
+    ).then((_) {
+      saveFocusNode.dispose();
+    });
   }
 
   Widget _buildMovieRow(String title, List<Movie> movies, {VoidCallback? onLoadMore, bool showClear = false}) {
@@ -602,6 +631,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Check if this is the last item and we have a load-more option
                     if (hasLoadMore && index == movies.length) {
                       return Focus(
+                        onKey: (node, event) {
+                          if (event is RawKeyDownEvent) {
+                            if (event.logicalKey == LogicalKeyboardKey.select ||
+                                event.logicalKey == LogicalKeyboardKey.enter ||
+                                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                event.logicalKey == LogicalKeyboardKey.space) {
+                              onLoadMore();
+                              return KeyEventResult.handled;
+                            }
+                          }
+                          return KeyEventResult.ignored;
+                        },
                         child: Builder(
                           builder: (context) {
                             final focused = Focus.of(context).hasFocus;

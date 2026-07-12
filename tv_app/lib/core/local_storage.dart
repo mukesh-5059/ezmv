@@ -49,4 +49,25 @@ class LocalStorage {
     final jsonStr = json.encode(history.map((item) => item.toJson()).toList());
     await prefs.setString(_historyKey, jsonStr);
   }
+
+  // Helper key for progress tracking
+  static String _progressKey(int tmdbId) => 'watch_progress_$tmdbId';
+
+  // Save current watch progress (in seconds)
+  static Future<void> saveProgress(int tmdbId, int seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_progressKey(tmdbId), seconds);
+  }
+
+  // Get saved progress (in seconds)
+  static Future<int> getProgress(int tmdbId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_progressKey(tmdbId)) ?? 0;
+  }
+
+  // Clear progress (e.g. if movie finished)
+  static Future<void> clearProgress(int tmdbId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_progressKey(tmdbId));
+  }
 }

@@ -46,6 +46,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         builder: (context) => PlayerScreen(
           streamUrl: streamUrl,
           movieTitle: widget.movie.title,
+          tmdbId: widget.movie.tmdbId,
         ),
       ),
     );
