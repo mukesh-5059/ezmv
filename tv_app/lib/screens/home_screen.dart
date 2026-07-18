@@ -52,6 +52,94 @@ class _HomeScreenState extends State<HomeScreen> {
   
   bool _isLoadingMore = false;
 
+  // Focus tracking maps for row-to-row traversal
+  final Map<String, int> _rowLastFocusedIndex = {
+    'search': 0,
+    'history': 0,
+    'top': 0,
+    'latest': 0,
+    'comedy': 0,
+  };
+  final Map<String, List<FocusNode>> _rowFocusNodes = {
+    'search': [],
+    'history': [],
+    'top': [],
+    'latest': [],
+    'comedy': [],
+  };
+
+  FocusNode _getFocusNode(String rowKey, int index) {
+    final nodes = _rowFocusNodes[rowKey] ??= [];
+    while (nodes.length <= index) {
+      nodes.add(FocusNode());
+    }
+    return nodes[index];
+  }
+
+  List<String> get _visibleRowKeys {
+    final keys = <String>[];
+    if (_searchResults.isNotEmpty) keys.add('search');
+    if (_history.isNotEmpty) keys.add('history');
+    keys.add('top');
+    keys.add('latest');
+    keys.add('comedy');
+    return keys;
+  }
+
+  KeyEventResult _handleRowKeyNavigation(
+    String rowKey,
+    int index,
+    int itemCount,
+    RawKeyEvent event,
+  ) {
+    if (event is! RawKeyDownEvent) return KeyEventResult.ignored;
+
+    final visibleRows = _visibleRowKeys;
+    final rowPos = visibleRows.indexOf(rowKey);
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (rowPos > 0) {
+        final prevRowKey = visibleRows[rowPos - 1];
+        final destIndex = _rowLastFocusedIndex[prevRowKey] ?? 0;
+        final targetNode = _getFocusNode(prevRowKey, destIndex);
+        targetNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      // If we are on the first row, let arrowUp traverse naturally to the top bar
+      return KeyEventResult.ignored;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (rowPos >= 0 && rowPos < visibleRows.length - 1) {
+        final nextRowKey = visibleRows[rowPos + 1];
+        final destIndex = _rowLastFocusedIndex[nextRowKey] ?? 0;
+        final targetNode = _getFocusNode(nextRowKey, destIndex);
+        targetNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      // If we are on the last row, consume arrowDown to prevent focus escaping
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      if (index == 0) {
+        // Prevent going left past the first item (prevents jumping rows)
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      if (index == itemCount - 1) {
+        // Prevent going right past the last item (prevents jumping rows)
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
   final TextEditingController _ipController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -59,6 +147,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadAllData();
+  }
+
+  @override
+  void dispose() {
+    _rowFocusNodes.values.forEach((list) {
+      for (var node in list) {
+        node.dispose();
+      }
+    });
+    _ipController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadAllData() async {
@@ -74,6 +174,23 @@ class _HomeScreenState extends State<HomeScreen> {
       _searchPage = 1;
       _searchResults = [];
       _searchQuery = "";
+
+      _rowLastFocusedIndex['search'] = 0;
+      _rowLastFocusedIndex['history'] = 0;
+      _rowLastFocusedIndex['top'] = 0;
+      _rowLastFocusedIndex['latest'] = 0;
+      _rowLastFocusedIndex['comedy'] = 0;
+
+      _rowFocusNodes.values.forEach((list) {
+        for (var node in list) {
+          node.dispose();
+        }
+      });
+      _rowFocusNodes['search'] = [];
+      _rowFocusNodes['history'] = [];
+      _rowFocusNodes['top'] = [];
+      _rowFocusNodes['latest'] = [];
+      _rowFocusNodes['comedy'] = [];
     });
     
     await _fetchHomeMovies();
@@ -271,6 +388,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeSearchText = query;
       _activeSearchYear = null;
       _activeSearchGenreId = null;
+      
+      _rowLastFocusedIndex['search'] = 0;
+      _rowFocusNodes['search']?.forEach((node) => node.dispose());
+      _rowFocusNodes['search'] = [];
     });
 
     final results = await ApiClient.searchMovies(query);
@@ -292,6 +413,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeSearchText = null;
       _activeSearchYear = year;
       _activeSearchGenreId = genreId;
+
+      _rowLastFocusedIndex['search'] = 0;
+      _rowFocusNodes['search']?.forEach((node) => node.dispose());
+      _rowFocusNodes['search'] = [];
     });
 
     final results = await Future.wait([
@@ -320,6 +445,10 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeSearchText = null;
       _activeSearchYear = null;
       _activeSearchGenreId = null;
+
+      _rowLastFocusedIndex['search'] = 0;
+      _rowFocusNodes['search']?.forEach((node) => node.dispose());
+      _rowFocusNodes['search'] = [];
       
       final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
       if (currentList.isNotEmpty) {
@@ -332,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Widget _buildSearchTag(BuildContext context, String label, VoidCallback onTap) {
+  Widget _buildSearchTag(BuildContext context, String label, VoidCallback onTap, {bool isLeftMost = false, FocusNode? leftFocusNode}) {
     return Focus(
       onKey: (node, event) {
         if (event is RawKeyDownEvent) {
@@ -342,6 +471,10 @@ class _HomeScreenState extends State<HomeScreen> {
               event.logicalKey == LogicalKeyboardKey.space) {
             Navigator.pop(context);
             onTap();
+            return KeyEventResult.handled;
+          }
+          if (isLeftMost && event.logicalKey == LogicalKeyboardKey.arrowLeft && leftFocusNode != null) {
+            leftFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
         }
@@ -379,7 +512,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // Open Search Query input dialog with focusable Quick Search tags
   void _showSearchDialog() {
     _searchController.clear();
+    final textFieldFocusNode = FocusNode();
+    final cancelButtonFocusNode = FocusNode();
     final searchButtonFocusNode = FocusNode();
+
     showDialog(
       context: context,
       builder: (context) {
@@ -413,6 +549,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           return KeyEventResult.ignored;
                         },
                         child: TextField(
+                          focusNode: textFieldFocusNode,
                           controller: _searchController,
                           autofocus: true,
                           decoration: const InputDecoration(
@@ -433,8 +570,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: Focus(
+                              focusNode: cancelButtonFocusNode,
                               onKey: (node, event) {
                                 if (event is RawKeyDownEvent) {
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                                    textFieldFocusNode.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                                    searchButtonFocusNode.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
                                   if (event.logicalKey == LogicalKeyboardKey.select ||
                                       event.logicalKey == LogicalKeyboardKey.enter ||
                                       event.logicalKey == LogicalKeyboardKey.numpadEnter ||
@@ -466,6 +612,14 @@ class _HomeScreenState extends State<HomeScreen> {
                               focusNode: searchButtonFocusNode,
                               onKey: (node, event) {
                                 if (event is RawKeyDownEvent) {
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                                    textFieldFocusNode.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
+                                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                                    cancelButtonFocusNode.requestFocus();
+                                    return KeyEventResult.handled;
+                                  }
                                   if (event.logicalKey == LogicalKeyboardKey.select ||
                                       event.logicalKey == LogicalKeyboardKey.enter ||
                                       event.logicalKey == LogicalKeyboardKey.numpadEnter ||
@@ -528,14 +682,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              _buildSearchTag(context, 'Action', () => _performDiscover('Action', genreId: 28)),
+                              _buildSearchTag(context, 'Action', () => _performDiscover('Action', genreId: 28), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
                               _buildSearchTag(context, 'Comedy', () => _performDiscover('Comedy', genreId: 35)),
                               _buildSearchTag(context, 'Thriller', () => _performDiscover('Thriller', genreId: 53)),
                               _buildSearchTag(context, 'Horror', () => _performDiscover('Horror', genreId: 27)),
-                              _buildSearchTag(context, 'Sci-Fi', () => _performDiscover('Sci-Fi', genreId: 878)),
+                              _buildSearchTag(context, 'Sci-Fi', () => _performDiscover('Sci-Fi', genreId: 878), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
                               _buildSearchTag(context, 'Romance', () => _performDiscover('Romance', genreId: 10749)),
                               _buildSearchTag(context, 'Animation', () => _performDiscover('Animation', genreId: 16)),
-                              _buildSearchTag(context, 'Drama', () => _performDiscover('Drama', genreId: 18)),
+                              _buildSearchTag(context, 'Drama', () => _performDiscover('Drama', genreId: 18), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
                             ],
                           ),
                           const SizedBox(height: 20),
@@ -548,17 +702,17 @@ class _HomeScreenState extends State<HomeScreen> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              _buildSearchTag(context, '2026', () => _performDiscover('2026', year: 2026)),
+                              _buildSearchTag(context, '2026', () => _performDiscover('2026', year: 2026), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
                               _buildSearchTag(context, '2025', () => _performDiscover('2025', year: 2025)),
                               _buildSearchTag(context, '2024', () => _performDiscover('2024', year: 2024)),
                               _buildSearchTag(context, '2023', () => _performDiscover('2023', year: 2023)),
                               _buildSearchTag(context, '2022', () => _performDiscover('2022', year: 2022)),
-                              _buildSearchTag(context, '2021', () => _performDiscover('2021', year: 2021)),
+                              _buildSearchTag(context, '2021', () => _performDiscover('2021', year: 2021), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
                               _buildSearchTag(context, '2020', () => _performDiscover('2020', year: 2020)),
                               _buildSearchTag(context, '2019', () => _performDiscover('2019', year: 2019)),
                               _buildSearchTag(context, '2018', () => _performDiscover('2018', year: 2018)),
                               _buildSearchTag(context, '2015', () => _performDiscover('2015', year: 2015)),
-                              _buildSearchTag(context, '2010', () => _performDiscover('2010', year: 2010)),
+                              _buildSearchTag(context, '2010', () => _performDiscover('2010', year: 2010), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
                             ],
                           ),
                         ],
@@ -572,6 +726,8 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     ).then((_) {
+      textFieldFocusNode.dispose();
+      cancelButtonFocusNode.dispose();
       searchButtonFocusNode.dispose();
     });
   }
@@ -579,7 +735,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // Open API server settings modal (TV D-pad focus trap resolved)
   void _showSettingsDialog() {
     _ipController.text = ApiClient.baseUrl;
+    final textFieldFocusNode = FocusNode();
+    final cancelFocusNode = FocusNode();
     final saveFocusNode = FocusNode();
+
     showDialog(
       context: context,
       builder: (context) {
@@ -597,14 +756,17 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               Focus(
                 onKey: (node, event) {
-                  if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                    // Force focus transition down to the Save button
-                    saveFocusNode.requestFocus();
-                    return KeyEventResult.handled;
+                  if (event is RawKeyDownEvent) {
+                    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                      // D-pad down from text field focuses Save Settings button
+                      saveFocusNode.requestFocus();
+                      return KeyEventResult.handled;
+                    }
                   }
                   return KeyEventResult.ignored;
                 },
                 child: TextField(
+                  focusNode: textFieldFocusNode,
                   autofocus: true,
                   controller: _ipController,
                   decoration: const InputDecoration(
@@ -627,13 +789,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           actions: [
             Focus(
+              focusNode: cancelFocusNode,
               onKey: (node, event) {
                 if (event is RawKeyDownEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                    textFieldFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                    saveFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
                   if (event.logicalKey == LogicalKeyboardKey.select ||
                       event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                       event.logicalKey == LogicalKeyboardKey.space) {
-                    saveFocusNode.dispose();
                     Navigator.pop(context);
                     return KeyEventResult.handled;
                   }
@@ -648,7 +818,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: focused ? Colors.white.withOpacity(0.1) : Colors.transparent,
                     ),
                     onPressed: () {
-                      saveFocusNode.dispose();
                       Navigator.pop(context);
                     },
                     child: const Text('Cancel', style: TextStyle(color: Colors.white)),
@@ -660,13 +829,20 @@ class _HomeScreenState extends State<HomeScreen> {
               focusNode: saveFocusNode,
               onKey: (node, event) {
                 if (event is RawKeyDownEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                    textFieldFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                    cancelFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
                   if (event.logicalKey == LogicalKeyboardKey.select ||
                       event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                       event.logicalKey == LogicalKeyboardKey.space) {
                     () async {
                       await ApiClient.setBaseUrl(_ipController.text);
-                      saveFocusNode.dispose();
                       Navigator.pop(context);
                       _loadAllData();
                     }();
@@ -685,7 +861,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     onPressed: () async {
                       await ApiClient.setBaseUrl(_ipController.text);
-                      saveFocusNode.dispose();
                       Navigator.pop(context);
                       _loadAllData();
                     },
@@ -698,11 +873,13 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     ).then((_) {
+      textFieldFocusNode.dispose();
+      cancelFocusNode.dispose();
       saveFocusNode.dispose();
     });
   }
 
-  Widget _buildMovieRow(String title, List<Movie> movies, {VoidCallback? onLoadMore, bool showClear = false}) {
+  Widget _buildMovieRow(String rowKey, String title, List<Movie> movies, {VoidCallback? onLoadMore, bool showClear = false}) {
     if (movies.isEmpty && !showClear) return const SizedBox.shrink();
     
     // Add 1 extra item for the focusable "Load More" card if pagination is available
@@ -769,8 +946,29 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     // Check if this is the last item and we have a load-more option
                     if (hasLoadMore && index == movies.length) {
+                      final node = _getFocusNode(rowKey, index);
                       return Focus(
+                        focusNode: node,
+                        onFocusChange: (focused) {
+                          if (focused) {
+                            setState(() {
+                              _rowLastFocusedIndex[rowKey] = index;
+                            });
+                            if (node.context != null) {
+                              Scrollable.ensureVisible(
+                                node.context!,
+                                duration: const Duration(milliseconds: 300),
+                                alignment: 0.5,
+                                curve: Curves.easeInOut,
+                              );
+                            }
+                          }
+                        },
                         onKey: (node, event) {
+                          final navResult = _handleRowKeyNavigation(rowKey, index, itemCount, event);
+                          if (navResult != KeyEventResult.ignored) {
+                            return navResult;
+                          }
                           if (event is RawKeyDownEvent) {
                             if (event.logicalKey == LogicalKeyboardKey.select ||
                                 event.logicalKey == LogicalKeyboardKey.enter ||
@@ -817,13 +1015,27 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
 
                     final movie = movies[index];
+                    final node = _getFocusNode(rowKey, index);
                     return MovieCard(
                       movie: movie,
+                      focusNode: node,
+                      onKey: (node, event) {
+                        return _handleRowKeyNavigation(rowKey, index, itemCount, event);
+                      },
                       onFocusChanged: (hasFocus) {
                         if (hasFocus) {
                           setState(() {
                             _focusedMovie = movie;
+                            _rowLastFocusedIndex[rowKey] = index;
                           });
+                          if (node.context != null) {
+                            Scrollable.ensureVisible(
+                              node.context!,
+                              duration: const Duration(milliseconds: 300),
+                              alignment: 0.5,
+                              curve: Curves.easeInOut,
+                            );
+                          }
                         }
                       },
                       onTap: () {
@@ -926,6 +1138,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () {
                           setState(() {
                             _isTamilSelected = !_isTamilSelected;
+
+                            _rowLastFocusedIndex['top'] = 0;
+                            _rowLastFocusedIndex['latest'] = 0;
+                            _rowLastFocusedIndex['comedy'] = 0;
+
+                            _rowFocusNodes['top']?.forEach((node) => node.dispose());
+                            _rowFocusNodes['latest']?.forEach((node) => node.dispose());
+                            _rowFocusNodes['comedy']?.forEach((node) => node.dispose());
+                            _rowFocusNodes['top'] = [];
+                            _rowFocusNodes['latest'] = [];
+                            _rowFocusNodes['comedy'] = [];
+
                             // Update focused movie on category change
                             final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
                             if (currentList.isNotEmpty) {
@@ -994,6 +1218,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Focus(
+                                      autofocus: true,
+                                      onKey: (node, event) {
+                                        if (event is RawKeyDownEvent) {
+                                          if (event.logicalKey == LogicalKeyboardKey.select ||
+                                              event.logicalKey == LogicalKeyboardKey.enter ||
+                                              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                              event.logicalKey == LogicalKeyboardKey.space) {
+                                            _loadAllData();
+                                            return KeyEventResult.handled;
+                                          }
+                                        }
+                                        return KeyEventResult.ignored;
+                                      },
                                       child: Builder(
                                         builder: (context) {
                                           final focused = Focus.of(context).hasFocus;
@@ -1011,6 +1248,18 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                     const SizedBox(width: 16),
                                     Focus(
+                                      onKey: (node, event) {
+                                        if (event is RawKeyDownEvent) {
+                                          if (event.logicalKey == LogicalKeyboardKey.select ||
+                                              event.logicalKey == LogicalKeyboardKey.enter ||
+                                              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                              event.logicalKey == LogicalKeyboardKey.space) {
+                                            _showSettingsDialog();
+                                            return KeyEventResult.handled;
+                                          }
+                                        }
+                                        return KeyEventResult.ignored;
+                                      },
                                       child: Builder(
                                         builder: (context) {
                                           final focused = Focus.of(context).hasFocus;
@@ -1087,18 +1336,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               const SizedBox(height: 20),
 
                               // Search results row (Tamil & English combined)
-                              _buildMovieRow('Search Results for "$_searchQuery"', _searchResults, onLoadMore: _loadMoreSearch, showClear: _searchQuery.isNotEmpty),
+                              _buildMovieRow('search', 'Search Results for "$_searchQuery"', _searchResults, onLoadMore: _loadMoreSearch, showClear: _searchQuery.isNotEmpty),
                               
-                              _buildMovieRow('Resume Watching', _history),
+                              _buildMovieRow('history', 'Resume Watching', _history),
                               
                               if (_isTamilSelected) ...[
-                                _buildMovieRow('Top Tamil Movies', _topTamil, onLoadMore: _loadMoreTopTamil),
-                                _buildMovieRow('Latest Tamil Movies', _latestTamil, onLoadMore: _loadMoreLatestTamil),
-                                _buildMovieRow('Tamil Comedy Movies', _comedyTamil, onLoadMore: _loadMoreComedyTamil),
+                                _buildMovieRow('top', 'Top Tamil Movies', _topTamil, onLoadMore: _loadMoreTopTamil),
+                                _buildMovieRow('latest', 'Latest Tamil Movies', _latestTamil, onLoadMore: _loadMoreLatestTamil),
+                                _buildMovieRow('comedy', 'Tamil Comedy Movies', _comedyTamil, onLoadMore: _loadMoreComedyTamil),
                               ] else ...[
-                                _buildMovieRow('Top English Movies', _topEnglish, onLoadMore: _loadMoreTopEnglish),
-                                _buildMovieRow('Latest English Movies', _latestEnglish, onLoadMore: _loadMoreLatestEnglish),
-                                _buildMovieRow('English Comedy Movies', _comedyEnglish, onLoadMore: _loadMoreComedyEnglish),
+                                _buildMovieRow('top', 'Top English Movies', _topEnglish, onLoadMore: _loadMoreTopEnglish),
+                                _buildMovieRow('latest', 'Latest English Movies', _latestEnglish, onLoadMore: _loadMoreLatestEnglish),
+                                _buildMovieRow('comedy', 'English Comedy Movies', _comedyEnglish, onLoadMore: _loadMoreComedyEnglish),
                               ],
                               
                               const SizedBox(height: 40),

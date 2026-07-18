@@ -7,12 +7,16 @@ class MovieCard extends StatefulWidget {
   final Movie movie;
   final VoidCallback onTap;
   final ValueChanged<bool>? onFocusChanged;
+  final FocusNode? focusNode;
+  final KeyEventResult Function(FocusNode, RawKeyEvent)? onKey;
 
   const MovieCard({
     Key? key,
     required this.movie,
     required this.onTap,
     this.onFocusChanged,
+    this.focusNode,
+    this.onKey,
   }) : super(key: key);
 
   @override
@@ -25,6 +29,7 @@ class _MovieCardState extends State<MovieCard> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      focusNode: widget.focusNode,
       onFocusChange: (focused) {
         setState(() {
           _isFocused = focused;
@@ -34,6 +39,12 @@ class _MovieCardState extends State<MovieCard> {
         }
       },
       onKey: (node, event) {
+        if (widget.onKey != null) {
+          final res = widget.onKey!(node, event);
+          if (res != KeyEventResult.ignored) {
+            return res;
+          }
+        }
         if (event is RawKeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.select ||
               event.logicalKey == LogicalKeyboardKey.enter ||

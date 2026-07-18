@@ -249,7 +249,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                         event.logicalKey == LogicalKeyboardKey.enter ||
                                         event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                                         event.logicalKey == LogicalKeyboardKey.space) {
-                                      _fetchStreams(bypassCache: true);
+                                      _fetchStreams(bypassCache: false);
                                       return KeyEventResult.handled;
                                     }
                                   }
@@ -263,7 +263,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                         backgroundColor: focused ? Colors.white : TVTheme.surface,
                                         foregroundColor: focused ? Colors.black : Colors.white,
                                       ),
-                                      onPressed: () => _fetchStreams(bypassCache: true),
+                                      onPressed: () => _fetchStreams(bypassCache: false),
                                       icon: const Icon(Icons.refresh),
                                       label: const Text('Retry Fetching'),
                                     );
