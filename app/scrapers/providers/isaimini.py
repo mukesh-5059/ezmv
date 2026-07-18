@@ -173,6 +173,7 @@ class IsaiminiScraper(BaseScraper):
                         has_direct_resolutions = True
                         break
             
+            category = "Original"
             subfolder_url = None
             if has_direct_resolutions:
                 logger.info(f"[{self.name}] Movie page directly contains resolution listings.")
@@ -183,10 +184,15 @@ class IsaiminiScraper(BaseScraper):
                     text = a.get_text().strip()
                     if href and any(k in href.lower() or k in text.lower() for k in ["original", "hd", "predvd"]):
                         subfolder_url = href if href.startswith("http") else f"{base_url.rstrip('/')}{href}"
+                        if "predvd" in href.lower() or "predvd" in text.lower():
+                            category = "PreDVD"
                         break
                     
             if not subfolder_url:
                 subfolder_url = movie_page_url
+
+            if "predvd" in subfolder_url.lower() or "predvd" in movie_page_url.lower():
+                category = "PreDVD"
                 
             # Step 2: Fetch subfolder for resolution lists
             resp = await client.get(subfolder_url, impersonate="chrome", timeout=8.0)
@@ -238,7 +244,7 @@ class IsaiminiScraper(BaseScraper):
                                         if source_tag and source_tag.get("src"):
                                             direct_stream_url = source_tag.get("src").replace("&amp;", "&")
                                             results.append({
-                                                "provider": f"Isaimini (Server {quality})",
+                                                "provider": f"{category} (Server {quality})",
                                                 "url": direct_stream_url,
                                                 "quality": quality,
                                                 "type": "embed",
@@ -251,7 +257,7 @@ class IsaiminiScraper(BaseScraper):
                                     
                                 # Fallback to player page URL if direct extraction fails
                                 results.append({
-                                    "provider": f"Isaimini (Server {quality})",
+                                    "provider": f"{category} (Server {quality})",
                                     "url": player_url,
                                     "quality": quality,
                                     "type": "embed",

@@ -85,8 +85,8 @@ class ScraperManager:
                 seen_urls.add(url)
                 deduplicated.append(item)
 
-        # Sort so that Isaimini streams are placed first
-        deduplicated.sort(key=lambda x: 0 if "Isaimini" in x.get("provider", "") else 1)
+        # Sort so that direct download streams (Original / PreDVD / Isaimini) are placed first
+        deduplicated.sort(key=lambda x: 0 if any(k in x.get("provider", "") for k in ["Original", "PreDVD", "Isaimini"]) else 1)
 
         # Cache the deduplicated results
         self._stream_cache.set(cache_key, deduplicated)
