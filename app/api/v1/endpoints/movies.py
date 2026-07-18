@@ -30,7 +30,8 @@ async def search_movies_or_tv(
             "poster_path": item.get("poster_path"),
             "backdrop_path": item.get("backdrop_path"),
             "vote_average": item.get("vote_average"),
-            "media_type": media_type
+            "media_type": media_type,
+            "genre_ids": item.get("genre_ids", [])
         })
         
     return {"results": formatted_results}
@@ -57,7 +58,8 @@ async def get_popular(
             "backdrop_path": item.get("backdrop_path"),
             "vote_average": item.get("vote_average"),
             "original_language": item.get("original_language"),
-            "media_type": "movie"
+            "media_type": "movie",
+            "genre_ids": item.get("genre_ids", [])
         })
         
     return {"results": formatted_results}
@@ -87,7 +89,8 @@ async def discover(
             "backdrop_path": item.get("backdrop_path"),
             "vote_average": item.get("vote_average"),
             "original_language": item.get("original_language"),
-            "media_type": "movie"
+            "media_type": "movie",
+            "genre_ids": item.get("genre_ids", [])
         })
         
     return {"results": formatted_results}

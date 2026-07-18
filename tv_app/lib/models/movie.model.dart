@@ -7,6 +7,7 @@ class Movie {
   final String backdropPath;
   final double voteAverage;
   final String originalLanguage;
+  final List<int> genreIds;
 
   Movie({
     required this.tmdbId,
@@ -17,6 +18,7 @@ class Movie {
     required this.backdropPath,
     required this.voteAverage,
     required this.originalLanguage,
+    this.genreIds = const [],
   });
 
   factory Movie.fromJson(Map<String, dynamic> json) {
@@ -29,6 +31,9 @@ class Movie {
       backdropPath: json['backdrop_path'] ?? '',
       voteAverage: (json['vote_average'] as num?)?.toDouble() ?? 0.0,
       originalLanguage: json['original_language'] ?? 'en',
+      genreIds: json['genre_ids'] != null
+          ? List<int>.from(json['genre_ids'])
+          : const [],
     );
   }
 
@@ -42,6 +47,7 @@ class Movie {
       'backdrop_path': backdropPath,
       'vote_average': voteAverage,
       'original_language': originalLanguage,
+      'genre_ids': genreIds,
     };
   }
 
@@ -54,4 +60,37 @@ class Movie {
   String get backdropUrl => backdropPath.isNotEmpty
       ? 'https://image.tmdb.org/t/p/w780$backdropPath'
       : '';
+
+  static const Map<int, String> _genreMap = {
+    28: 'Action',
+    12: 'Adventure',
+    16: 'Animation',
+    35: 'Comedy',
+    80: 'Crime',
+    99: 'Documentary',
+    18: 'Drama',
+    10751: 'Family',
+    14: 'Fantasy',
+    36: 'History',
+    27: 'Horror',
+    10402: 'Music',
+    9648: 'Mystery',
+    10749: 'Romance',
+    878: 'Sci-Fi',
+    10770: 'TV Movie',
+    53: 'Thriller',
+    10752: 'War',
+    37: 'Western',
+  };
+
+  // Convert genre IDs list to string tag representation
+  String get genreTags {
+    if (genreIds.isEmpty) return '';
+    final names = genreIds
+        .map((id) => _genreMap[id])
+        .where((name) => name != null)
+        .cast<String>()
+        .toList();
+    return names.join(' • ');
+  }
 }

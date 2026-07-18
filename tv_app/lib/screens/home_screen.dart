@@ -880,13 +880,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMovieRow(String rowKey, String title, List<Movie> movies, {VoidCallback? onLoadMore, bool showClear = false}) {
-    if (movies.isEmpty && !showClear) return const SizedBox.shrink();
+    if (movies.isEmpty && !showClear) {
+      return SizedBox.shrink(key: ValueKey('${rowKey}_empty'));
+    }
     
     // Add 1 extra item for the focusable "Load More" card if pagination is available
     final hasLoadMore = onLoadMore != null && movies.isNotEmpty;
     final itemCount = movies.length + (hasLoadMore ? 1 : 0);
 
     return Column(
+      key: ValueKey(rowKey),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
@@ -1063,6 +1066,16 @@ class _HomeScreenState extends State<HomeScreen> {
     return Focus(
       onKey: (node, event) {
         if (event is RawKeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            final visibleRows = _visibleRowKeys;
+            if (visibleRows.isNotEmpty) {
+              final firstRowKey = visibleRows.first;
+              final destIndex = _rowLastFocusedIndex[firstRowKey] ?? 0;
+              final targetNode = _getFocusNode(firstRowKey, destIndex);
+              targetNode.requestFocus();
+              return KeyEventResult.handled;
+            }
+          }
           if (event.logicalKey == LogicalKeyboardKey.select ||
               event.logicalKey == LogicalKeyboardKey.enter ||
               event.logicalKey == LogicalKeyboardKey.numpadEnter ||
@@ -1124,9 +1137,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 4),
                       if (_focusedMovie != null && _errorMessage == null)
-                        Text(
-                          'Current: ${_focusedMovie!.title} (${_focusedMovie!.releaseDate.split('-')[0]})',
-                          style: Theme.of(context).textTheme.bodyMedium,
+                        SizedBox(
+                          width: size.width * 0.5,
+                          child: Text(
+                            'Current: ${_focusedMovie!.title} (${_focusedMovie!.releaseDate.isNotEmpty ? _focusedMovie!.releaseDate.split('-')[0] : 'N/A'})${_focusedMovie!.genreTags.isNotEmpty ? '  •  ${_focusedMovie!.genreTags}' : ''}',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                     ],
                   ),
@@ -1285,55 +1303,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Quick Movie Description Block
-                              if (_focusedMovie != null)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-                                  child: SizedBox(
-                                    width: size.width * 0.6,
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          _focusedMovie!.title,
-                                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: TVTheme.surface,
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                'IMDb ${_focusedMovie!.voteAverage.toStringAsFixed(1)}',
-                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Text(
-                                              _focusedMovie!.releaseDate.split('-')[0],
-                                              style: const TextStyle(color: TVTheme.textSecondary, fontSize: 12),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          _focusedMovie!.overview,
-                                          maxLines: 3,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(color: TVTheme.textSecondary, fontSize: 12, height: 1.4),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 12),
 
                               // Search results row (Tamil & English combined)
                               _buildMovieRow('search', 'Search Results for "$_searchQuery"', _searchResults, onLoadMore: _loadMoreSearch, showClear: _searchQuery.isNotEmpty),

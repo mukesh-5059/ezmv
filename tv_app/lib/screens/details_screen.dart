@@ -146,7 +146,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
                           runSpacing: 8,
                           children: [
                             Text(
-                              widget.movie.releaseDate.split('-')[0],
+                              widget.movie.releaseDate.isNotEmpty
+                                  ? widget.movie.releaseDate.split('-')[0]
+                                  : 'N/A',
                               style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14),
                             ),
                             Text(
@@ -157,6 +159,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               'Rating: ${widget.movie.voteAverage.toStringAsFixed(1)}',
                               style: const TextStyle(color: TVTheme.accent, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
+                            if (widget.movie.genreTags.isNotEmpty)
+                              Text(
+                                'Genres: ${widget.movie.genreTags}',
+                                style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 20),
