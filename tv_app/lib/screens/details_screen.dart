@@ -107,8 +107,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
           ),
 
           // 2. Details Content
-          SafeArea(
-            child: SingleChildScrollView(
+          Positioned.fill(
+            child: SafeArea(
+              child: SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20.0),
                 child: Row(
@@ -339,7 +340,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
             ),
           ),
         ),
-        ],
+      ),
+      ],
       ),
     );
   }
