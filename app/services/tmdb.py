@@ -66,7 +66,8 @@ class TMDBClient:
         url = f"{self.BASE_URL}/search/movie"
         params = {
             "query": query,
-            "page": str(page)
+            "page": str(page),
+            "include_adult": "false"
         }
         if year:
             params["year"] = str(year)
@@ -96,7 +97,10 @@ class TMDBClient:
         Search for TV shows on TMDB.
         """
         url = f"{self.BASE_URL}/search/tv"
-        params = {"query": query}
+        params = {
+            "query": query,
+            "include_adult": "false"
+        }
         if year:
             params["first_air_date_year"] = str(year)
 
@@ -168,7 +172,8 @@ class TMDBClient:
             "with_original_language": lang_code,
             "sort_by": "popularity.desc",
             "page": str(page),
-            "primary_release_date.lte": today_str
+            "primary_release_date.lte": today_str,
+            "include_adult": "false"
         }
 
         try:
@@ -203,7 +208,8 @@ class TMDBClient:
         params = {
             "with_original_language": lang_code,
             "page": str(page),
-            "primary_release_date.lte": today_str
+            "primary_release_date.lte": today_str,
+            "include_adult": "false"
         }
         
         if genre:

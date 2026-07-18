@@ -53,16 +53,23 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  void _startPlayback(String streamUrl) {
+  void _startPlayback(Map<String, dynamic> stream) {
     // 1. Add movie to recently viewed history list asynchronously
     LocalStorage.addToHistory(widget.movie);
+    
+    // Parse headers if present
+    Map<String, String>? headers;
+    if (stream['headers'] != null) {
+      headers = Map<String, String>.from(stream['headers']);
+    }
     
     // 2. Play stream immediately
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PlayerScreen(
-          streamUrl: streamUrl,
+          streamUrl: stream['url'] ?? '',
+          headers: headers,
           movieTitle: widget.movie.title,
           tmdbId: widget.movie.tmdbId,
         ),
@@ -284,7 +291,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                           event.logicalKey == LogicalKeyboardKey.enter ||
                                           event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                                           event.logicalKey == LogicalKeyboardKey.space) {
-                                        _startPlayback(streamUrl);
+                                        _startPlayback(stream);
                                         return KeyEventResult.handled;
                                       }
                                     }
@@ -307,7 +314,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                               ),
                                             ),
                                           ),
-                                          onPressed: () => _startPlayback(streamUrl),
+                                          onPressed: () => _startPlayback(stream),
                                           child: Text(providerName),
                                         ),
                                       );

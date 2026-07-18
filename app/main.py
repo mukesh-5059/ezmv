@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup actions
     logger.info("Initializing application startup...")
+    
     await init_session()
     yield
     
