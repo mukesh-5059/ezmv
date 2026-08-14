@@ -79,11 +79,11 @@ class TMDBClient:
             resp.raise_for_status()
             results = resp.json().get("results", [])
             
-            # Filter out unreleased movies (where release_date is empty or in the future)
+            # Filter out unreleased movies and filter by Tamil original language
             today_str = date.today().isoformat()
             filtered_results = [
                 m for m in results
-                if m.get("release_date") and m.get("release_date") <= today_str
+                if m.get("release_date") and m.get("release_date") <= today_str and m.get("original_language") == "ta"
             ]
             
             self._search_cache.set(cache_key, filtered_results)
@@ -108,7 +108,14 @@ class TMDBClient:
             client = get_session()
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
             resp.raise_for_status()
-            return resp.json().get("results", [])
+            results = resp.json().get("results", [])
+            
+            # Filter to only show Tamil TV shows
+            filtered_results = [
+                t for t in results
+                if t.get("original_language") == "ta"
+            ]
+            return filtered_results
         except Exception as e:
             logger.error(f"TMDB TV search failed for '{query}': {e}")
             return []

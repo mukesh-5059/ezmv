@@ -20,10 +20,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
   bool _isLoadingStreams = true;
   int _cacheExpiresIn = 0;
 
+  final FocusNode _firstStreamFocusNode = FocusNode();
+  final FocusNode _retryFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _fetchStreams();
+  }
+
+  @override
+  void dispose() {
+    _firstStreamFocusNode.dispose();
+    _retryFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchStreams({bool bypassCache = false}) async {
@@ -32,12 +42,27 @@ class _DetailsScreenState extends State<DetailsScreen> {
       _cacheExpiresIn = 0;
     });
     final response = await ApiClient.getStreamLinks(widget.movie.tmdbId, bypassCache: bypassCache);
+    if (!mounted) return;
     setState(() {
       final List streamList = response['streams'] ?? [];
       _streams = List<Map<String, dynamic>>.from(streamList);
       _cacheExpiresIn = response['cache_expires_in'] ?? 0;
       _isLoadingStreams = false;
     });
+
+    if (_streams.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (_firstStreamFocusNode.canRequestFocus) {
+          _firstStreamFocusNode.requestFocus();
+        }
+      });
+    } else {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (_retryFocusNode.canRequestFocus) {
+          _retryFocusNode.requestFocus();
+        }
+      });
+    }
   }
 
   String _formatCacheTime(int seconds) {
@@ -251,6 +276,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               ),
                               const SizedBox(height: 12),
                               Focus(
+                                focusNode: _retryFocusNode,
                                 onKey: (node, event) {
                                   if (event is RawKeyDownEvent) {
                                     if (event.logicalKey == LogicalKeyboardKey.select ||
@@ -290,9 +316,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               itemBuilder: (context, index) {
                                 final stream = _streams[index];
                                 final providerName = stream['provider'] ?? 'Source ${index + 1}';
-                                final streamUrl = stream['url'] ?? '';
 
                                 return Focus(
+                                  focusNode: index == 0 ? _firstStreamFocusNode : null,
                                   onKey: (node, event) {
                                     if (event is RawKeyDownEvent) {
                                       if (event.logicalKey == LogicalKeyboardKey.select ||

@@ -1,7 +1,5 @@
 import asyncio
 import logging
-from app.scrapers.providers.vidsrc import VidSrcScraper
-from app.scrapers.providers.vidsrcto import VidSrcToScraper
 from app.scrapers.providers.isaimini import IsaiminiScraper
 from app.services.tmdb import TTLCache
 
@@ -11,8 +9,6 @@ class ScraperManager:
     def __init__(self):
         # Register active scraper instances
         self.scrapers = [
-            VidSrcScraper(),
-            VidSrcToScraper(),
             IsaiminiScraper()
         ]
         # Cache resolved stream links for 3 hours to speed up details loading

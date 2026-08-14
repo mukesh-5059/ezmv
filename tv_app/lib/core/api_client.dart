@@ -10,19 +10,58 @@ class ApiClient {
   // Initialize and load the configured backend URL
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    // Overwrite cached URL with hardcoded URL for testing
-    await prefs.setString('backend_url', defaultBaseUrl);
-    _currentBaseUrl = defaultBaseUrl;
+    final savedUrl = prefs.getString('backend_url');
+    if (savedUrl != null && savedUrl.isNotEmpty) {
+      _currentBaseUrl = savedUrl;
+    } else {
+      _currentBaseUrl = defaultBaseUrl;
+    }
   }
 
   // Get current base URL
   static String get baseUrl => _currentBaseUrl;
 
-  // Set and save new backend URL (e.g., when running on TV connecting to PC IP)
-  static Future<void> setBaseUrl(String newUrl) async {
+  // Format shorthand input to a full API endpoint URL
+  static String formatInputToUrl(String input) {
+    var trimmed = input.trim();
+    if (trimmed.isEmpty) return defaultBaseUrl;
+
+    // If it doesn't start with http:// or https://, prepend http://
+    if (!trimmed.startsWith(RegExp(r'^https?://'))) {
+      trimmed = 'http://$trimmed';
+    }
+
+    // If it doesn't end with /api/v1 (or /api/v1/), append it
+    if (!trimmed.endsWith('/api/v1') && !trimmed.endsWith('/api/v1/')) {
+      if (trimmed.endsWith('/')) {
+        trimmed = trimmed.substring(0, trimmed.length - 1);
+      }
+      trimmed = '$trimmed/api/v1';
+    }
+
+    return trimmed;
+  }
+
+  // Get display base URL (clean IP/host representation for UI text editing)
+  static String get displayBaseUrl {
+    var display = _currentBaseUrl;
+    if (display.startsWith('http://')) {
+      display = display.substring(7);
+    }
+    if (display.endsWith('/api/v1')) {
+      display = display.substring(0, display.length - 7);
+    } else if (display.endsWith('/api/v1/')) {
+      display = display.substring(0, display.length - 8);
+    }
+    return display;
+  }
+
+  // Set and save new backend URL (automatically formatting raw IP input)
+  static Future<void> setBaseUrl(String input) async {
+    final formattedUrl = formatInputToUrl(input);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('backend_url', newUrl);
-    _currentBaseUrl = newUrl;
+    await prefs.setString('backend_url', formattedUrl);
+    _currentBaseUrl = formattedUrl;
   }
 
   // Search movies with page support

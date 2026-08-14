@@ -1,2 +1,6 @@
 .env
 stremsrc/
+__pycache__/
+*.pyc
+*.db
+*.apk

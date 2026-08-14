@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:video_player/video_player.dart';
@@ -26,6 +27,9 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
+  final FocusNode _playerFocusNode = FocusNode();
+  bool _canPop = false;
+
   // Web Player (Fallback)
   late final WebViewController _webViewController;
   bool _isWebLoading = true;
@@ -262,6 +266,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _videoController!.play();
       _startProgressSaving();
     }
+    _playerFocusNode.requestFocus();
   }
 
   // Periodically save progress to LocalStorage
@@ -323,9 +328,91 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
           onPageFinished: (String url) {
             setState(() => _isWebLoading = false);
-            // Wait slightly for video element and play button elements to load, then check progress
-            Future.delayed(const Duration(milliseconds: 1500), () {
+            // Inject the Embed Player Optimizer script
+            _webViewController.runJavaScript('''
+              (function() {
+                // Block window.open popups
+                window.open = function() { return null; };
+                
+                // Continuous viewport optimization and auto-focus loop
+                setInterval(function() {
+                  window.open = function() { return null; };
+                  
+                  var player = null;
+                  var iframes = document.querySelectorAll('iframe');
+                  for (var i = 0; i < iframes.length; i++) {
+                    var iframe = iframes[i];
+                    if (iframe.offsetWidth > 200 || iframe.offsetHeight > 200) {
+                      player = iframe;
+                      break;
+                    }
+                  }
+                  if (!player) {
+                    player = document.querySelector('video');
+                  }
+                  
+                  if (player) {
+                    try {
+                      if (!player.hasAttribute('tabindex')) {
+                        player.setAttribute('tabindex', '0');
+                      }
+                      player.focus();
+                    } catch(e) {}
+                    
+                    // Hide all sibling DOM elements up to the body element
+                    var current = player;
+                    while (current && current !== document.body) {
+                      var parent = current.parentElement;
+                      if (parent) {
+                        for (var i = 0; i < parent.children.length; i++) {
+                          var sibling = parent.children[i];
+                          if (sibling !== current && sibling.tagName !== 'SCRIPT' && sibling.tagName !== 'STYLE') {
+                            sibling.style.setProperty('display', 'none', 'important');
+                            sibling.style.setProperty('visibility', 'hidden', 'important');
+                            sibling.style.setProperty('opacity', '0', 'important');
+                            sibling.style.setProperty('pointer-events', 'none', 'important');
+                          }
+                        }
+                      }
+                      current = parent;
+                    }
+                    
+                    // Stretch player to occupy 100% of WebView viewport
+                    player.style.setProperty('position', 'fixed', 'important');
+                    player.style.setProperty('top', '0', 'important');
+                    player.style.setProperty('left', '0', 'important');
+                    player.style.setProperty('width', '100vw', 'important');
+                    player.style.setProperty('height', '100vh', 'important');
+                    player.style.setProperty('z-index', '999999', 'important');
+                    player.style.setProperty('background', 'black', 'important');
+                    
+                    // Disable scrollbars and enforce pure black backdrop
+                    document.documentElement.style.setProperty('background', 'black', 'important');
+                    document.body.style.setProperty('background', 'black', 'important');
+                    document.documentElement.style.setProperty('overflow', 'hidden', 'important');
+                    document.body.style.setProperty('overflow', 'hidden', 'important');
+                  }
+                }, 500);
+              })();
+            ''');
+            
+            // Wait slightly for video/iframe elements to load, then check progress and focus player
+            Future.delayed(const Duration(milliseconds: 2500), () {
               _checkWebResumeProgress();
+              // Force tabindex and focus on the player element/iframe
+              _webViewController.runJavaScript('''
+                var iframe = document.querySelector('iframe');
+                if (iframe) {
+                  iframe.setAttribute('tabindex', '0');
+                  iframe.focus();
+                } else {
+                  var video = document.querySelector('video');
+                  if (video) {
+                    video.setAttribute('tabindex', '0');
+                    video.focus();
+                  }
+                }
+              ''');
               // Try to autoplay bypassing policy blocks
               _webViewController.runJavaScript('''
                 setInterval(function() {
@@ -449,6 +536,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
     _startProgressSaving();
+    _playerFocusNode.requestFocus();
   }
 
   void _resetCursorTimer() {
@@ -463,22 +551,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _triggerWebClick() {
-    _webViewController.runJavaScript('''
-      (function() {
-        var x = window.innerWidth * $_cursorX;
-        var y = window.innerHeight * $_cursorY;
-        var el = document.elementFromPoint(x, y);
-        if (el) {
-          el.click();
-          var ev1 = new MouseEvent('mousedown', {clientX: x, clientY: y, bubbles: true});
-          var ev2 = new MouseEvent('mouseup', {clientX: x, clientY: y, bubbles: true});
-          var ev3 = new MouseEvent('click', {clientX: x, clientY: y, bubbles: true});
-          el.dispatchEvent(ev1);
-          el.dispatchEvent(ev2);
-          el.dispatchEvent(ev3);
-        }
-      })();
-    ''');
+    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    
+    final size = renderBox.size;
+    final localPosition = Offset(_cursorX * size.width, _cursorY * size.height);
+    final globalPosition = renderBox.localToGlobal(localPosition);
+    
+    // Simulate physical touch down event at current cursor position
+    final pointerDown = PointerDownEvent(
+      pointer: 1,
+      position: globalPosition,
+      kind: PointerDeviceKind.touch,
+    );
+    
+    // Simulate physical touch up event at current cursor position
+    final pointerUp = PointerUpEvent(
+      pointer: 1,
+      position: globalPosition,
+      kind: PointerDeviceKind.touch,
+    );
+    
+    // Dispatch the down gesture
+    GestureBinding.instance.handlePointerEvent(pointerDown);
+    
+    // Dispatch the up gesture after a tiny delay (50ms) to simulate a natural tap
+    Future.delayed(const Duration(milliseconds: 50), () {
+      GestureBinding.instance.handlePointerEvent(pointerUp);
+    });
   }
 
   // Overlay management
@@ -582,30 +682,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _showCursor = true;
         });
         return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        // Normal Left: seek back
-        _webViewController.runJavaScript(
-          "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowLeft', keyCode: 37, bubbles: true}));"
-        );
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        // Normal Right: seek forward
-        _webViewController.runJavaScript(
-          "window.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', keyCode: 39, bubbles: true}));"
-        );
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.select ||
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                 event.logicalKey == LogicalKeyboardKey.arrowRight ||
+                 event.logicalKey == LogicalKeyboardKey.select ||
                  event.logicalKey == LogicalKeyboardKey.enter ||
                  event.logicalKey == LogicalKeyboardKey.space) {
-        // Toggle play/pause directly on HTML5 video element if available
+        // Enforce focus on the player iframe
         _webViewController.runJavaScript(
-          "var v = document.querySelector('video'); if (v) { if (v.paused) v.play(); else v.pause(); }"
+          "var iframe = document.querySelector('iframe'); if (iframe) { if (!iframe.hasAttribute('tabindex')) iframe.setAttribute('tabindex', '0'); iframe.focus(); }"
         );
-        // Also dispatch spacebar event to the window
-        _webViewController.runJavaScript(
-          "window.dispatchEvent(new KeyboardEvent('keydown', {key: ' ', keyCode: 32, bubbles: true}));"
-        );
-        return KeyEventResult.handled;
+        // Let the system pass D-pad key events natively to the focused WebView iframe
+        return KeyEventResult.ignored;
       }
     }
     return KeyEventResult.ignored;
@@ -623,6 +710,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  Future<void> _saveProgressBeforePop() async {
+    _progressSaveTimer?.cancel();
+    if (!_isDirectStream) {
+      try {
+        final result = await _webViewController.runJavaScriptReturningResult(
+          "var v = document.querySelector('video'); v ? v.currentTime : 0;"
+        );
+        final currentSec = double.tryParse(result.toString())?.toInt();
+        if (currentSec != null && currentSec > 5) {
+          await LocalStorage.saveProgress(widget.tmdbId, currentSec);
+        }
+      } catch (e) {
+        print("Failed to save web progress on pop: $e");
+      }
+    } else {
+      if (_videoController != null) {
+        final currentSec = _videoController!.value.position.inSeconds;
+        final durationSec = _videoController!.value.duration.inSeconds;
+        if (currentSec > 5) {
+          if (durationSec > 0 && currentSec / durationSec > 0.95) {
+            await LocalStorage.clearProgress(widget.tmdbId);
+          } else {
+            await LocalStorage.saveProgress(widget.tmdbId, currentSec);
+          }
+        }
+      }
+    }
+  }
+
   @override
   void dispose() {
     _progressSaveTimer?.cancel();
@@ -633,31 +749,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     WakelockPlus.disable();
 
     if (_isDirectStream) {
-      if (_videoController != null) {
-        final currentSec = _videoController!.value.position.inSeconds;
-        final durationSec = _videoController!.value.duration.inSeconds;
-        
-        // Only save progress if they watched/seeked beyond the first 5 seconds (prevents hot restart overwriting)
-        if (currentSec > 5) {
-          // Clear watch progress if they finished 95% of the movie, else save current position
-          if (durationSec > 0 && currentSec / durationSec > 0.95) {
-            LocalStorage.clearProgress(widget.tmdbId);
-          } else {
-            LocalStorage.saveProgress(widget.tmdbId, currentSec);
-          }
-        }
-        _videoController!.dispose();
-      }
-    } else {
-      // WebView progress save on close (only if beyond 5 seconds)
-      _webViewController.runJavaScriptReturningResult("var v = document.querySelector('video'); v ? v.currentTime : 0;")
-          .then((result) {
-            final currentSec = double.tryParse(result.toString())?.toInt();
-            if (currentSec != null && currentSec > 5) {
-              LocalStorage.saveProgress(widget.tmdbId, currentSec);
-            }
-          }).catchError((_) {});
+      _videoController?.dispose();
     }
+    _playerFocusNode.dispose();
 
     // Restore standard UI options & unlock orientation on exit
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -667,24 +761,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Widget child;
     if (_errorMessage != null) {
-      return Scaffold(
+      child = Scaffold(
         backgroundColor: Colors.black,
         body: _buildErrorWidget(),
       );
-    }
-
-    if (_isDirectStream) {
-      return Scaffold(
+    } else if (_isDirectStream) {
+      child = Scaffold(
         backgroundColor: Colors.black,
         body: _buildNativePlayer(),
       );
     } else {
-      return Scaffold(
+      child = Scaffold(
         backgroundColor: Colors.black,
         body: _buildWebPlayer(),
       );
     }
+
+    return PopScope(
+      canPop: _canPop,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        await _saveProgressBeforePop();
+        if (context.mounted) {
+          setState(() {
+            _canPop = true;
+          });
+          Navigator.of(context).pop();
+        }
+      },
+      child: child,
+    );
   }
 
   // Native player UI Layout
@@ -697,6 +805,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final position = _videoController!.value.position;
 
     return Focus(
+      focusNode: _playerFocusNode,
       autofocus: !_isShowingResumeDialog,
       canRequestFocus: !_isShowingResumeDialog,
       onKey: (node, event) {
@@ -829,7 +938,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildWebPlayer() {
     final size = MediaQuery.of(context).size;
     return Focus(
-      autofocus: true,
+      focusNode: _playerFocusNode,
+      autofocus: !_isShowingResumeDialog,
+      canRequestFocus: !_isShowingResumeDialog,
       onKey: (node, event) => _handleWebKeyEvent(event),
       child: Stack(
         children: [

@@ -52,6 +52,12 @@ class _HomeScreenState extends State<HomeScreen> {
   
   bool _isLoadingMore = false;
 
+  final FocusNode _languageFocusNode = FocusNode();
+  final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _refreshFocusNode = FocusNode();
+  final FocusNode _settingsFocusNode = FocusNode();
+  final FocusNode _clearSearchFocusNode = FocusNode();
+
   // Focus tracking maps for row-to-row traversal
   final Map<String, int> _rowLastFocusedIndex = {
     'search': 0,
@@ -86,6 +92,26 @@ class _HomeScreenState extends State<HomeScreen> {
     return keys;
   }
 
+  int _getRowItemCount(String rowKey) {
+    if (rowKey == 'search') {
+      final hasLoadMore = _searchResults.isNotEmpty;
+      return _searchResults.length + (hasLoadMore ? 1 : 0);
+    }
+    if (rowKey == 'history') {
+      return _history.length;
+    }
+    final isTamil = _isTamilSelected;
+    final list = rowKey == 'top'
+        ? (isTamil ? _topTamil : _topEnglish)
+        : rowKey == 'latest'
+            ? (isTamil ? _latestTamil : _latestEnglish)
+            : rowKey == 'comedy'
+                ? (isTamil ? _comedyTamil : _comedyEnglish)
+                : const <Movie>[];
+    final hasLoadMore = list.isNotEmpty;
+    return list.length + (hasLoadMore ? 1 : 0);
+  }
+
   KeyEventResult _handleRowKeyNavigation(
     String rowKey,
     int index,
@@ -100,22 +126,39 @@ class _HomeScreenState extends State<HomeScreen> {
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       if (rowPos > 0) {
         final prevRowKey = visibleRows[rowPos - 1];
-        final destIndex = _rowLastFocusedIndex[prevRowKey] ?? 0;
-        final targetNode = _getFocusNode(prevRowKey, destIndex);
-        targetNode.requestFocus();
-        return KeyEventResult.handled;
+        final maxCount = _getRowItemCount(prevRowKey);
+        if (maxCount > 0) {
+          var destIndex = _rowLastFocusedIndex[prevRowKey] ?? 0;
+          if (destIndex >= maxCount) {
+            destIndex = maxCount - 1;
+          }
+          final targetNode = _getFocusNode(prevRowKey, destIndex);
+          targetNode.requestFocus();
+          return KeyEventResult.handled;
+        }
       }
-      // If we are on the first row, let arrowUp traverse naturally to the top bar
-      return KeyEventResult.ignored;
+      // If we are on the first row, navigate to the Clear Search button if visible, else top bar
+      if (rowKey == 'search' && _searchQuery.isNotEmpty) {
+        _clearSearchFocusNode.requestFocus();
+      } else {
+        _searchFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       if (rowPos >= 0 && rowPos < visibleRows.length - 1) {
         final nextRowKey = visibleRows[rowPos + 1];
-        final destIndex = _rowLastFocusedIndex[nextRowKey] ?? 0;
-        final targetNode = _getFocusNode(nextRowKey, destIndex);
-        targetNode.requestFocus();
-        return KeyEventResult.handled;
+        final maxCount = _getRowItemCount(nextRowKey);
+        if (maxCount > 0) {
+          var destIndex = _rowLastFocusedIndex[nextRowKey] ?? 0;
+          if (destIndex >= maxCount) {
+            destIndex = maxCount - 1;
+          }
+          final targetNode = _getFocusNode(nextRowKey, destIndex);
+          targetNode.requestFocus();
+          return KeyEventResult.handled;
+        }
       }
       // If we are on the last row, consume arrowDown to prevent focus escaping
       return KeyEventResult.handled;
@@ -156,6 +199,11 @@ class _HomeScreenState extends State<HomeScreen> {
         node.dispose();
       }
     });
+    _languageFocusNode.dispose();
+    _searchFocusNode.dispose();
+    _refreshFocusNode.dispose();
+    _settingsFocusNode.dispose();
+    _clearSearchFocusNode.dispose();
     _ipController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -402,6 +450,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _focusedMovie = results.first;
       }
     });
+
+    if (results.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _getFocusNode('search', 0).requestFocus();
+      });
+    }
   }
 
   // Discover movies filterable by genre or year for Quick Tags (Querying Tamil and English parallelly)
@@ -435,6 +489,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _focusedMovie = unique.first;
       }
     });
+
+    if (unique.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _getFocusNode('search', 0).requestFocus();
+      });
+    }
   }
 
   void _clearSearch() {
@@ -457,6 +517,16 @@ class _HomeScreenState extends State<HomeScreen> {
         _focusedMovie = _history.first;
       } else {
         _focusedMovie = null;
+      }
+    });
+
+    // Request focus on the first item of the first visible row (e.g. history or top) to prevent focus loss
+    Future.delayed(const Duration(milliseconds: 100), () {
+      final visibleRows = _visibleRowKeys;
+      if (visibleRows.isNotEmpty) {
+        final firstRowKey = visibleRows.first;
+        final targetNode = _getFocusNode(firstRowKey, 0);
+        targetNode.requestFocus();
       }
     });
   }
@@ -512,9 +582,17 @@ class _HomeScreenState extends State<HomeScreen> {
   // Open Search Query input dialog with focusable Quick Search tags
   void _showSearchDialog() {
     _searchController.clear();
-    final textFieldFocusNode = FocusNode();
-    final cancelButtonFocusNode = FocusNode();
     final searchButtonFocusNode = FocusNode();
+    final textFieldFocusNode = FocusNode(
+      onKey: (node, event) {
+        if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          searchButtonFocusNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+    final cancelButtonFocusNode = FocusNode();
 
     showDialog(
       context: context,
@@ -540,30 +618,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 12),
-                      Focus(
-                        onKey: (node, event) {
-                          if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                            searchButtonFocusNode.requestFocus();
-                            return KeyEventResult.handled;
-                          }
-                          return KeyEventResult.ignored;
-                        },
-                        child: TextField(
-                          focusNode: textFieldFocusNode,
-                          controller: _searchController,
-                          autofocus: true,
-                          decoration: const InputDecoration(
-                            hintText: 'Enter title...',
-                            border: OutlineInputBorder(),
-                          ),
-                          onSubmitted: (val) {
-                            Future.delayed(const Duration(milliseconds: 150), () {
-                              if (searchButtonFocusNode.canRequestFocus) {
-                                searchButtonFocusNode.requestFocus();
-                              }
-                            });
-                          },
+                      TextField(
+                        focusNode: textFieldFocusNode,
+                        controller: _searchController,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Enter title...',
+                          border: OutlineInputBorder(),
                         ),
+                        onSubmitted: (val) {
+                          Future.delayed(const Duration(milliseconds: 150), () {
+                            if (searchButtonFocusNode.canRequestFocus) {
+                              searchButtonFocusNode.requestFocus();
+                            }
+                          });
+                        },
                       ),
                       const SizedBox(height: 24),
                       Row(
@@ -734,10 +803,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Open API server settings modal (TV D-pad focus trap resolved)
   void _showSettingsDialog() {
-    _ipController.text = ApiClient.baseUrl;
-    final textFieldFocusNode = FocusNode();
-    final cancelFocusNode = FocusNode();
+    _ipController.text = ApiClient.displayBaseUrl;
     final saveFocusNode = FocusNode();
+    final textFieldFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            // D-pad down from text field focuses Save Settings button
+            saveFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+    final cancelFocusNode = FocusNode();
 
     showDialog(
       context: context,
@@ -754,44 +834,32 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(color: TVTheme.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 16),
-              Focus(
-                onKey: (node, event) {
-                  if (event is RawKeyDownEvent) {
-                    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                      // D-pad down from text field focuses Save Settings button
-                      saveFocusNode.requestFocus();
-                      return KeyEventResult.handled;
-                    }
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: TextField(
-                  focusNode: textFieldFocusNode,
-                  autofocus: true,
-                  controller: _ipController,
-                  decoration: const InputDecoration(
-                    labelText: 'Server Base URL',
-                    hintText: 'e.g., http://192.168.29.50:8000/api/v1',
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (val) {
-                    // Auto focus Save button when 'Done/OK' is pressed on virtual keyboard
-                    // Wrapped in Future.delayed to bypass Android keyboard dismissal focus resets
-                    Future.delayed(const Duration(milliseconds: 150), () {
-                      if (saveFocusNode.canRequestFocus) {
-                        saveFocusNode.requestFocus();
-                      }
-                    });
-                  },
+              TextField(
+                focusNode: textFieldFocusNode,
+                autofocus: true,
+                controller: _ipController,
+                decoration: const InputDecoration(
+                  labelText: 'Server IP / Port / URL',
+                  hintText: 'e.g., 192.168.29.50:8080',
+                  border: OutlineInputBorder(),
                 ),
+                onSubmitted: (val) {
+                  // Auto focus Save button when 'Done/OK' is pressed on virtual keyboard
+                  // Wrapped in Future.delayed to bypass Android keyboard dismissal focus resets
+                  Future.delayed(const Duration(milliseconds: 150), () {
+                    if (saveFocusNode.canRequestFocus) {
+                      saveFocusNode.requestFocus();
+                    }
+                  });
+                },
               ),
             ],
           ),
           actions: [
             Focus(
               focusNode: cancelFocusNode,
-              onKey: (node, event) {
-                if (event is RawKeyDownEvent) {
+              onKeyEvent: (node, event) {
+                if (event is KeyDownEvent) {
                   if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                     textFieldFocusNode.requestFocus();
                     return KeyEventResult.handled;
@@ -804,6 +872,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                       event.logicalKey == LogicalKeyboardKey.space) {
+                    FocusManager.instance.primaryFocus?.unfocus();
                     Navigator.pop(context);
                     return KeyEventResult.handled;
                   }
@@ -818,6 +887,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: focused ? Colors.white.withOpacity(0.1) : Colors.transparent,
                     ),
                     onPressed: () {
+                      FocusManager.instance.primaryFocus?.unfocus();
                       Navigator.pop(context);
                     },
                     child: const Text('Cancel', style: TextStyle(color: Colors.white)),
@@ -827,8 +897,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             Focus(
               focusNode: saveFocusNode,
-              onKey: (node, event) {
-                if (event is RawKeyDownEvent) {
+              onKeyEvent: (node, event) {
+                if (event is KeyDownEvent) {
                   if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                     textFieldFocusNode.requestFocus();
                     return KeyEventResult.handled;
@@ -841,11 +911,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                       event.logicalKey == LogicalKeyboardKey.space) {
-                    () async {
-                      await ApiClient.setBaseUrl(_ipController.text);
-                      Navigator.pop(context);
-                      _loadAllData();
-                    }();
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    ApiClient.setBaseUrl(_ipController.text).then((_) {
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        _loadAllData();
+                      }
+                    });
                     return KeyEventResult.handled;
                   }
                 }
@@ -860,9 +932,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       foregroundColor: focused ? Colors.black : Colors.white,
                     ),
                     onPressed: () async {
+                      FocusManager.instance.primaryFocus?.unfocus();
                       await ApiClient.setBaseUrl(_ipController.text);
-                      Navigator.pop(context);
-                      _loadAllData();
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        _loadAllData();
+                      }
                     },
                     child: const Text('Save Settings'),
                   );
@@ -888,96 +963,41 @@ class _HomeScreenState extends State<HomeScreen> {
     final hasLoadMore = onLoadMore != null && movies.isNotEmpty;
     final itemCount = movies.length + (hasLoadMore ? 1 : 0);
 
-    return Column(
-      key: ValueKey(rowKey),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 24.0, top: 16.0, bottom: 4.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              if (showClear)
-                Padding(
-                  padding: const EdgeInsets.only(right: 24.0),
-                  child: Focus(
-                    onKey: (node, event) {
-                      if (event is RawKeyDownEvent) {
-                        if (event.logicalKey == LogicalKeyboardKey.select ||
-                            event.logicalKey == LogicalKeyboardKey.enter ||
-                            event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                            event.logicalKey == LogicalKeyboardKey.space) {
-                          _clearSearch();
-                          return KeyEventResult.handled;
-                        }
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    child: Builder(
-                      builder: (context) {
-                        final focused = Focus.of(context).hasFocus;
-                        return TextButton.icon(
-                          style: TextButton.styleFrom(
-                            backgroundColor: focused ? TVTheme.accent : Colors.transparent,
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: const Icon(Icons.close, size: 16),
-                          label: const Text('Clear Search', style: TextStyle(fontSize: 12)),
-                          onPressed: _clearSearch,
-                        );
-                      },
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        SizedBox(
-          height: 240,
-          child: movies.isEmpty && showClear
-              ? const Center(
-                  child: Text(
-                    'No search results found.',
-                    style: TextStyle(color: TVTheme.textSecondary),
-                  ),
-                )
-              : ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  itemCount: itemCount,
-                  itemBuilder: (context, index) {
-                    // Check if this is the last item and we have a load-more option
-                    if (hasLoadMore && index == movies.length) {
-                      final node = _getFocusNode(rowKey, index);
-                      return Focus(
-                        focusNode: node,
-                        onFocusChange: (focused) {
-                          if (focused) {
-                            setState(() {
-                              _rowLastFocusedIndex[rowKey] = index;
-                            });
-                            if (node.context != null) {
-                              Scrollable.ensureVisible(
-                                node.context!,
-                                duration: const Duration(milliseconds: 300),
-                                alignment: 0.5,
-                                curve: Curves.easeInOut,
-                              );
-                            }
-                          }
-                        },
+    return Builder(
+      builder: (rowContext) {
+        return Column(
+          key: ValueKey(rowKey),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 24.0, top: 16.0, bottom: 4.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleLarge),
+                  if (showClear)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 24.0),
+                      child: Focus(
+                        focusNode: _clearSearchFocusNode,
                         onKey: (node, event) {
-                          final navResult = _handleRowKeyNavigation(rowKey, index, itemCount, event);
-                          if (navResult != KeyEventResult.ignored) {
-                            return navResult;
-                          }
                           if (event is RawKeyDownEvent) {
+                            if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                              final destIndex = _rowLastFocusedIndex['search'] ?? 0;
+                              final maxCount = _getRowItemCount('search');
+                              final targetIndex = destIndex < maxCount ? destIndex : 0;
+                              _getFocusNode('search', targetIndex).requestFocus();
+                              return KeyEventResult.handled;
+                            }
+                            if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                              _searchFocusNode.requestFocus();
+                              return KeyEventResult.handled;
+                            }
                             if (event.logicalKey == LogicalKeyboardKey.select ||
                                 event.logicalKey == LogicalKeyboardKey.enter ||
                                 event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                                 event.logicalKey == LogicalKeyboardKey.space) {
-                              onLoadMore();
+                              _clearSearch();
                               return KeyEventResult.handled;
                             }
                           }
@@ -986,74 +1006,157 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Builder(
                           builder: (context) {
                             final focused = Focus.of(context).hasFocus;
-                            return GestureDetector(
-                              onTap: onLoadMore,
-                              child: Container(
-                                width: 130,
-                                margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                                decoration: TVTheme.focusDecoration(focused),
-                                child: Card(
-                                  color: TVTheme.surface,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        _isLoadingMore ? Icons.hourglass_empty : Icons.arrow_forward,
-                                        color: focused ? Colors.white : TVTheme.accent,
-                                        size: 32,
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        _isLoadingMore ? 'Loading...' : 'Load More',
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                            return TextButton.icon(
+                              style: TextButton.styleFrom(
+                                backgroundColor: focused ? TVTheme.accent : Colors.transparent,
+                                foregroundColor: Colors.white,
                               ),
+                              icon: const Icon(Icons.close, size: 16),
+                              label: const Text('Clear Search', style: TextStyle(fontSize: 12)),
+                              onPressed: _clearSearch,
                             );
                           },
                         ),
-                      );
-                    }
-
-                    final movie = movies[index];
-                    final node = _getFocusNode(rowKey, index);
-                    return MovieCard(
-                      movie: movie,
-                      focusNode: node,
-                      onKey: (node, event) {
-                        return _handleRowKeyNavigation(rowKey, index, itemCount, event);
-                      },
-                      onFocusChanged: (hasFocus) {
-                        if (hasFocus) {
-                          setState(() {
-                            _focusedMovie = movie;
-                            _rowLastFocusedIndex[rowKey] = index;
-                          });
-                          if (node.context != null) {
-                            Scrollable.ensureVisible(
-                              node.context!,
-                              duration: const Duration(milliseconds: 300),
-                              alignment: 0.5,
-                              curve: Curves.easeInOut,
-                            );
-                          }
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 240,
+              child: movies.isEmpty && showClear
+                  ? const Center(
+                      child: Text(
+                        'No search results found.',
+                        style: TextStyle(color: TVTheme.textSecondary),
+                      ),
+                    )
+                  : ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      itemCount: itemCount,
+                      itemBuilder: (context, index) {
+                        // Check if this is the last item and we have a load-more option
+                        if (hasLoadMore && index == movies.length) {
+                          final node = _getFocusNode(rowKey, index);
+                          return Focus(
+                            focusNode: node,
+                            onFocusChange: (focused) {
+                              if (focused) {
+                                setState(() {
+                                  _rowLastFocusedIndex[rowKey] = index;
+                                });
+                                if (node.context != null) {
+                                  Scrollable.ensureVisible(
+                                    node.context!,
+                                    duration: const Duration(milliseconds: 300),
+                                    alignment: 0.5,
+                                    curve: Curves.easeInOut,
+                                  );
+                                  Scrollable.ensureVisible(
+                                    rowContext,
+                                    duration: const Duration(milliseconds: 300),
+                                    alignment: 0.5,
+                                    curve: Curves.easeInOut,
+                                  );
+                                }
+                              }
+                            },
+                            onKey: (node, event) {
+                              final navResult = _handleRowKeyNavigation(rowKey, index, itemCount, event);
+                              if (navResult != KeyEventResult.ignored) {
+                                return navResult;
+                              }
+                              if (event is RawKeyDownEvent) {
+                                if (event.logicalKey == LogicalKeyboardKey.select ||
+                                    event.logicalKey == LogicalKeyboardKey.enter ||
+                                    event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                                    event.logicalKey == LogicalKeyboardKey.space) {
+                                  onLoadMore();
+                                  return KeyEventResult.handled;
+                                }
+                              }
+                              return KeyEventResult.ignored;
+                            },
+                            child: Builder(
+                              builder: (context) {
+                                final focused = Focus.of(context).hasFocus;
+                                return GestureDetector(
+                                  onTap: onLoadMore,
+                                  child: Container(
+                                    width: 130,
+                                    margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                    decoration: TVTheme.focusDecoration(focused),
+                                    child: Card(
+                                      color: TVTheme.surface,
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            _isLoadingMore ? Icons.hourglass_empty : Icons.arrow_forward,
+                                            color: focused ? Colors.white : TVTheme.accent,
+                                            size: 32,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            _isLoadingMore ? 'Loading...' : 'Load More',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
                         }
+
+                        final movie = movies[index];
+                        final node = _getFocusNode(rowKey, index);
+                        return MovieCard(
+                          movie: movie,
+                          focusNode: node,
+                          onKey: (node, event) {
+                            return _handleRowKeyNavigation(rowKey, index, itemCount, event);
+                          },
+                          onFocusChanged: (hasFocus) {
+                            if (hasFocus) {
+                              setState(() {
+                                _focusedMovie = movie;
+                                _rowLastFocusedIndex[rowKey] = index;
+                              });
+                              if (node.context != null) {
+                                Scrollable.ensureVisible(
+                                  node.context!,
+                                  duration: const Duration(milliseconds: 300),
+                                  alignment: 0.5,
+                                  curve: Curves.easeInOut,
+                                );
+                                Scrollable.ensureVisible(
+                                  rowContext,
+                                  duration: const Duration(milliseconds: 300),
+                                  alignment: 0.5,
+                                  curve: Curves.easeInOut,
+                                );
+                              }
+                            }
+                          },
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => DetailsScreen(movie: movie),
+                              ),
+                            ).then((_) => _loadHistory()); // Silently refresh history list on return
+                          },
+                        );
                       },
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => DetailsScreen(movie: movie),
-                          ),
-                        ).then((_) => _loadHistory()); // Silently refresh history list on return
-                      },
-                    );
-                  },
-                ),
-        ),
-      ],
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1062,18 +1165,30 @@ class _HomeScreenState extends State<HomeScreen> {
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    FocusNode? focusNode,
   }) {
     return Focus(
+      focusNode: focusNode,
       onKey: (node, event) {
         if (event is RawKeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
             final visibleRows = _visibleRowKeys;
             if (visibleRows.isNotEmpty) {
               final firstRowKey = visibleRows.first;
-              final destIndex = _rowLastFocusedIndex[firstRowKey] ?? 0;
-              final targetNode = _getFocusNode(firstRowKey, destIndex);
-              targetNode.requestFocus();
-              return KeyEventResult.handled;
+              if (firstRowKey == 'search' && _searchQuery.isNotEmpty) {
+                _clearSearchFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              final maxCount = _getRowItemCount(firstRowKey);
+              if (maxCount > 0) {
+                var destIndex = _rowLastFocusedIndex[firstRowKey] ?? 0;
+                if (destIndex >= maxCount) {
+                  destIndex = maxCount - 1;
+                }
+                final targetNode = _getFocusNode(firstRowKey, destIndex);
+                targetNode.requestFocus();
+                return KeyEventResult.handled;
+              }
             }
           }
           if (event.logicalKey == LogicalKeyboardKey.select ||
@@ -1153,6 +1268,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _buildTopBarAction(
                         icon: Icons.language,
                         label: _isTamilSelected ? 'Tamil Cinema' : 'English Cinema',
+                        focusNode: _languageFocusNode,
                         onTap: () {
                           setState(() {
                             _isTamilSelected = !_isTamilSelected;
@@ -1183,16 +1299,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       _buildTopBarAction(
                         icon: Icons.search,
                         label: 'Search Movies',
+                        focusNode: _searchFocusNode,
                         onTap: _showSearchDialog,
                       ),
                       _buildTopBarAction(
                         icon: Icons.refresh,
                         label: 'Refresh',
+                        focusNode: _refreshFocusNode,
                         onTap: _loadAllData,
                       ),
                       _buildTopBarAction(
                         icon: Icons.settings,
                         label: 'Server Settings',
+                        focusNode: _settingsFocusNode,
                         onTap: _showSettingsDialog,
                       ),
                     ],
@@ -1237,8 +1356,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   children: [
                                     Focus(
                                       autofocus: true,
-                                      onKey: (node, event) {
-                                        if (event is RawKeyDownEvent) {
+                                      onKeyEvent: (node, event) {
+                                        if (event is KeyUpEvent) {
                                           if (event.logicalKey == LogicalKeyboardKey.select ||
                                               event.logicalKey == LogicalKeyboardKey.enter ||
                                               event.logicalKey == LogicalKeyboardKey.numpadEnter ||
@@ -1266,8 +1385,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                     const SizedBox(width: 16),
                                     Focus(
-                                      onKey: (node, event) {
-                                        if (event is RawKeyDownEvent) {
+                                      onKeyEvent: (node, event) {
+                                        if (event is KeyUpEvent) {
                                           if (event.logicalKey == LogicalKeyboardKey.select ||
                                               event.logicalKey == LogicalKeyboardKey.enter ||
                                               event.logicalKey == LogicalKeyboardKey.numpadEnter ||
