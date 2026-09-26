@@ -1,7 +1,7 @@
 import logging
 import time
-from app.core.config import settings
-from app.core.session import get_session
+from backend.config import settings
+from backend.session import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -239,5 +239,24 @@ class TMDBClient:
         except Exception as e:
             logger.error(f"TMDB discover failed for lang '{lang_code}', year '{year}', genre '{genre}': {e}")
             return []
+
+    async def find_movie_by_imdb_id(self, imdb_id: str) -> dict | None:
+        url = f"{self.BASE_URL}/find/{imdb_id}"
+        params = {"external_source": "imdb_id"}
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            data = resp.json()
+            movie_results = data.get("movie_results", [])
+            if movie_results:
+                return movie_results[0]
+            tv_results = data.get("tv_results", [])
+            if tv_results:
+                return tv_results[0]
+            return None
+        except Exception as e:
+            logger.error(f"Failed to find TMDB item for IMDb ID '{imdb_id}': {e}")
+            return None
 
 tmdb_client = TMDBClient()

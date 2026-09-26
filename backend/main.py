@@ -2,8 +2,8 @@ from contextlib import asynccontextmanager
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1.api import api_router
-from app.core.session import init_session, close_session
+from backend.session import init_session, close_session
+from backend.routes import movies, streams
 
 # Setup basic logging
 logging.basicConfig(
@@ -41,7 +41,8 @@ app.add_middleware(
 )
 
 # Mount API routes
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(movies.router, prefix="/api/v1/movies", tags=["movies"])
+app.include_router(streams.router, prefix="/api/v1/streams", tags=["streams"])
 
 @app.get("/")
 def read_root():
