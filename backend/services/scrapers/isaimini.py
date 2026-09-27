@@ -1,95 +1,20 @@
 import re
-import json
 import logging
 import asyncio
-from datetime import datetime
-from pathlib import Path
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs, quote
-from backend.config import DATA_DIR
 from backend.services.scrapers.base import BaseScraper
+from backend.services.scrapers.cache import (
+    get_cached_domain,
+    save_cached_domain,
+    get_cached_movie_path,
+    save_cached_movie_path,
+    log_file_id,
+)
 from backend.session import get_session
 
 logger = logging.getLogger(__name__)
 
-DOMAIN_CACHE_FILE = DATA_DIR / "domain_cache.json"
-PATH_CACHE_FILE = DATA_DIR / "movie_path_cache.json"
-FILE_ID_LOG_FILE = DATA_DIR / "file_id_log.json"
-
-def get_cached_domain(key: str) -> str | None:
-    try:
-        if DOMAIN_CACHE_FILE.exists():
-            with open(DOMAIN_CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get(key)
-    except Exception as e:
-        logger.warning(f"Error reading domain cache: {e}")
-    return None
-
-def save_cached_domain(key: str, domain: str):
-    try:
-        data = {}
-        if DOMAIN_CACHE_FILE.exists():
-            with open(DOMAIN_CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        data[key] = domain
-        with open(DOMAIN_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        logger.info(f"Updated domain cache for '{key}': {domain}")
-    except Exception as e:
-        logger.warning(f"Error writing domain cache: {e}")
-
-def get_cached_movie_path(tmdb_id: int) -> dict | None:
-    try:
-        if PATH_CACHE_FILE.exists():
-            with open(PATH_CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                val = data.get(str(tmdb_id))
-                if isinstance(val, dict):
-                    return val
-                elif isinstance(val, str):
-                    return {"path": val, "page": 1}
-    except Exception as e:
-        logger.warning(f"Error reading movie path cache: {e}")
-    return None
-
-def save_cached_movie_path(tmdb_id: int, movie_path: str, page: int = 1):
-    try:
-        data = {}
-        if PATH_CACHE_FILE.exists():
-            with open(PATH_CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        data[str(tmdb_id)] = {
-            "path": movie_path,
-            "page": page
-        }
-        with open(PATH_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        logger.info(f"Permanently cached movie path for TMDB {tmdb_id}: {movie_path} (Page {page})")
-    except Exception as e:
-        logger.warning(f"Error writing movie path cache: {e}")
-
-def log_file_id(tmdb_id: int, title: str, file_id: str, quality: str):
-    try:
-        logs = []
-        if FILE_ID_LOG_FILE.exists():
-            with open(FILE_ID_LOG_FILE, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        if any(l.get("tmdb_id") == tmdb_id and l.get("file_id") == file_id and l.get("quality") == quality for l in logs):
-            return
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "tmdb_id": tmdb_id,
-            "title": title,
-            "file_id": file_id,
-            "quality": quality
-        }
-        logs.append(entry)
-        with open(FILE_ID_LOG_FILE, "w", encoding="utf-8") as f:
-            json.dump(logs, f, indent=2)
-        logger.info(f"Logged file ID for science: TMDB {tmdb_id} | File ID: {file_id} | Quality: {quality}")
-    except Exception as e:
-        logger.warning(f"Error logging file ID: {e}")
 
 SEED_MIRRORS = [
     "https://moviezda.net/",
