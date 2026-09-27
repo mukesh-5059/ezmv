@@ -178,6 +178,6 @@ def log_file_id(tmdb_id: int, title: str, file_id: str, quality: str):
                 (tmdb_id, title, file_id, quality, datetime.now().isoformat())
             )
             conn.commit()
-        logger.info(f"Logged file ID for science: TMDB {tmdb_id} | File ID: {file_id} | Quality: {quality}")
+        logger.debug(f"Logged file ID: TMDB {tmdb_id} | File ID: {file_id} | Quality: {quality}")
     except Exception as e:
         logger.warning(f"Error logging file ID: {e}")

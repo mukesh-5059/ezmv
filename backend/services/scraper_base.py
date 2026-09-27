@@ -20,6 +20,7 @@ class BaseScraper(ABC):
         tmdb_id: int, 
         imdb_id: str | None = None,
         season: int | None = None, 
-        episode: int | None = None
+        episode: int | None = None,
+        on_progress = None
     ) -> list[dict]:
         pass

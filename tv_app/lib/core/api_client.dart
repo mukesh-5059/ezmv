@@ -119,11 +119,10 @@ class ApiClient {
     return [];
   }
 
-  // Get scraped streaming links for a movie ID with cache control support
   static Future<Map<String, dynamic>> getStreamLinks(int tmdbId, {bool bypassCache = false}) async {
     final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      final response = await http.get(url).timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return data as Map<String, dynamic>;
@@ -132,5 +131,46 @@ class ApiClient {
       print('Get streams failed: $e');
     }
     return {};
+  }
+
+  static Future<Map<String, dynamic>> getStreamLinksWithProgress(
+    int tmdbId, {
+    bool bypassCache = false,
+    void Function(String message)? onProgress,
+  }) async {
+    final client = http.Client();
+    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache&format=sse');
+    try {
+      final request = http.Request('GET', url);
+      request.headers['Accept'] = 'text/event-stream';
+      final response = await client.send(request).timeout(const Duration(seconds: 30));
+
+      Map<String, dynamic> finalResult = {};
+      await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+        if (line.startsWith('data: ')) {
+          final jsonStr = line.substring(6).trim();
+          if (jsonStr.isEmpty) continue;
+          try {
+            final data = json.decode(jsonStr);
+            if (data is Map<String, dynamic>) {
+              final step = data['step'];
+              final msg = data['message'];
+              if (msg != null && onProgress != null) {
+                onProgress(msg.toString());
+              }
+              if (step == 'done' && data['result'] != null) {
+                finalResult = Map<String, dynamic>.from(data['result']);
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      client.close();
+      return finalResult;
+    } catch (e) {
+      client.close();
+      print('Get streams SSE failed: $e');
+      return {};
+    }
   }
 }

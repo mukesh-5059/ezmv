@@ -1,27 +1,27 @@
+import asyncio
 from curl_cffi.requests import AsyncSession
 from curl_cffi import CurlOpt
 
 _session: AsyncSession | None = None
 
 def get_session() -> AsyncSession:
-    """
-    Get the global shared persistent AsyncSession.
-    If not initialized, performs fallback on-demand creation.
-    """
     global _session
-    if _session is None:
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _session is None or _session.loop is None or _session.loop.is_closed() or (current_loop and _session.loop != current_loop):
         curl_opts = {CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query"}
-        _session = AsyncSession(curl_options=curl_opts)
+        _session = AsyncSession(curl_options=curl_opts, loop=current_loop)
     return _session
 
 async def init_session():
-    """
-    Initialize the persistent session. Called during application startup.
-    """
     global _session
-    if _session is None:
+    current_loop = asyncio.get_running_loop()
+    if _session is None or _session.loop != current_loop:
         curl_opts = {CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query"}
-        _session = AsyncSession(curl_options=curl_opts)
+        _session = AsyncSession(curl_options=curl_opts, loop=current_loop)
 
 async def close_session():
     """

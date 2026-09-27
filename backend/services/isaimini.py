@@ -146,10 +146,10 @@ class IsaiminiScraper(BaseScraper):
                 if resp.status_code == 200:
                     final_domain = self._extract_base_domain(str(resp.url))
                     if final_domain != cached_domain:
-                        logger.info(f"[{self.name}] Cached domain '{cached_domain}' redirected to '{final_domain}'. Updating cache.")
+                        logger.info(f"[Domain] Active mirror (newly found): {final_domain}")
                         save_cached_domain("isaimini", final_domain)
                     else:
-                        logger.info(f"[{self.name}] Using active cached domain: {final_domain}")
+                        logger.info(f"[Domain] Active mirror (cached): {final_domain}")
                     return final_domain
             except Exception as e:
                 logger.warning(f"[{self.name}] Cached domain '{cached_domain}' unreachable ({e}). Retrying after short delay...")
@@ -169,7 +169,6 @@ class IsaiminiScraper(BaseScraper):
 
         for seed in SEED_MIRRORS:
             try:
-                logger.info(f"[{self.name}] Pinging seed mirror: {seed}")
                 resp = await client.get(
                     seed,
                     headers=headers,
@@ -178,7 +177,7 @@ class IsaiminiScraper(BaseScraper):
                 )
                 if resp.status_code == 200:
                     active_domain = self._extract_base_domain(str(resp.url))
-                    logger.info(f"[{self.name}] Discovered active domain via redirect: {seed} -> {active_domain}")
+                    logger.info(f"[Domain] Active mirror (newly found): {active_domain}")
                     save_cached_domain("isaimini", active_domain)
                     return active_domain
             except Exception as e:
@@ -260,7 +259,8 @@ class IsaiminiScraper(BaseScraper):
         tmdb_id: int, 
         imdb_id: str | None = None,
         season: int | None = None, 
-        episode: int | None = None
+        episode: int | None = None,
+        on_progress = None
     ) -> list[dict]:
         """
         Scrape Isaimini (Moviesda) for Tamil download/embed streams.
@@ -275,6 +275,8 @@ class IsaiminiScraper(BaseScraper):
             if not base_url:
                 logger.warning(f"[{self.name}] No valid base domain available.")
                 return results
+            if on_progress:
+                on_progress("domain", f"Active mirror: {base_url}")
             target_tokens = self._clean_title_tokens(title)
             if not target_tokens:
                 return results
@@ -289,7 +291,9 @@ class IsaiminiScraper(BaseScraper):
                 cached_path_slug = cached_path_data.get("path")
                 cached_page = cached_path_data.get("page", 1)
                 movie_page_url = f"{base_url.rstrip('/')}{cached_path_slug}"
-                logger.info(f"[{self.name}] Using permanent cached movie path for TMDB {tmdb_id}: {movie_page_url} (Found on Page {cached_page})")
+                logger.info(f"[Path] Movie directory (cached): {movie_page_url}")
+                if on_progress:
+                    on_progress("path", f"Movie directory (cached): {movie_page_url}")
 
             # 2. If not cached, search directory pages 1..N
             if not movie_page_url:
@@ -366,12 +370,18 @@ class IsaiminiScraper(BaseScraper):
 
                 # Save permanent path mapping to cache with page number
                 if movie_page_url:
+                    logger.info(f"[Path] Movie directory (newly found): {movie_page_url}")
+                    if on_progress:
+                        on_progress("path", f"Movie directory (newly found): {movie_page_url}")
                     parsed_path = urlparse(movie_page_url).path
                     save_cached_movie_path(tmdb_id, parsed_path, page=found_page)
 
             if not movie_page_url:
                 logger.info(f"[{self.name}] Movie '{title}' ({year}) not listed in year directory.")
                 return results
+
+            if on_progress:
+                on_progress("extracting", "Extracting stream file links...")
 
             # Fetch root movie page soup for metadata / quality tag extraction
             root_soup = None
@@ -437,7 +447,7 @@ class IsaiminiScraper(BaseScraper):
                                                 "type": "direct",
                                                 "subtitles": []
                                             })
-                                            logger.info(f"[{self.name}] Scraped raw stream link ({quality}): {direct_stream_url}")
+                                            logger.debug(f"[{self.name}] Scraped raw stream link ({quality}): {direct_stream_url}")
                                             break
                                 except Exception as e:
                                     logger.error(f"[{self.name}] Failed to extract direct stream link from player: {e}")

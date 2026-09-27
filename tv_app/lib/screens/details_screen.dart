@@ -19,6 +19,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   List<Map<String, dynamic>> _streams = [];
   bool _isLoadingStreams = true;
   int _cacheExpiresIn = 0;
+  String _statusMessage = 'Connecting to scrapers...';
 
   final FocusNode _firstStreamFocusNode = FocusNode();
   final FocusNode _retryFocusNode = FocusNode();
@@ -40,8 +41,18 @@ class _DetailsScreenState extends State<DetailsScreen> {
     setState(() {
       _isLoadingStreams = true;
       _cacheExpiresIn = 0;
+      _statusMessage = 'Connecting to scrapers...';
     });
-    final response = await ApiClient.getStreamLinks(widget.movie.tmdbId, bypassCache: bypassCache);
+    final response = await ApiClient.getStreamLinksWithProgress(
+      widget.movie.tmdbId,
+      bypassCache: bypassCache,
+      onProgress: (msg) {
+        if (!mounted) return;
+        setState(() {
+          _statusMessage = msg;
+        });
+      },
+    );
     if (!mounted) return;
     setState(() {
       final List streamList = response['streams'] ?? [];
@@ -252,17 +263,19 @@ class _DetailsScreenState extends State<DetailsScreen> {
                         ),
                         const SizedBox(height: 12),
                         if (_isLoadingStreams)
-                          const Padding(
-                            padding: EdgeInsets.all(8.0),
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
                             child: Row(
                               children: [
-                                SizedBox(
+                                const SizedBox(
                                   width: 20,
                                   height: 20,
                                   child: CircularProgressIndicator(color: TVTheme.accent, strokeWidth: 2),
                                 ),
-                                SizedBox(width: 12),
-                                Text('Scraping stream sources...', style: TextStyle(color: TVTheme.textSecondary))
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(_statusMessage, style: const TextStyle(color: TVTheme.textSecondary)),
+                                ),
                               ],
                             ),
                           )
