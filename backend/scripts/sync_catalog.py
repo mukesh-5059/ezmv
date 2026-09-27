@@ -6,10 +6,370 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import asyncio
+import json
+import logging
 import sqlite3
-from backend.session import init_session, close_session
-from backend.services.catalog import catalog_service, DB_PATH
+import time
+from backend.config import DB_PATH
+from backend.session import init_session, close_session, get_session
+from backend.services.catalog import get_connection, init_db
+from backend.services.tmdb import tmdb_client
 
+logger = logging.getLogger(__name__)
+
+GRAPHQL_URL = "https://api.graphql.imdb.com/"
+
+GRAPHQL_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/graphql+json, application/json",
+    "Origin": "https://www.imdb.com",
+    "Referer": "https://www.imdb.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "x-imdb-client-name": "imdb-web-next",
+}
+
+BASE_QUERY = """
+query GetMovies($first: Int!, $after: String, $sort: AdvancedTitleSearchSort!, $constraints: AdvancedTitleSearchConstraints!) {
+  advancedTitleSearch(
+    first: $first
+    after: $after
+    sort: $sort
+    constraints: $constraints
+  ) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    edges {
+      node {
+        title {
+          id
+          titleText { text }
+          releaseYear { year }
+          ratingsSummary {
+            aggregateRating
+            voteCount
+          }
+          meterRanking {
+            currentRank
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+LANES_SYNC_CONFIG = {
+    "trending": {
+        "title": "New & Trending Tamil",
+        "sort_by": "POPULARITY",
+        "sort_order": "ASC",
+        "constraints": {},
+        "deep_crawler": False,
+    },
+    "comedy": {
+        "title": "Popular Tamil Comedy",
+        "sort_by": "POPULARITY",
+        "sort_order": "ASC",
+        "constraints": {"genreConstraint": {"anyGenreIds": ["Comedy"]}},
+        "deep_crawler": False,
+    },
+    "top_rated": {
+        "title": "All-Time Most Watched",
+        "sort_by": "USER_RATING_COUNT",
+        "sort_order": "DESC",
+        "constraints": {},
+        "deep_crawler": True,
+    },
+    "box_office": {
+        "title": "Record-Breaking Box Office",
+        "sort_by": "BOX_OFFICE_GROSS_DOMESTIC",
+        "sort_order": "DESC",
+        "constraints": {},
+        "deep_crawler": True,
+    },
+}
+
+async def fetch_graphql_lane(
+    sort_by: str,
+    sort_order: str,
+    extra_constraints: dict,
+    limit: int = 50,
+    after: str | None = None,
+) -> tuple[list[dict], str | None]:
+    constraints = {
+        "titleTypeConstraint": {"anyTitleTypeIds": ["movie"]},
+        "languageConstraint": {"anyPrimaryLanguages": ["ta"]},
+    }
+    if extra_constraints:
+        constraints.update(extra_constraints)
+
+    payload = {
+        "query": BASE_QUERY,
+        "variables": {
+            "first": limit,
+            "after": after,
+            "sort": {"sortBy": sort_by, "sortOrder": sort_order},
+            "constraints": constraints,
+        },
+    }
+
+    session = get_session()
+    resp = await session.post(
+        GRAPHQL_URL,
+        headers=GRAPHQL_HEADERS,
+        data=json.dumps(payload),
+        impersonate="chrome",
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    search_result = data.get("data", {}).get("advancedTitleSearch", {})
+    edges = search_result.get("edges", [])
+    page_info = search_result.get("pageInfo", {})
+    end_cursor = page_info.get("endCursor")
+
+    movies = []
+    for edge in edges:
+        node = edge.get("node", {}).get("title", {})
+        if not node:
+            continue
+
+        imdb_id = node.get("id")
+        title_text = node.get("titleText", {}).get("text") if node.get("titleText") else None
+        release_year = node.get("releaseYear", {}).get("year") if node.get("releaseYear") else None
+        meter_rank = node.get("meterRanking", {}).get("currentRank") if node.get("meterRanking") else None
+        ratings_summary = node.get("ratingsSummary", {}) or {}
+        rating = ratings_summary.get("aggregateRating")
+        votes = ratings_summary.get("voteCount", 0)
+
+        if imdb_id and title_text:
+            movies.append({
+                "imdb_id": imdb_id,
+                "title": title_text,
+                "year": release_year,
+                "rating": rating,
+                "votes": votes,
+                "meter_rank": meter_rank,
+            })
+    return movies, end_cursor
+
+def merge_lane_data(conn: sqlite3.Connection, lane_id: str, items: list[dict], now: int):
+    conn.execute(
+        "UPDATE lane_entries SET today_rank = NULL WHERE lane_id = ?;",
+        (lane_id,),
+    )
+    for rank_idx, item in enumerate(items, start=1):
+        imdb_id = item["imdb_id"]
+        conn.execute(
+            """
+            INSERT INTO movies (imdb_id, title, year, rating, votes, meter_rank, first_seen, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(imdb_id) DO UPDATE SET
+                title = excluded.title,
+                year = COALESCE(excluded.year, movies.year),
+                rating = excluded.rating,
+                votes = excluded.votes,
+                meter_rank = excluded.meter_rank,
+                last_updated = excluded.last_updated;
+            """,
+            (
+                imdb_id,
+                item["title"],
+                item["year"],
+                item["rating"],
+                item["votes"],
+                item["meter_rank"],
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO lane_entries (lane_id, imdb_id, today_rank, previous_rank, last_seen)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(lane_id, imdb_id) DO UPDATE SET
+                today_rank = excluded.today_rank,
+                previous_rank = excluded.previous_rank,
+                last_seen = excluded.last_seen;
+            """,
+            (lane_id, imdb_id, rank_idx, rank_idx, now),
+        )
+    conn.commit()
+
+def merge_deep_tail(conn: sqlite3.Connection, lane_id: str, items: list[dict], starting_rank: int, now: int):
+    for idx, item in enumerate(items, start=1):
+        imdb_id = item["imdb_id"]
+        assigned_rank = starting_rank + idx
+        conn.execute(
+            """
+            INSERT INTO movies (imdb_id, title, year, rating, votes, meter_rank, first_seen, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(imdb_id) DO UPDATE SET
+                title = excluded.title,
+                year = COALESCE(excluded.year, movies.year),
+                rating = excluded.rating,
+                votes = excluded.votes,
+                meter_rank = excluded.meter_rank,
+                last_updated = excluded.last_updated;
+            """,
+            (
+                imdb_id,
+                item["title"],
+                item["year"],
+                item["rating"],
+                item["votes"],
+                item["meter_rank"],
+                now,
+                now,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO lane_entries (lane_id, imdb_id, today_rank, previous_rank, last_seen)
+            VALUES (?, ?, NULL, ?, ?)
+            ON CONFLICT(lane_id, imdb_id) DO UPDATE SET
+                previous_rank = COALESCE(lane_entries.previous_rank, excluded.previous_rank),
+                last_seen = excluded.last_seen;
+            """,
+            (lane_id, imdb_id, assigned_rank, now),
+        )
+    conn.commit()
+
+async def sync_deep_tail(conn: sqlite3.Connection, lane_id: str, cfg: dict, top50_cursor: str | None, now: int):
+    cursor_row = conn.execute(
+        "SELECT value FROM sync_meta WHERE key = ?;",
+        (f"{lane_id}_tail_cursor",),
+    ).fetchone()
+    rank_row = conn.execute(
+        "SELECT value FROM sync_meta WHERE key = ?;",
+        (f"{lane_id}_tail_rank",),
+    ).fetchone()
+
+    stored_cursor = cursor_row["value"] if cursor_row else None
+    current_tail_rank = int(rank_row["value"]) if rank_row else 50
+    active_cursor = stored_cursor or top50_cursor
+
+    if not active_cursor:
+        return
+
+    print(f"  [Tail] Lane '{lane_id}' starting at rank {current_tail_rank}...")
+    try:
+        items, new_cursor = await fetch_graphql_lane(
+            sort_by=cfg["sort_by"],
+            sort_order=cfg["sort_order"],
+            extra_constraints=cfg["constraints"],
+            limit=50,
+            after=active_cursor,
+        )
+    except Exception as e:
+        print(f"  [Tail Warn] Resetting to top 50 cursor for '{lane_id}': {e}")
+        items, new_cursor = await fetch_graphql_lane(
+            sort_by=cfg["sort_by"],
+            sort_order=cfg["sort_order"],
+            extra_constraints=cfg["constraints"],
+            limit=50,
+            after=top50_cursor,
+        )
+        current_tail_rank = 50
+
+    if items:
+        merge_deep_tail(conn, lane_id, items, current_tail_rank, now)
+        next_rank = current_tail_rank + len(items)
+        if new_cursor:
+            conn.execute(
+                "INSERT INTO sync_meta (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;",
+                (f"{lane_id}_tail_cursor", new_cursor, now),
+            )
+        conn.execute(
+            "INSERT INTO sync_meta (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;",
+            (f"{lane_id}_tail_rank", str(next_rank), now),
+        )
+        conn.commit()
+        print(f"  [Tail OK] Lane '{lane_id}' expanded from {current_tail_rank} to {next_rank}.")
+
+async def sync_all_lanes():
+    print("Starting IMDb catalog synchronization...")
+    now = int(time.time())
+
+    with get_connection() as conn:
+        init_db(conn)
+        for lane_id, cfg in LANES_SYNC_CONFIG.items():
+            try:
+                print(f"[Lane] Fetching Top 50 for '{lane_id}' ({cfg['title']})...")
+                items, end_cursor = await fetch_graphql_lane(
+                    sort_by=cfg["sort_by"],
+                    sort_order=cfg["sort_order"],
+                    extra_constraints=cfg["constraints"],
+                    limit=50,
+                )
+                merge_lane_data(conn, lane_id, items, now)
+                print(f"[Lane OK] '{lane_id}' Top 50 merged ({len(items)} items).")
+
+                if cfg.get("deep_crawler"):
+                    await sync_deep_tail(conn, lane_id, cfg, end_cursor, now)
+            except Exception as e:
+                print(f"[Lane Error] Error syncing '{lane_id}': {e}")
+
+        conn.execute(
+            "INSERT INTO sync_meta (key, value, updated_at) VALUES ('last_sync', 'success', ?) "
+            "ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at;",
+            (now,),
+        )
+        conn.commit()
+    print("IMDb catalog synchronization complete.")
+
+async def enrich_posters():
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT imdb_id FROM movies WHERE poster_path IS NULL LIMIT 250;"
+        ).fetchall()
+
+    if not rows:
+        return
+
+    print(f"Enriching {len(rows)} movies with TMDB posters/backdrops...")
+    sem = asyncio.Semaphore(10)
+
+    async def fetch_one(imdb_id: str):
+        async with sem:
+            try:
+                tmdb_info = await tmdb_client.find_movie_by_imdb_id(imdb_id)
+                if tmdb_info:
+                    return (
+                        imdb_id,
+                        tmdb_info.get("id"),
+                        tmdb_info.get("poster_path") or "",
+                        tmdb_info.get("backdrop_path") or "",
+                        tmdb_info.get("overview") or "",
+                    )
+                else:
+                    return (imdb_id, None, "", "", "")
+            except Exception as e:
+                pass
+            return None
+
+    results = await asyncio.gather(*(fetch_one(r["imdb_id"]) for r in rows))
+    updates = [u for u in results if u is not None]
+
+    if updates:
+        with get_connection() as conn:
+            conn.executemany(
+                """
+                UPDATE movies SET
+                    tmdb_id = COALESCE(?, tmdb_id),
+                    poster_path = ?,
+                    backdrop_path = ?,
+                    overview = ?
+                WHERE imdb_id = ?;
+                """,
+                [(u[1], u[2], u[3], u[4], u[0]) for u in updates],
+            )
+            conn.commit()
+        print(f"Successfully enriched {len(updates)} movies with TMDB posters.")
 
 def print_stats(label: str):
     conn = sqlite3.connect(DB_PATH)
@@ -24,22 +384,20 @@ def print_stats(label: str):
     print("Lane Counts:", {r["lane_id"]: r["c"] for r in lanes})
     print("Crawler Positions:", {r["key"]: r["value"] for r in meta if "cursor" not in r["key"]})
 
-
 async def main():
     await init_session()
     print_stats("State BEFORE Sync")
 
     print("\n[>>] Starting IMDb sync cycle...")
-    await catalog_service.sync_all_lanes()
+    await sync_all_lanes()
     print("[OK] Sync cycle complete!")
 
     print("\n[>>] Fetching posters & overviews from TMDb...")
-    await catalog_service._enrich_posters()
+    await enrich_posters()
     print("[OK] Poster enrichment complete!")
 
     print_stats("State AFTER Sync")
 
-    # Display latest tail entries for top_rated
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     latest_tail = conn.execute("""
@@ -57,7 +415,6 @@ async def main():
         print(f"  #{item['previous_rank']} | {item['title']} ({item['year']}) | Poster: {item['poster_path']}")
 
     await close_session()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -3,8 +3,8 @@ import logging
 import asyncio
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs, quote
-from backend.services.scrapers.base import BaseScraper
-from backend.services.scrapers.cache import (
+from backend.services.scraper_base import BaseScraper
+from backend.services.scraper_cache import (
     get_cached_domain,
     save_cached_domain,
     get_cached_movie_path,

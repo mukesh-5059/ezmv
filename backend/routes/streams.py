@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Request, Header
 from fastapi.responses import StreamingResponse
 from backend.services.tmdb import tmdb_client
-from backend.services.scrapers.manager import scraper_manager
+from backend.services.scrapers import scraper_manager
 from urllib.parse import quote
 import asyncio
 import logging
