@@ -80,7 +80,7 @@ class ScraperManager:
         self.scrapers = [
             IsaiminiScraper()
         ]
-        self._stream_cache = TTLCache(ttl_seconds=10800)
+        self._stream_cache = TTLCache(ttl_seconds=180)
         self._in_flight: dict[str, asyncio.Task] = {}
         self._broadcasters: dict[str, StreamBroadcaster] = {}
 
@@ -169,17 +169,6 @@ class ScraperManager:
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 deduplicated.append(item)
-
-        async def process_stream(stream: dict):
-            raw_url = stream.get("url", "")
-            if "download.php" in raw_url or ".php" in raw_url or "uptomkv" in raw_url:
-                resolved_url = await resolve_cdn_redirect(raw_url)
-                if resolved_url != raw_url:
-                    stream["url"] = resolved_url
-                    stream["type"] = "direct"
-
-        if deduplicated:
-            await asyncio.gather(*(process_stream(s) for s in deduplicated))
 
         deduplicated.sort(key=lambda x: 0 if any(k in x.get("provider", "") for k in ["Original", "PreDVD", "Isaimini"]) else 1)
         self._stream_cache.set(cache_key, deduplicated)

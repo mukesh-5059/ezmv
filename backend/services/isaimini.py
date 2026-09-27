@@ -445,6 +445,10 @@ class IsaiminiScraper(BaseScraper):
                                                 "url": direct_stream_url,
                                                 "quality": quality,
                                                 "type": "direct",
+                                                "headers": {
+                                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                                    "Referer": "https://cdn.uptomkv.ch/"
+                                                },
                                                 "subtitles": []
                                             })
                                             logger.debug(f"[{self.name}] Scraped raw stream link ({quality}): {direct_stream_url}")

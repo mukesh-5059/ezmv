@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
@@ -20,6 +21,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   bool _isLoadingStreams = true;
   int _cacheExpiresIn = 0;
   String _statusMessage = 'Connecting to scrapers...';
+  Timer? _cacheTimer;
 
   final FocusNode _firstStreamFocusNode = FocusNode();
   final FocusNode _retryFocusNode = FocusNode();
@@ -32,12 +34,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   @override
   void dispose() {
+    _cacheTimer?.cancel();
     _firstStreamFocusNode.dispose();
     _retryFocusNode.dispose();
     super.dispose();
   }
 
   Future<void> _fetchStreams({bool bypassCache = false}) async {
+    _cacheTimer?.cancel();
     setState(() {
       _isLoadingStreams = true;
       _cacheExpiresIn = 0;
@@ -61,6 +65,22 @@ class _DetailsScreenState extends State<DetailsScreen> {
       _isLoadingStreams = false;
     });
 
+    if (_cacheExpiresIn > 0) {
+      _cacheTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        if (_cacheExpiresIn > 0) {
+          setState(() {
+            _cacheExpiresIn--;
+          });
+        } else {
+          timer.cancel();
+        }
+      });
+    }
+
     if (_streams.isNotEmpty) {
       Future.delayed(const Duration(milliseconds: 150), () {
         if (_firstStreamFocusNode.canRequestFocus) {
@@ -77,19 +97,31 @@ class _DetailsScreenState extends State<DetailsScreen> {
   }
 
   String _formatCacheTime(int seconds) {
-    if (seconds <= 0) return '';
+    if (seconds <= 0) return 'Cache expired';
     final int hours = seconds ~/ 3600;
     final int minutes = (seconds % 3600) ~/ 60;
+    final int secs = seconds % 60;
     if (hours > 0) {
       return 'Cache expires in: ${hours}h ${minutes}m';
     } else if (minutes > 0) {
-      return 'Cache expires in: ${minutes}m';
+      return 'Cache expires in: ${minutes}m ${secs}s';
     } else {
-      return 'Cache expires in: ${seconds}s';
+      return 'Cache expires in: ${secs}s';
     }
   }
 
   void _startPlayback(Map<String, dynamic> stream) {
+    if (_cacheExpiresIn <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Stream link expired. Refreshing sources...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      _fetchStreams(bypassCache: true);
+      return;
+    }
+
     // 1. Add movie to recently viewed history list asynchronously
     LocalStorage.addToHistory(widget.movie);
     
@@ -221,10 +253,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
                             if (!_isLoadingStreams)
                               Row(
                                 children: [
-                                  if (_cacheExpiresIn > 0) ...[
+                                  if (_streams.isNotEmpty) ...[
                                     Text(
                                       _formatCacheTime(_cacheExpiresIn),
-                                      style: const TextStyle(color: Colors.white54, fontSize: 13),
+                                      style: TextStyle(
+                                        color: _cacheExpiresIn <= 0 ? Colors.redAccent : Colors.white54,
+                                        fontSize: 13,
+                                      ),
                                     ),
                                     const SizedBox(width: 8),
                                   ],

@@ -458,7 +458,7 @@ flowchart TD
 | `TMDBClient._details_cache` | In-Memory `TTLCache` | `movie_id` or `tv_id`<br/>**24 Hours** (86,400s) | Caches full TMDb metadata and external IMDb IDs. |
 | `TMDBClient._popular_cache` | In-Memory `TTLCache` | `f"{language}_{page}"`<br/>**24 Hours** (86,400s) | Caches popular titles list. |
 | `TMDBClient._discover_cache` | In-Memory `TTLCache` | `f"{language}_{year}_{genre}_{page}"`<br/>**24 Hours** (86,400s) | Caches filtered discovery lists. |
-| `ScraperManager._stream_cache` | In-Memory `TTLCache` | `f"{tmdb_id}_{season}_{episode}"`<br/>**3 Hours** (10,800s) | Eliminates scraping latency for recently accessed streams. |
+| `ScraperManager._stream_cache` | In-Memory `TTLCache` | `f"{tmdb_id}_{season}_{episode}"`<br/>**3 Minutes** (180s) | Eliminates scraping latency for recently accessed streams within upstream token lifespan. |
 | `domain_cache.json` | Disk File JSON | Key: `"isaimini"`<br/>**Persistent** | Stores active mirror domain discovered via seed mirror redirects. |
 | `movie_path_cache.json` | Disk File JSON | Key: `str(tmdb_id)` &rarr; `{"path": str, "page": int}`<br/>**Persistent** | Stores exact URL path and directory page for scraped movies. |
 | `file_id_log.json` | Disk File JSON | Array of `{tmdb_id, title, file_id, quality, timestamp}`<br/>**Persistent** | Audits scraped file IDs. |

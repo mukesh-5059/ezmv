@@ -1,12 +1,24 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
-import 'package:video_player/video_player.dart';
-import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/local_storage.dart';
+import '../theme.dart';
+
+String formatDuration(int totalSeconds) {
+  if (totalSeconds <= 0) return '0:00';
+  final int hours = totalSeconds ~/ 3600;
+  final int minutes = (totalSeconds % 3600) ~/ 60;
+  final int seconds = totalSeconds % 60;
+  final String secStr = seconds.toString().padLeft(2, '0');
+  if (hours > 0) {
+    final String minStr = minutes.toString().padLeft(2, '0');
+    return '$hours:$minStr:$secStr';
+  }
+  return '$minutes:$secStr';
+}
 
 class PlayerScreen extends StatefulWidget {
   final String streamUrl;
@@ -15,446 +27,110 @@ class PlayerScreen extends StatefulWidget {
   final int tmdbId;
 
   const PlayerScreen({
-    Key? key,
+    super.key,
     required this.streamUrl,
     this.headers,
     required this.movieTitle,
     required this.tmdbId,
-  }) : super(key: key);
+  });
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  final FocusNode _playerFocusNode = FocusNode();
-  bool _canPop = false;
+  late final Player _player;
+  late final VideoController _videoController;
+  final FocusNode _focusNode = FocusNode();
 
-  // Web Player (Fallback)
-  late final WebViewController _webViewController;
-  bool _isWebLoading = true;
-  
-  // Virtual Cursor for Web Player controls & subtitles selection
-  double _cursorX = 0.5;
-  double _cursorY = 0.5;
-  bool _showCursor = false;
-  Timer? _cursorTimer;
-
-  // Native Player (Isaimini)
-  VideoPlayerController? _videoController;
-  bool _isNativeLoading = true;
   bool _showControls = true;
   Timer? _hideTimer;
   Timer? _progressSaveTimer;
+
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  Duration _buffer = Duration.zero;
+  bool _isPlaying = false;
+  bool _isBuffering = true;
   String? _errorMessage;
-  String? _rawErrorMessage;
   bool _isShowingResumeDialog = false;
 
-  // Check if link is a direct streamable file
-  bool get _isDirectStream {
-    final uri = Uri.parse(widget.streamUrl);
-    final path = uri.path.toLowerCase();
-    final host = uri.host.toLowerCase();
-    return host.contains('uptomkv') || 
-           host.contains('fastbytes') || 
-           path.endsWith('.mp4') || 
-           path.endsWith('.m3u8') || 
-           uri.queryParameters.containsKey('stream');
-  }
+  final List<StreamSubscription> _subscriptions = [];
+
+  Map<String, String> get _requestHeaders => {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://cdn.uptomkv.ch/',
+    ...?widget.headers,
+  };
 
   @override
   void initState() {
     super.initState();
-    
-    // Keep screen awake during video playback
     WakelockPlus.enable();
-
-    // Lock screen to fullscreen landscape
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
 
-    if (_isDirectStream) {
-      _initNativePlayer();
-    } else {
-      _initWebPlayer();
-    }
+    _initPlayer();
   }
 
-  // Initialize Native player
-  void _initNativePlayer() {
-    VideoFormat? formatHint;
-    final lowercaseUrl = widget.streamUrl.toLowerCase();
-    if (lowercaseUrl.contains('.m3u8') || lowercaseUrl.contains('m3u8')) {
-      formatHint = VideoFormat.hls;
-    } else if (lowercaseUrl.contains('.mp4')) {
-      formatHint = VideoFormat.other;
-    }
+  Future<void> _initPlayer() async {
+    _player = Player();
+    _videoController = VideoController(_player);
 
-    final httpHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Referer': 'https://${Uri.parse(widget.streamUrl).host}/',
-      if (widget.headers != null) ...widget.headers!,
-    };
-
-    _videoController = VideoPlayerController.networkUrl(
-      Uri.parse(widget.streamUrl),
-      formatHint: formatHint,
-      httpHeaders: httpHeaders,
-    )
-      ..initialize().then((_) {
-        setState(() {
-          _isNativeLoading = false;
-        });
-        _checkResumeProgress();
-        _resetHideTimer();
-      }).catchError((e) {
-        print("Native player initialization failed: $e");
-        setState(() {
-          _isNativeLoading = false;
-          _rawErrorMessage = e.toString();
-          _errorMessage = _parsePlaybackError(e.toString());
-        });
-      });
-
-    // Listen for progress change to update overlay UI and catch playback errors
-    _videoController!.addListener(() {
-      if (_videoController!.value.hasError) {
-        final errorMsg = _videoController!.value.errorDescription ?? "Playback error";
-        setState(() {
-          _rawErrorMessage = errorMsg;
-          _errorMessage = _parsePlaybackError(errorMsg);
-        });
-      }
-      if (mounted) setState(() {});
-    });
-  }
-
-  // Parse raw PlatformException error strings into user-friendly messages
-  String _parsePlaybackError(String rawError) {
-    final err = rawError.toLowerCase();
-    
-    if (err.contains('403') || err.contains('forbidden')) {
-      return 'Access Forbidden (HTTP 403).\nThe server rejected the playback request, possibly due to expired hotlink tokens or incorrect referrer headers.';
-    }
-    if (err.contains('404') || err.contains('not found')) {
-      return 'Stream Not Found (HTTP 404).\nThis video link is no longer available on the server. Try scraping again or selecting a different source.';
-    }
-    if (err.contains('410') || err.contains('gone')) {
-      return 'Link Expired (HTTP 410).\nThe temporary streaming URL has expired. Please go back and reload the sources.';
-    }
-    if (err.contains('401') || err.contains('unauthorized')) {
-      return 'Unauthorized Access (HTTP 401).\nYou do not have permission to view this video.';
-    }
-    if (err.contains('unknownhostexception') || err.contains('unable to resolve host') || err.contains('dns')) {
-      return 'DNS Resolution Failed.\nThe player could not find the streaming server. Check your internet connection or DNS settings.';
-    }
-    if (err.contains('connection timed out') || err.contains('sockettimeout') || err.contains('timeout')) {
-      return 'Connection Timeout.\nThe connection to the media server timed out. Please check your internet connection and try again.';
-    }
-    if (err.contains('ssl') || err.contains('certif') || err.contains('tls')) {
-      return 'SSL/TLS Handshake Failed.\nCould not establish a secure connection to the media server.';
-    }
-    if (err.contains('decoder') || err.contains('codec') || err.contains('unsupported format') || err.contains('parserexception')) {
-      return 'Video Decoding Failed.\nThe player could not decode this video stream format (unsupported video/audio codecs).';
-    }
-    if (err.contains('source error') || err.contains('exoplaybackexception')) {
-      return 'Media Source Error.\nThe player failed to read the remote media stream. This usually happens when the link has expired or the server is overloaded.';
-    }
-    
-    // Clean up generic Exoplayback exceptions for better readability
-    if (rawError.contains('ExoPlaybackException:')) {
-      final parts = rawError.split('ExoPlaybackException:');
-      if (parts.length > 1) {
-        return 'Playback Error: ${parts[1].trim()}';
-      }
-    }
-    
-    return rawError;
-  }
-
-  // Check and prompt for watch progress
-  Future<void> _checkResumeProgress() async {
-    final savedSeconds = await LocalStorage.getProgress(widget.tmdbId);
-    if (savedSeconds > 10 && mounted) {
-      setState(() {
-        _isShowingResumeDialog = true;
-      });
-      final resume = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            title: const Text('Resume Playback?', style: TextStyle(color: Colors.white)),
-            content: Text(
-              'Would you like to resume watching from ${formatDuration(savedSeconds)}?',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            actions: [
-              Focus(
-                onKey: (node, event) {
-                  if (event is RawKeyDownEvent) {
-                    if (event.logicalKey == LogicalKeyboardKey.select ||
-                        event.logicalKey == LogicalKeyboardKey.enter ||
-                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                        event.logicalKey == LogicalKeyboardKey.space) {
-                      Navigator.pop(context, false);
-                      return KeyEventResult.handled;
-                    }
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Builder(
-                  builder: (context) {
-                    final focused = Focus.of(context).hasFocus;
-                    return TextButton(
-                      style: TextButton.styleFrom(
-                        backgroundColor: focused ? Colors.white24 : Colors.transparent,
-                      ),
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Start Over', style: TextStyle(color: Colors.red)),
-                    );
-                  },
-                ),
-              ),
-              Focus(
-                autofocus: true,
-                onKey: (node, event) {
-                  if (event is RawKeyDownEvent) {
-                    if (event.logicalKey == LogicalKeyboardKey.select ||
-                        event.logicalKey == LogicalKeyboardKey.enter ||
-                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                        event.logicalKey == LogicalKeyboardKey.space) {
-                      Navigator.pop(context, true);
-                      return KeyEventResult.handled;
-                    }
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Builder(
-                  builder: (context) {
-                    final focused = Focus.of(context).hasFocus;
-                    return ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: focused ? Colors.white : Colors.red,
-                        foregroundColor: focused ? Colors.black : Colors.white,
-                      ),
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Resume'),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      );
-
-      setState(() {
-        _isShowingResumeDialog = false;
-      });
-
-      if (resume == true && _videoController != null) {
-        await _videoController!.seekTo(Duration(seconds: savedSeconds));
-      }
-    }
-
-    if (_videoController != null) {
-      _videoController!.play();
-      _startProgressSaving();
-    }
-    _playerFocusNode.requestFocus();
-  }
-
-  // Periodically save progress to LocalStorage
-  void _startProgressSaving() {
-    _progressSaveTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
-      if (_isDirectStream) {
-        if (_videoController != null && _videoController!.value.isPlaying) {
-          final currentSec = _videoController!.value.position.inSeconds;
-          if (currentSec > 5) {
-            LocalStorage.saveProgress(widget.tmdbId, currentSec);
-          }
+    _subscriptions.add(
+      _player.stream.position.listen((p) {
+        if (mounted) setState(() => _position = p);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.duration.listen((d) {
+        if (mounted) setState(() => _duration = d);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.buffer.listen((b) {
+        if (mounted) setState(() => _buffer = b);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.playing.listen((playing) {
+        if (mounted) {
+          setState(() => _isPlaying = playing);
+          if (playing) _startHideTimer();
         }
-      } else {
-        try {
-          final result = await _webViewController.runJavaScriptReturningResult(
-            "var v = document.querySelector('video'); v ? v.currentTime : 0;"
-          );
-          final currentSec = double.tryParse(result.toString())?.toInt();
-          if (currentSec != null && currentSec > 5) {
-            LocalStorage.saveProgress(widget.tmdbId, currentSec);
-          }
-        } catch (_) {}
-      }
-    });
-  }
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.buffering.listen((buffering) {
+        if (mounted) setState(() => _isBuffering = buffering);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.completed.listen((completed) {
+        if (completed && mounted) {
+          LocalStorage.clearProgress(widget.tmdbId);
+          Navigator.of(context).pop();
+        }
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.error.listen((err) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = err.isNotEmpty ? err : 'Playback error encountered';
+            _isBuffering = false;
+          });
+        }
+      }),
+    );
 
-  // Initialize WebView player
-  void _initWebPlayer() {
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (NavigationRequest request) {
-            final url = request.url.toLowerCase();
-            final host = Uri.parse(request.url).host.toLowerCase();
-            
-            // Allow original stream host and known mirror player/delivery domains
-            final isTrustedHost = host.contains(Uri.parse(widget.streamUrl).host.toLowerCase()) ||
-                                  host.contains('vidsrc') ||
-                                  host.contains('cloudnestra') ||
-                                  host.contains('cloudorchestranova') ||
-                                  host.contains('vsembed') ||
-                                  host.contains('putgate');
-                                  
-            if (request.isMainFrame && !isTrustedHost) {
-              print("Adblock: Blocked main frame redirect to $url");
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
-          },
-          onProgress: (int progress) {
-            if (progress > 80) {
-              setState(() => _isWebLoading = false);
-            }
-          },
-          onPageStarted: (String url) {
-            setState(() => _isWebLoading = true);
-          },
-          onPageFinished: (String url) {
-            setState(() => _isWebLoading = false);
-            // Inject the Embed Player Optimizer script
-            _webViewController.runJavaScript('''
-              (function() {
-                // Block window.open popups
-                window.open = function() { return null; };
-                
-                // Continuous viewport optimization and auto-focus loop
-                setInterval(function() {
-                  window.open = function() { return null; };
-                  
-                  var player = null;
-                  var iframes = document.querySelectorAll('iframe');
-                  for (var i = 0; i < iframes.length; i++) {
-                    var iframe = iframes[i];
-                    if (iframe.offsetWidth > 200 || iframe.offsetHeight > 200) {
-                      player = iframe;
-                      break;
-                    }
-                  }
-                  if (!player) {
-                    player = document.querySelector('video');
-                  }
-                  
-                  if (player) {
-                    try {
-                      if (!player.hasAttribute('tabindex')) {
-                        player.setAttribute('tabindex', '0');
-                      }
-                      player.focus();
-                    } catch(e) {}
-                    
-                    // Hide all sibling DOM elements up to the body element
-                    var current = player;
-                    while (current && current !== document.body) {
-                      var parent = current.parentElement;
-                      if (parent) {
-                        for (var i = 0; i < parent.children.length; i++) {
-                          var sibling = parent.children[i];
-                          if (sibling !== current && sibling.tagName !== 'SCRIPT' && sibling.tagName !== 'STYLE') {
-                            sibling.style.setProperty('display', 'none', 'important');
-                            sibling.style.setProperty('visibility', 'hidden', 'important');
-                            sibling.style.setProperty('opacity', '0', 'important');
-                            sibling.style.setProperty('pointer-events', 'none', 'important');
-                          }
-                        }
-                      }
-                      current = parent;
-                    }
-                    
-                    // Stretch player to occupy 100% of WebView viewport
-                    player.style.setProperty('position', 'fixed', 'important');
-                    player.style.setProperty('top', '0', 'important');
-                    player.style.setProperty('left', '0', 'important');
-                    player.style.setProperty('width', '100vw', 'important');
-                    player.style.setProperty('height', '100vh', 'important');
-                    player.style.setProperty('z-index', '999999', 'important');
-                    player.style.setProperty('background', 'black', 'important');
-                    
-                    // Disable scrollbars and enforce pure black backdrop
-                    document.documentElement.style.setProperty('background', 'black', 'important');
-                    document.body.style.setProperty('background', 'black', 'important');
-                    document.documentElement.style.setProperty('overflow', 'hidden', 'important');
-                    document.body.style.setProperty('overflow', 'hidden', 'important');
-                  }
-                }, 500);
-              })();
-            ''');
-            
-            // Wait slightly for video/iframe elements to load, then check progress and focus player
-            Future.delayed(const Duration(milliseconds: 2500), () {
-              _checkWebResumeProgress();
-              // Force tabindex and focus on the player element/iframe
-              _webViewController.runJavaScript('''
-                var iframe = document.querySelector('iframe');
-                if (iframe) {
-                  iframe.setAttribute('tabindex', '0');
-                  iframe.focus();
-                } else {
-                  var video = document.querySelector('video');
-                  if (video) {
-                    video.setAttribute('tabindex', '0');
-                    video.focus();
-                  }
-                }
-              ''');
-              // Try to autoplay bypassing policy blocks
-              _webViewController.runJavaScript('''
-                setInterval(function() {
-                  var v = document.querySelector('video');
-                  if (v && v.paused) {
-                    v.play().catch(function(e) {
-                      var playBtn = document.querySelector('.play-button') || 
-                                    document.querySelector('.vjs-big-play-button') || 
-                                    document.querySelector('[class*="play"]');
-                      if (playBtn) playBtn.click();
-                    });
-                  }
-                }, 1000);
-              ''');
-            });
-          },
-          onWebResourceError: (WebResourceError error) {
-            print("WebView player error: ${error.description}");
-          },
-        ),
-      )
-      ..setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-      ..loadRequest(
-        Uri.parse(widget.streamUrl),
-        headers: widget.headers ?? {
-          'Referer': 'https://${Uri.parse(widget.streamUrl).host}/',
-        },
-      );
-
-    // Disable media playback user gesture requirement on Android
-    final platform = _webViewController.platform;
-    if (platform is AndroidWebViewController) {
-      platform.setMediaPlaybackRequiresUserGesture(false);
-    }
-  }
-
-  Future<void> _checkWebResumeProgress() async {
+    Duration? startPosition;
     final savedSeconds = await LocalStorage.getProgress(widget.tmdbId);
     if (savedSeconds > 10 && mounted) {
-      setState(() {
-        _isShowingResumeDialog = true;
-      });
+      setState(() => _isShowingResumeDialog = true);
       final resume = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -467,578 +143,242 @@ class _PlayerScreenState extends State<PlayerScreen> {
               style: const TextStyle(color: Colors.white70),
             ),
             actions: [
-              Focus(
-                onKey: (node, event) {
-                  if (event is RawKeyDownEvent) {
-                    if (event.logicalKey == LogicalKeyboardKey.select ||
-                        event.logicalKey == LogicalKeyboardKey.enter ||
-                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                        event.logicalKey == LogicalKeyboardKey.space) {
-                      Navigator.pop(context, false);
-                      return KeyEventResult.handled;
-                    }
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Builder(
-                  builder: (context) {
-                    final focused = Focus.of(context).hasFocus;
-                    return TextButton(
-                      style: TextButton.styleFrom(
-                        backgroundColor: focused ? Colors.white24 : Colors.transparent,
-                      ),
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Start Over', style: TextStyle(color: Colors.red)),
-                    );
-                  },
-                ),
+              _FocusableDialogButton(
+                label: 'Start Over',
+                color: Colors.redAccent,
+                onPressed: () => Navigator.pop(context, false),
               ),
-              Focus(
+              const SizedBox(width: 8),
+              _FocusableDialogButton(
+                label: 'Resume',
+                color: TVTheme.accent,
                 autofocus: true,
-                onKey: (node, event) {
-                  if (event is RawKeyDownEvent) {
-                    if (event.logicalKey == LogicalKeyboardKey.select ||
-                        event.logicalKey == LogicalKeyboardKey.enter ||
-                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                        event.logicalKey == LogicalKeyboardKey.space) {
-                      Navigator.pop(context, true);
-                      return KeyEventResult.handled;
-                    }
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Builder(
-                  builder: (context) {
-                    final focused = Focus.of(context).hasFocus;
-                    return ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: focused ? Colors.white : Colors.red,
-                        foregroundColor: focused ? Colors.black : Colors.white,
-                      ),
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Resume'),
-                    );
-                  },
-                ),
+                onPressed: () => Navigator.pop(context, true),
               ),
             ],
           );
         },
       );
-      setState(() {
-        _isShowingResumeDialog = false;
-      });
-
-      if (resume == true && mounted) {
-        _webViewController.runJavaScript(
-          "var v = document.querySelector('video'); if (v) v.currentTime = $savedSeconds;"
-        );
+      if (mounted) setState(() => _isShowingResumeDialog = false);
+      if (resume == true) {
+        startPosition = Duration(seconds: savedSeconds);
+      } else {
+        await LocalStorage.clearProgress(widget.tmdbId);
       }
     }
-    _startProgressSaving();
-    _playerFocusNode.requestFocus();
-  }
 
-  void _resetCursorTimer() {
-    _cursorTimer?.cancel();
-    _cursorTimer = Timer(const Duration(seconds: 6), () {
-      if (mounted && _showCursor) {
+    try {
+      await _player.open(
+        Media(
+          widget.streamUrl,
+          httpHeaders: _requestHeaders,
+          start: startPosition,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
         setState(() {
-          _showCursor = false;
+          _errorMessage = e.toString();
+          _isBuffering = false;
         });
       }
+    }
+
+    _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
     });
+
+    _startHideTimer();
   }
 
-  void _triggerWebClick() {
-    final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    
-    final size = renderBox.size;
-    final localPosition = Offset(_cursorX * size.width, _cursorY * size.height);
-    final globalPosition = renderBox.localToGlobal(localPosition);
-    
-    // Simulate physical touch down event at current cursor position
-    final pointerDown = PointerDownEvent(
-      pointer: 1,
-      position: globalPosition,
-      kind: PointerDeviceKind.touch,
-    );
-    
-    // Simulate physical touch up event at current cursor position
-    final pointerUp = PointerUpEvent(
-      pointer: 1,
-      position: globalPosition,
-      kind: PointerDeviceKind.touch,
-    );
-    
-    // Dispatch the down gesture
-    GestureBinding.instance.handlePointerEvent(pointerDown);
-    
-    // Dispatch the up gesture after a tiny delay (50ms) to simulate a natural tap
-    Future.delayed(const Duration(milliseconds: 50), () {
-      GestureBinding.instance.handlePointerEvent(pointerUp);
-    });
+  void _saveProgress() {
+    if (_duration.inSeconds > 30) {
+      if (_position.inSeconds >= (_duration.inSeconds * 0.95)) {
+        LocalStorage.clearProgress(widget.tmdbId);
+      } else if (_position.inSeconds > 5) {
+        LocalStorage.saveProgress(widget.tmdbId, _position.inSeconds);
+      }
+    }
   }
 
-  // Overlay management
-  void _resetHideTimer() {
+  void _startHideTimer() {
     _hideTimer?.cancel();
-    setState(() => _showControls = true);
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) {
+      if (mounted && _isPlaying && !_isShowingResumeDialog) {
         setState(() => _showControls = false);
       }
     });
   }
 
-  void _seekRelative(int seconds) {
-    if (_videoController == null) return;
-    _resetHideTimer();
-    final newPosition = _videoController!.value.position + Duration(seconds: seconds);
-    final duration = _videoController!.value.duration;
-    if (newPosition < Duration.zero) {
-      _videoController!.seekTo(Duration.zero);
-    } else if (newPosition > duration) {
-      _videoController!.seekTo(duration);
-    } else {
-      _videoController!.seekTo(newPosition);
-    }
+  void _showOverlayControls() {
+    setState(() => _showControls = true);
+    _startHideTimer();
   }
 
-  void _togglePlay() {
-    if (_videoController == null) return;
-    _resetHideTimer();
-    setState(() {
-      if (_videoController!.value.isPlaying) {
-        _videoController!.pause();
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || _isShowingResumeDialog) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.mediaPlayPause) {
+      if (!_showControls) {
+        _showOverlayControls();
       } else {
-        _videoController!.play();
+        _player.playOrPause();
+        _startHideTimer();
       }
-    });
-  }
-
-  // Key Event Handling (TV Remote control logic)
-  KeyEventResult _handleKeyEvent(RawKeyEvent event) {
-    _resetHideTimer();
-    if (event is RawKeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        _seekRelative(-10);
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        _seekRelative(10);
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.select ||
-                 event.logicalKey == LogicalKeyboardKey.enter ||
-                 event.logicalKey == LogicalKeyboardKey.space) {
-        _togglePlay();
-        return KeyEventResult.handled;
-      }
+      return KeyEventResult.handled;
     }
+
+    if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
+      _showOverlayControls();
+      final target = _position - const Duration(seconds: 10);
+      _player.seek(target < Duration.zero ? Duration.zero : target);
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
+      _showOverlayControls();
+      final target = _position + const Duration(seconds: 10);
+      _player.seek(target > _duration ? _duration : target);
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
+      _showOverlayControls();
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+      if (_showControls) {
+        setState(() => _showControls = false);
+      } else {
+        _exitPlayer();
+      }
+      return KeyEventResult.handled;
+    }
+
     return KeyEventResult.ignored;
   }
 
-  // Web Remote event mapping: Forward keys directly into browser context
-  KeyEventResult _handleWebKeyEvent(RawKeyEvent event) {
-    if (event is! RawKeyDownEvent) return KeyEventResult.ignored;
-
-    _resetCursorTimer();
-
-    // If cursor is showing, D-pad controls the cursor
-    if (_showCursor) {
-      const step = 0.035; // Cursor move step (fine speed)
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        setState(() {
-          _cursorX = (_cursorX - step).clamp(0.01, 0.99);
-        });
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        setState(() {
-          _cursorX = (_cursorX + step).clamp(0.01, 0.99);
-        });
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        setState(() {
-          _cursorY = (_cursorY - step).clamp(0.01, 0.99);
-        });
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        setState(() {
-          _cursorY = (_cursorY + step).clamp(0.01, 0.99);
-        });
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.select ||
-                 event.logicalKey == LogicalKeyboardKey.enter) {
-        // Trigger click at cursor position
-        _triggerWebClick();
-        return KeyEventResult.handled;
-      }
-    } else {
-      // Normal remote mode
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
-          event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        // Pressing Up/Down automatically activates virtual mouse mode!
-        setState(() {
-          _showCursor = true;
-        });
-        return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-                 event.logicalKey == LogicalKeyboardKey.arrowRight ||
-                 event.logicalKey == LogicalKeyboardKey.select ||
-                 event.logicalKey == LogicalKeyboardKey.enter ||
-                 event.logicalKey == LogicalKeyboardKey.space) {
-        // Enforce focus on the player iframe
-        _webViewController.runJavaScript(
-          "var iframe = document.querySelector('iframe'); if (iframe) { if (!iframe.hasAttribute('tabindex')) iframe.setAttribute('tabindex', '0'); iframe.focus(); }"
-        );
-        // Let the system pass D-pad key events natively to the focused WebView iframe
-        return KeyEventResult.ignored;
-      }
-    }
-    return KeyEventResult.ignored;
-  }
-
-  String formatDuration(int totalSeconds) {
-    final int hours = totalSeconds ~/ 3600;
-    final int minutes = (totalSeconds % 3600) ~/ 60;
-    final int seconds = totalSeconds % 60;
-    
-    if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    } else {
-      return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-    }
-  }
-
-  Future<void> _saveProgressBeforePop() async {
-    _progressSaveTimer?.cancel();
-    if (!_isDirectStream) {
-      try {
-        final result = await _webViewController.runJavaScriptReturningResult(
-          "var v = document.querySelector('video'); v ? v.currentTime : 0;"
-        );
-        final currentSec = double.tryParse(result.toString())?.toInt();
-        if (currentSec != null && currentSec > 5) {
-          await LocalStorage.saveProgress(widget.tmdbId, currentSec);
-        }
-      } catch (e) {
-        print("Failed to save web progress on pop: $e");
-      }
-    } else {
-      if (_videoController != null) {
-        final currentSec = _videoController!.value.position.inSeconds;
-        final durationSec = _videoController!.value.duration.inSeconds;
-        if (currentSec > 5) {
-          if (durationSec > 0 && currentSec / durationSec > 0.95) {
-            await LocalStorage.clearProgress(widget.tmdbId);
-          } else {
-            await LocalStorage.saveProgress(widget.tmdbId, currentSec);
-          }
-        }
-      }
-    }
+  void _exitPlayer() {
+    _saveProgress();
+    Navigator.of(context).pop();
   }
 
   @override
   void dispose() {
-    _progressSaveTimer?.cancel();
     _hideTimer?.cancel();
-    _cursorTimer?.cancel();
-
-    // Allow screen to go to sleep/screensaver again
-    WakelockPlus.disable();
-
-    if (_isDirectStream) {
-      _videoController?.dispose();
+    _progressSaveTimer?.cancel();
+    for (final sub in _subscriptions) {
+      sub.cancel();
     }
-    _playerFocusNode.dispose();
-
-    // Restore standard UI options & unlock orientation on exit
+    _saveProgress();
+    _player.dispose();
+    _focusNode.dispose();
+    WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setPreferredOrientations([]);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    Widget child;
-    if (_errorMessage != null) {
-      child = Scaffold(
-        backgroundColor: Colors.black,
-        body: _buildErrorWidget(),
-      );
-    } else if (_isDirectStream) {
-      child = Scaffold(
-        backgroundColor: Colors.black,
-        body: _buildNativePlayer(),
-      );
-    } else {
-      child = Scaffold(
-        backgroundColor: Colors.black,
-        body: _buildWebPlayer(),
-      );
-    }
-
     return PopScope(
-      canPop: _canPop,
-      onPopInvoked: (didPop) async {
-        if (didPop) return;
-        await _saveProgressBeforePop();
-        if (context.mounted) {
-          setState(() {
-            _canPop = true;
-          });
-          Navigator.of(context).pop();
+      canPop: !_showControls,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          _saveProgress();
+        } else if (_showControls) {
+          setState(() => _showControls = false);
         }
       },
-      child: child,
-    );
-  }
-
-  // Native player UI Layout
-  Widget _buildNativePlayer() {
-    if (_isNativeLoading || _videoController == null || !_videoController!.value.isInitialized) {
-      return _buildLoadingWidget();
-    }
-
-    final duration = _videoController!.value.duration;
-    final position = _videoController!.value.position;
-
-    return Focus(
-      focusNode: _playerFocusNode,
-      autofocus: !_isShowingResumeDialog,
-      canRequestFocus: !_isShowingResumeDialog,
-      onKey: (node, event) {
-        if (_isShowingResumeDialog) return KeyEventResult.ignored;
-        return _handleKeyEvent(event);
-      },
-      child: GestureDetector(
-        onTap: _resetHideTimer,
-        child: Stack(
-          children: [
-            // Video renderer
-            Center(
-              child: AspectRatio(
-                aspectRatio: _videoController!.value.aspectRatio,
-                child: VideoPlayer(_videoController!),
+      child: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: _handleKeyEvent,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              Video(
+                controller: _videoController,
+                controls: NoVideoControls,
               ),
-            ),
-
-            // Buffering Overlay
-            if (_videoController!.value.isBuffering)
-              Positioned.fill(
-                child: Container(
-                  color: Colors.black45,
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(color: Colors.red, strokeWidth: 3),
-                        SizedBox(height: 12),
-                        Text(
-                          'Buffering...',
-                          style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
+              if (_isBuffering && _errorMessage == null)
+                const Center(
+                  child: CircularProgressIndicator(
+                    color: TVTheme.accent,
+                    strokeWidth: 3,
                   ),
                 ),
-              ),
-
-            // Controls Overlay
-            AnimatedOpacity(
-              opacity: _showControls ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 250),
-              child: IgnorePointer(
-                ignoring: !_showControls,
-                child: Container(
-                  color: Colors.black.withOpacity(0.6),
-                  child: Stack(
-                    children: [
-                      // Header panel
-                      Positioned(
-                        top: 24,
-                        left: 24,
-                        right: 24,
-                        child: Row(
-                          children: [
-                            Text(
-                              widget.movieTitle,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Center Play/Pause indicator
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.black38,
-                            borderRadius: BorderRadius.circular(40),
-                          ),
-                          child: Icon(
-                            _videoController!.value.isPlaying ? Icons.play_arrow : Icons.pause,
-                            color: Colors.white,
-                            size: 56,
-                          ),
-                        ),
-                      ),
-
-                      // Bottom Progress timeline
-                      Positioned(
-                        bottom: 24,
-                        left: 24,
-                        right: 24,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            VideoProgressIndicator(
-                              _videoController!,
-                              allowScrubbing: true,
-                              colors: const VideoProgressColors(
-                                playedColor: Colors.red,
-                                bufferedColor: Colors.white24,
-                                backgroundColor: Colors.white12,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  formatDuration(position.inSeconds),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                                ),
-                                Text(
-                                  formatDuration(duration.inSeconds),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
+              if (_errorMessage != null)
+                _buildErrorOverlay(),
+              if (_showControls && _errorMessage == null)
+                _buildControlsOverlay(),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildWebPlayer() {
-    final size = MediaQuery.of(context).size;
-    return Focus(
-      focusNode: _playerFocusNode,
-      autofocus: !_isShowingResumeDialog,
-      canRequestFocus: !_isShowingResumeDialog,
-      onKey: (node, event) => _handleWebKeyEvent(event),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: WebViewWidget(controller: _webViewController),
-          ),
-          if (_isWebLoading)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black,
-                child: const Center(
-                  child: CircularProgressIndicator(color: Colors.red),
-                ),
-              ),
-            ),
-          if (_showCursor)
-            Positioned(
-              left: _cursorX * size.width - 8,
-              top: _cursorY * size.height - 8,
-              child: Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.85),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black54, blurRadius: 4, spreadRadius: 1),
-                  ],
-                ),
-              ),
-            ),
-          // System back remote key handles exit
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorWidget() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
+  Widget _buildErrorOverlay() {
+    return Container(
+      color: Colors.black87,
+      padding: const EdgeInsets.all(32),
+      child: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 64),
+            const Icon(Icons.error_outline, color: TVTheme.accent, size: 48),
             const SizedBox(height: 16),
             const Text(
               'Playback Error',
               style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
-              _errorMessage ?? 'An unknown error occurred.',
+              _errorMessage ?? 'Failed to play stream',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 15),
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
             ),
-            if (_rawErrorMessage != null) ...[
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                child: Text(
-                  'Details: $_rawErrorMessage',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white38, fontSize: 11, fontStyle: FontStyle.italic),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _FocusableDialogButton(
+                  label: 'Retry',
+                  color: TVTheme.accent,
+                  autofocus: true,
+                  onPressed: () {
+                    setState(() {
+                      _errorMessage = null;
+                      _isBuffering = true;
+                    });
+                    _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
+                  },
                 ),
-              ),
-            ],
-            const SizedBox(height: 32),
-            Focus(
-              autofocus: true,
-              onKey: (node, event) {
-                if (event is RawKeyDownEvent) {
-                  if (event.logicalKey == LogicalKeyboardKey.select ||
-                      event.logicalKey == LogicalKeyboardKey.enter ||
-                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                      event.logicalKey == LogicalKeyboardKey.space) {
-                    Navigator.pop(context);
-                    return KeyEventResult.handled;
-                  }
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Builder(
-                builder: (context) {
-                  final focused = Focus.of(context).hasFocus;
-                  return ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: focused ? Colors.white : Colors.red,
-                      foregroundColor: focused ? Colors.black : Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    ),
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('Go Back'),
-                  );
-                },
-              ),
+                const SizedBox(width: 16),
+                _FocusableDialogButton(
+                  label: 'Exit',
+                  color: Colors.white24,
+                  onPressed: _exitPlayer,
+                ),
+              ],
             ),
           ],
         ),
@@ -1046,31 +386,215 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildLoadingWidget() {
-    return Center(
+  Widget _buildControlsOverlay() {
+    final double progress = _duration.inMilliseconds > 0
+        ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    final double buffer = _duration.inMilliseconds > 0
+        ? (_buffer.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black87,
+            Colors.transparent,
+            Colors.transparent,
+            Colors.black87,
+          ],
+          stops: [0.0, 0.25, 0.75, 1.0],
+        ),
+      ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const CircularProgressIndicator(color: Colors.red, strokeWidth: 4),
-          const SizedBox(height: 24),
-          Text(
-            widget.movieTitle,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: _exitPlayer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.movieTitle,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: TVTheme.accent.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: TVTheme.accent),
+                  ),
+                  child: const Text(
+                    'Direct HD',
+                    style: TextStyle(
+                      color: TVTheme.accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Connecting to server & loading stream...',
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 14,
+          Center(
+            child: IconButton(
+              iconSize: 64,
+              icon: Icon(
+                _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                color: Colors.white.withValues(alpha: 0.9),
+              ),
+              onPressed: () {
+                _player.playOrPause();
+                _startHideTimer();
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            child: Column(
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    return Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        Container(
+                          height: 4,
+                          width: width,
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        Container(
+                          height: 4,
+                          width: width * buffer,
+                          decoration: BoxDecoration(
+                            color: Colors.white38,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                        Container(
+                          height: 4,
+                          width: width * progress,
+                          decoration: BoxDecoration(
+                            color: TVTheme.accent,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      formatDuration(_position.inSeconds),
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                    const Text(
+                      '◄◄ 10s   [OK: Play/Pause]   10s ►►',
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                    Text(
+                      formatDuration(_duration.inSeconds),
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FocusableDialogButton extends StatefulWidget {
+  final String label;
+  final Color color;
+  final bool autofocus;
+  final VoidCallback onPressed;
+
+  const _FocusableDialogButton({
+    required this.label,
+    required this.color,
+    this.autofocus = false,
+    required this.onPressed,
+  });
+
+  @override
+  State<_FocusableDialogButton> createState() => _FocusableDialogButtonState();
+}
+
+class _FocusableDialogButtonState extends State<_FocusableDialogButton> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: widget.autofocus,
+      onFocusChange: (focused) => setState(() => _isFocused = focused),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+             event.logicalKey == LogicalKeyboardKey.enter ||
+             event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onPressed();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: _isFocused ? widget.color : Colors.white10,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _isFocused ? Colors.white : Colors.transparent,
+              width: 2,
+            ),
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: widget.color.withValues(alpha: 0.4),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    )
+                  ]
+                : [],
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: _isFocused ? Colors.white : Colors.white70,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+        ),
       ),
     );
   }
