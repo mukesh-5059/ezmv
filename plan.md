@@ -93,3 +93,13 @@ Five focused, high-engagement lanes tailored for couch viewers:
   * Video stream reverse proxy routes (`/streams/proxy/*`).
   * Manual server IP configuration dialogs.
   * WebView virtual cursor & embed injection engine.
+
+
+  "https://vidsrc2.ru",
+  "https://vidsrc.ir",
+  "https://vidsrcme.ru",
+  "https://vidsrcme.su",
+  "https://vidsrc-me.ru",
+  "https://vidsrc.me",
+  "https://vidsrc.io",
+  "https://vidsrc.tw"

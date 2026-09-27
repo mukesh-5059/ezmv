@@ -43,25 +43,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoController _videoController;
   final FocusNode _focusNode = FocusNode();
 
-  bool _showControls = true;
-  Timer? _hideTimer;
   Timer? _progressSaveTimer;
-
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
-  Duration _buffer = Duration.zero;
-  bool _isPlaying = false;
-  bool _isBuffering = true;
+  final List<StreamSubscription> _subscriptions = [];
   String? _errorMessage;
   bool _isShowingResumeDialog = false;
 
-  final List<StreamSubscription> _subscriptions = [];
-
-  Map<String, String> get _requestHeaders => {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://cdn.uptomkv.ch/',
-    ...?widget.headers,
-  };
+  Map<String, String> get _requestHeaders {
+    if (widget.headers != null) {
+      return {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ...widget.headers!,
+      };
+    }
+    return {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
+  }
 
   @override
   void initState() {
@@ -81,34 +78,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _videoController = VideoController(_player);
 
     _subscriptions.add(
-      _player.stream.position.listen((p) {
-        if (mounted) setState(() => _position = p);
-      }),
-    );
-    _subscriptions.add(
-      _player.stream.duration.listen((d) {
-        if (mounted) setState(() => _duration = d);
-      }),
-    );
-    _subscriptions.add(
-      _player.stream.buffer.listen((b) {
-        if (mounted) setState(() => _buffer = b);
-      }),
-    );
-    _subscriptions.add(
-      _player.stream.playing.listen((playing) {
-        if (mounted) {
-          setState(() => _isPlaying = playing);
-          if (playing) _startHideTimer();
-        }
-      }),
-    );
-    _subscriptions.add(
-      _player.stream.buffering.listen((buffering) {
-        if (mounted) setState(() => _isBuffering = buffering);
-      }),
-    );
-    _subscriptions.add(
       _player.stream.completed.listen((completed) {
         if (completed && mounted) {
           LocalStorage.clearProgress(widget.tmdbId);
@@ -116,12 +85,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }),
     );
+
     _subscriptions.add(
       _player.stream.error.listen((err) {
         if (mounted) {
           setState(() {
             _errorMessage = err.isNotEmpty ? err : 'Playback error encountered';
-            _isBuffering = false;
           });
         }
       }),
@@ -172,14 +141,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
         Media(
           widget.streamUrl,
           httpHeaders: _requestHeaders,
-          start: startPosition,
         ),
       );
+
+      if (startPosition != null) {
+        _player.stream.buffer.firstWhere((b) => b > Duration.zero).then((_) async {
+          await Future.delayed(const Duration(milliseconds: 300));
+          if (mounted) {
+            await _player.seek(startPosition!);
+          }
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
           _errorMessage = e.toString();
-          _isBuffering = false;
         });
       }
     }
@@ -189,36 +165,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
-
-    _startHideTimer();
   }
 
   void _saveProgress() {
-    if (_duration.inSeconds > 30) {
-      if (_position.inSeconds >= (_duration.inSeconds * 0.95)) {
+    final pos = _player.state.position;
+    final dur = _player.state.duration;
+    if (dur.inSeconds > 30) {
+      if (pos.inSeconds >= (dur.inSeconds * 0.95)) {
         LocalStorage.clearProgress(widget.tmdbId);
-      } else if (_position.inSeconds > 5) {
-        LocalStorage.saveProgress(widget.tmdbId, _position.inSeconds);
+      } else if (pos.inSeconds > 5) {
+        LocalStorage.saveProgress(widget.tmdbId, pos.inSeconds);
       }
     }
   }
 
-  void _startHideTimer() {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _isPlaying && !_isShowingResumeDialog) {
-        setState(() => _showControls = false);
-      }
-    });
-  }
-
-  void _showOverlayControls() {
-    setState(() => _showControls = true);
-    _startHideTimer();
-  }
-
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || _isShowingResumeDialog) {
+    if (_isShowingResumeDialog) {
+      return KeyEventResult.ignored;
+    }
+
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
 
@@ -229,40 +195,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
         key == LogicalKeyboardKey.numpadEnter ||
         key == LogicalKeyboardKey.space ||
         key == LogicalKeyboardKey.mediaPlayPause) {
-      if (!_showControls) {
-        _showOverlayControls();
-      } else {
-        _player.playOrPause();
-        _startHideTimer();
-      }
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
+      _player.playOrPause();
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
-      _showOverlayControls();
-      final target = _position - const Duration(seconds: 10);
+      final target = _player.state.position - const Duration(seconds: 10);
       _player.seek(target < Duration.zero ? Duration.zero : target);
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
-      _showOverlayControls();
-      final target = _position + const Duration(seconds: 10);
-      _player.seek(target > _duration ? _duration : target);
-      return KeyEventResult.handled;
-    }
-
-    if (key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) {
-      _showOverlayControls();
+      final target = _player.state.position + const Duration(seconds: 10);
+      _player.seek(target > _player.state.duration ? _player.state.duration : target);
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-      if (_showControls) {
-        setState(() => _showControls = false);
-      } else {
-        _exitPlayer();
-      }
+      _exitPlayer();
       return KeyEventResult.handled;
     }
 
@@ -276,11 +227,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
-    _hideTimer?.cancel();
     _progressSaveTimer?.cancel();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
+    _subscriptions.clear();
     _saveProgress();
     _player.dispose();
     _focusNode.dispose();
@@ -294,15 +245,82 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
+  MaterialVideoControlsThemeData _buildThemeData() {
+    return MaterialVideoControlsThemeData(
+      displaySeekBar: true,
+      seekGesture: true,
+      seekOnDoubleTap: true,
+      seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
+      seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
+      speedUpOnLongPress: true,
+      seekBarPositionColor: TVTheme.accent,
+      seekBarThumbColor: TVTheme.accent,
+      topButtonBar: [
+        IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: _exitPlayer,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            widget.movieTitle,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: TVTheme.accent.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: TVTheme.accent),
+          ),
+          child: const Text(
+            'Direct HD',
+            style: TextStyle(
+              color: TVTheme.accent,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
+      primaryButtonBar: [
+        MaterialCustomButton(
+          icon: const Icon(Icons.replay_10, color: Colors.white),
+          onPressed: () {
+            final target = _player.state.position - const Duration(seconds: 10);
+            _player.seek(target < Duration.zero ? Duration.zero : target);
+          },
+        ),
+        const SizedBox(width: 32),
+        const MaterialPlayOrPauseButton(iconSize: 64),
+        const SizedBox(width: 32),
+        MaterialCustomButton(
+          icon: const Icon(Icons.forward_10, color: Colors.white),
+          onPressed: () {
+            final target = _player.state.position + const Duration(seconds: 10);
+            _player.seek(target > _player.state.duration ? _player.state.duration : target);
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final themeData = _buildThemeData();
+
     return PopScope(
-      canPop: !_showControls,
+      canPop: true,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) {
           _saveProgress();
-        } else if (_showControls) {
-          setState(() => _showControls = false);
         }
       },
       child: Focus(
@@ -314,21 +332,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
           body: Stack(
             fit: StackFit.expand,
             children: [
-              Video(
-                controller: _videoController,
-                controls: NoVideoControls,
-              ),
-              if (_isBuffering && _errorMessage == null)
-                const Center(
-                  child: CircularProgressIndicator(
-                    color: TVTheme.accent,
-                    strokeWidth: 3,
-                  ),
+              MaterialVideoControlsTheme(
+                normal: themeData,
+                fullscreen: themeData,
+                child: Video(
+                  controller: _videoController,
+                  controls: MaterialVideoControls,
                 ),
+              ),
               if (_errorMessage != null)
                 _buildErrorOverlay(),
-              if (_showControls && _errorMessage == null)
-                _buildControlsOverlay(),
             ],
           ),
         ),
@@ -367,7 +380,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   onPressed: () {
                     setState(() {
                       _errorMessage = null;
-                      _isBuffering = true;
                     });
                     _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
                   },
@@ -382,148 +394,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildControlsOverlay() {
-    final double progress = _duration.inMilliseconds > 0
-        ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-    final double buffer = _duration.inMilliseconds > 0
-        ? (_buffer.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black87,
-            Colors.transparent,
-            Colors.transparent,
-            Colors.black87,
-          ],
-          stops: [0.0, 0.25, 0.75, 1.0],
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  onPressed: _exitPlayer,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.movieTitle,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: TVTheme.accent.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: TVTheme.accent),
-                  ),
-                  child: const Text(
-                    'Direct HD',
-                    style: TextStyle(
-                      color: TVTheme.accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Center(
-            child: IconButton(
-              iconSize: 64,
-              icon: Icon(
-                _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                color: Colors.white.withValues(alpha: 0.9),
-              ),
-              onPressed: () {
-                _player.playOrPause();
-                _startHideTimer();
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-            child: Column(
-              children: [
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final width = constraints.maxWidth;
-                    return Stack(
-                      alignment: Alignment.centerLeft,
-                      children: [
-                        Container(
-                          height: 4,
-                          width: width,
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                        Container(
-                          height: 4,
-                          width: width * buffer,
-                          decoration: BoxDecoration(
-                            color: Colors.white38,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                        Container(
-                          height: 4,
-                          width: width * progress,
-                          decoration: BoxDecoration(
-                            color: TVTheme.accent,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      formatDuration(_position.inSeconds),
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                    const Text(
-                      '◄◄ 10s   [OK: Play/Pause]   10s ►►',
-                      style: TextStyle(color: Colors.white38, fontSize: 12),
-                    ),
-                    Text(
-                      formatDuration(_duration.inSeconds),
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
