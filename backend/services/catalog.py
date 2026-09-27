@@ -1,6 +1,7 @@
 import sqlite3
 from pathlib import Path
 from backend.config import DATA_DIR, DB_PATH
+from backend.models import MovieSummary
 
 LANES_CONFIG = {
     "trending": {
@@ -150,5 +151,63 @@ class CatalogService:
         with self._get_connection() as conn:
             row = conn.execute("SELECT * FROM movies WHERE tmdb_id = ?;", (tmdb_id,)).fetchone()
             return dict(row) if row else None
+
+    def get_category_movies(self, category: str, page: int = 1, limit: int = 20) -> list[MovieSummary]:
+        offset = (page - 1) * limit
+        lane_id = "trending"
+        default_genre = None
+        if category in ["box_office", "box_office_hit"]:
+            lane_id = "box_office"
+        elif category in ["popular", "top_rated"]:
+            lane_id = "top_rated"
+        elif category in ["comedy", "latest_comedy"]:
+            lane_id = "comedy"
+            default_genre = 35
+        elif category in ["latest", "trending"]:
+            lane_id = "trending"
+
+        movies = self.get_lane_movies(lane_id, limit=limit, offset=offset)
+        return [MovieSummary.from_catalog(m, default_genre=default_genre) for m in movies]
+
+    def get_tamil_category_movies(
+        self,
+        category: str | None = None,
+        genre: int | None = None,
+        year: int | None = None,
+        page: int = 1,
+        limit: int = 20
+    ) -> list[MovieSummary] | None:
+        if category in ["box_office", "box_office_hit"]:
+            return self.get_category_movies("box_office", page=page, limit=limit)
+        if category in ["popular", "top_rated"]:
+            return self.get_category_movies("popular", page=page, limit=limit)
+        if (category in ["comedy", "latest_comedy"] or genre == 35) and year is None:
+            return self.get_category_movies("comedy", page=page, limit=limit)
+        if category in ["latest", "trending"] or (category is None and genre is None and year is None):
+            return self.get_category_movies("latest", page=page, limit=limit)
+        return None
+
+    async def search_catalog_with_fallback(
+        self,
+        query: str,
+        year: int | None = None,
+        page: int = 1,
+        limit: int = 20
+    ) -> list[MovieSummary]:
+        offset = (page - 1) * limit
+        local_results = self.search_movies(query=query, limit=limit, offset=offset)
+        formatted_local = [MovieSummary.from_catalog(m) for m in local_results]
+        if len(formatted_local) >= 10:
+            return formatted_local
+
+        from backend.services.tmdb import tmdb_client
+        tmdb_results = await tmdb_client.search_movie(query=query, year=year, page=page)
+        existing_ids = {m.tmdb_id for m in formatted_local}
+        formatted_tmdb = [
+            MovieSummary.from_tmdb(item, media_type="movie")
+            for item in tmdb_results
+            if item.get("id") not in existing_ids
+        ]
+        return formatted_local + formatted_tmdb
 
 catalog_service = CatalogService()

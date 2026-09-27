@@ -47,9 +47,8 @@ class TMDBClient:
             "accept": "application/json"
         }
         
-        # Initialize Cache instances (TTL: 1 hour for searches, 24 hours for discover/popular/details)
+        # Initialize Cache instances (TTL: 1 hour for searches, 24 hours for discover/details)
         self._search_cache = TTLCache(ttl_seconds=3600)
-        self._popular_cache = TTLCache(ttl_seconds=86400)
         self._discover_cache = TTLCache(ttl_seconds=86400)
         self._details_cache = TTLCache(ttl_seconds=86400)
 
@@ -160,50 +159,13 @@ class TMDBClient:
             return None
 
     async def get_popular_movies(self, language: str = "en-US", page: int = 1) -> list[dict]:
-        """
-        Get popular movies from TMDB whose original language matches the requested language code.
-        """
-        cache_key = f"{language}_{page}"
-        cached_result = self._popular_cache.get(cache_key)
-        if cached_result is not None:
-            logger.info(f"Serving popular movies (language: {language}, page: {page}) from TMDB cache")
-            return cached_result
+        return await self.discover_movies(language=language, page=page, sort_by="popularity.desc")
 
-        url = f"{self.BASE_URL}/discover/movie"
-        lang_code = language.split("-")[0] if "-" in language else language
-        
-        from datetime import date
-        today_str = date.today().isoformat()
-        
-        params = {
-            "with_original_language": lang_code,
-            "sort_by": "popularity.desc",
-            "page": str(page),
-            "primary_release_date.lte": today_str,
-            "include_adult": "false"
-        }
-
-        try:
-            client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-            
-            self._popular_cache.set(cache_key, results)
-            return results
-        except Exception as e:
-            logger.error(f"Failed to fetch popular movies for original language '{lang_code}': {e}")
-            return []
-
-    async def discover_movies(self, language: str = "en-US", year: int | None = None, genre: int | None = None, page: int = 1) -> list[dict]:
-        """
-        Discover movies filterable by original language, primary release year, and/or genre ID.
-        If no year is specified, sorts by latest release date.
-        """
-        cache_key = f"{language}_{year}_{genre}_{page}"
+    async def discover_movies(self, language: str = "en-US", year: int | None = None, genre: int | None = None, page: int = 1, sort_by: str | None = None) -> list[dict]:
+        cache_key = f"{language}_{year}_{genre}_{sort_by}_{page}"
         cached_result = self._discover_cache.get(cache_key)
         if cached_result is not None:
-            logger.info(f"Serving discovered movies (language: {language}, year: {year}, genre: {genre}, page: {page}) from TMDB cache")
+            logger.info(f"Serving discovered movies (language: {language}, year: {year}, genre: {genre}, sort_by: {sort_by}, page: {page}) from TMDB cache")
             return cached_result
 
         url = f"{self.BASE_URL}/discover/movie"
@@ -222,7 +184,9 @@ class TMDBClient:
         if genre:
             params["with_genres"] = str(genre)
             
-        if year:
+        if sort_by:
+            params["sort_by"] = sort_by
+        elif year:
             params["primary_release_year"] = str(year)
             params["sort_by"] = "popularity.desc"
         else:

@@ -3,6 +3,8 @@ stremsrc/
 __pycache__/
 *.pyc
 *.db
+*.db-wal
+*.db-shm
 *.apk
 domain_cache.json
 movie_path_cache.json
