@@ -50,25 +50,22 @@ def _init_cache_tables(conn: sqlite3.Connection):
         UNIQUE(tmdb_id, file_id, quality)
     );
     """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS isaimini_catalog (
+        path TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        page INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    conn.execute("""
+    CREATE INDEX IF NOT EXISTS idx_isaimini_cat_year ON isaimini_catalog(year);
+    """)
     conn.commit()
     _migrate_json_files(conn)
 
 def _migrate_json_files(conn: sqlite3.Connection):
-    try:
-        if DOMAIN_CACHE_FILE.exists():
-            with open(DOMAIN_CACHE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for key, domain in data.items():
-                conn.execute(
-                    "INSERT OR REPLACE INTO domain_cache (key, domain) VALUES (?, ?)",
-                    (key, domain)
-                )
-            conn.commit()
-            DOMAIN_CACHE_FILE.unlink()
-            logger.info("Migrated domain_cache.json into SQLite")
-    except Exception as e:
-        logger.warning(f"Error migrating domain_cache.json: {e}")
-
     try:
         if PATH_CACHE_FILE.exists():
             with open(PATH_CACHE_FILE, "r", encoding="utf-8") as f:
@@ -114,29 +111,31 @@ def _migrate_json_files(conn: sqlite3.Connection):
 
 def get_cached_domain(key: str) -> str | None:
     try:
-        with _get_connection() as conn:
-            row = conn.execute("SELECT domain FROM domain_cache WHERE key = ?", (key,)).fetchone()
-            if row:
-                return row["domain"]
+        if DOMAIN_CACHE_FILE.exists():
+            with open(DOMAIN_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            val = data.get(key)
+            if val and isinstance(val, str) and val.strip():
+                return val.strip()
     except Exception as e:
-        logger.warning(f"Error reading domain cache: {e}")
+        logger.warning(f"Error reading domain cache from {DOMAIN_CACHE_FILE}: {e}")
     return None
 
 def save_cached_domain(key: str, domain: str):
     try:
-        with _get_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO domain_cache (key, domain, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE SET domain = excluded.domain, updated_at = CURRENT_TIMESTAMP
-                """,
-                (key, domain)
-            )
-            conn.commit()
-        logger.info(f"Updated domain cache for '{key}': {domain}")
+        data = {}
+        if DOMAIN_CACHE_FILE.exists():
+            try:
+                with open(DOMAIN_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        data[key] = domain.strip()
+        with open(DOMAIN_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"Updated domain cache in JSON for '{key}': {domain}")
     except Exception as e:
-        logger.warning(f"Error writing domain cache: {e}")
+        logger.warning(f"Error writing domain cache to {DOMAIN_CACHE_FILE}: {e}")
 
 def get_cached_movie_path(tmdb_id: int) -> dict | None:
     try:
@@ -181,3 +180,33 @@ def log_file_id(tmdb_id: int, title: str, file_id: str, quality: str):
         logger.debug(f"Logged file ID: TMDB {tmdb_id} | File ID: {file_id} | Quality: {quality}")
     except Exception as e:
         logger.warning(f"Error logging file ID: {e}")
+
+def save_isaimini_catalog_entries(entries: list[dict]):
+    if not entries:
+        return
+    try:
+        with _get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO isaimini_catalog (path, title, year, page)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET title = excluded.title, page = excluded.page
+                """,
+                [(e["path"], e["title"], e["year"], e.get("page", 1)) for e in entries]
+            )
+            conn.commit()
+        logger.debug(f"Saved {len(entries)} movies to isaimini_catalog")
+    except Exception as e:
+        logger.warning(f"Error saving isaimini catalog entries: {e}")
+
+def get_isaimini_catalog_by_year(year: int) -> list[dict]:
+    try:
+        with _get_connection() as conn:
+            rows = conn.execute(
+                "SELECT path, title, year, page FROM isaimini_catalog WHERE year = ?",
+                (year,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"Error reading isaimini catalog for year {year}: {e}")
+    return []

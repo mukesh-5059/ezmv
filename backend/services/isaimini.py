@@ -10,17 +10,13 @@ from backend.services.scraper_cache import (
     get_cached_movie_path,
     save_cached_movie_path,
     log_file_id,
+    save_isaimini_catalog_entries,
+    get_isaimini_catalog_by_year,
 )
 from backend.session import get_session
 
 logger = logging.getLogger(__name__)
 
-
-SEED_MIRRORS = [
-    "https://moviezda.net/",
-    "https://moviesdatamil.net/",
-    "https://moviesda33.com/"
-]
 
 RESOLUTION_TOKENS = {"1080p", "720p", "640x360", "480p", "360p", "480x320", "320x240", "sample"}
 QUALITY_SUBFOLDER_TOKENS = {"original", "predvd", "hd", "tamil", "dubbed", "multi audio", "single part"}
@@ -34,40 +30,72 @@ class IsaiminiScraper(BaseScraper):
         tokens = re.findall(r'[a-z0-9]+', title)
         return set(tokens)
 
-    def _find_candidates_in_soup(self, soup, target_tokens: set[str], base_url: str, page_num: int = 1) -> list[dict]:
-        """
-        Finds all candidate movie links in soup and scores them.
-        Returns a list of candidate dicts containing url, page, is_strict, extra_tokens, and overlap.
-        """
+    def _extract_and_save_all_movies_from_soup(self, soup, year: int, page_num: int = 1) -> list[dict]:
+        entries = []
+        for a in soup.find_all("a"):
+            href = a.get("href")
+            text = a.get_text().strip()
+            if not href or not text:
+                continue
+
+            parsed = urlparse(href)
+            if parsed.query:
+                continue
+
+            path = parsed.path.strip('/')
+            if path.startswith("tamil-movies/") or path.endswith("-movies"):
+                continue
+
+            if not (path.endswith("-movie") or path.endswith("-web-series")):
+                continue
+
+            clean_path = f"/{path}/"
+            entries.append({
+                "path": clean_path,
+                "title": text,
+                "year": year,
+                "page": page_num
+            })
+
+        if entries:
+            save_isaimini_catalog_entries(entries)
+        return entries
+
+    def _find_candidates_in_entries(self, entries: list[dict], target_tokens: set[str], base_url: str) -> list[dict]:
         candidates = []
-        links = soup.find_all("a")
-        for link in links:
-            href = link.get("href")
-            text = link.get_text().strip()
-            if href and text and ("-movie" in href or "-web-series" in href):
-                combined_tokens = self._clean_title_tokens(f"{text} {href}")
+        alpha_target = {t for t in target_tokens if not t.isdigit()}
+        for e in entries:
+            text = e["title"]
+            path = e["path"]
+            page_num = e.get("page", 1)
 
-                if any(black in combined_tokens for black in BLACKLIST_TOKENS):
-                    continue
+            combined_tokens = self._clean_title_tokens(f"{text} {path}")
+            if any(black in combined_tokens for black in BLACKLIST_TOKENS):
+                continue
 
-                link_tokens = self._clean_title_tokens(text)
-                overlap = target_tokens & link_tokens
-                score = len(overlap)
+            link_tokens = self._clean_title_tokens(text)
+            if alpha_target and not (alpha_target & link_tokens):
+                continue
 
-                if score > 0:
-                    is_strict = target_tokens.issubset(link_tokens)
-                    extra_tokens = len(link_tokens - target_tokens)
-                    full_url = href if href.startswith("http") else f"{base_url.rstrip('/')}{href}"
-                    candidates.append({
-                        "url": full_url,
-                        "page": page_num,
-                        "is_strict": is_strict,
-                        "extra_tokens": extra_tokens,
-                        "overlap": score,
-                        "text": text
-                    })
-
+            overlap = target_tokens & link_tokens
+            score = len(overlap)
+            if score > 0:
+                is_strict = target_tokens.issubset(link_tokens)
+                extra_tokens = len(link_tokens - target_tokens)
+                full_url = f"{base_url.rstrip('/')}{path}"
+                candidates.append({
+                    "url": full_url,
+                    "page": page_num,
+                    "is_strict": is_strict,
+                    "extra_tokens": extra_tokens,
+                    "overlap": score,
+                    "text": text
+                })
         return candidates
+
+    def _find_candidates_in_soup(self, soup, target_tokens: set[str], base_url: str, year: int, page_num: int = 1) -> list[dict]:
+        entries = self._extract_and_save_all_movies_from_soup(soup, year=year, page_num=page_num)
+        return self._find_candidates_in_entries(entries, target_tokens, base_url)
 
     def _detect_print_category(self, soup, root_soup, res_name: str, res_url: str, movie_page_url: str) -> str:
         combined_text = f"{movie_page_url} {res_name} {res_url}".lower()
@@ -135,7 +163,11 @@ class IsaiminiScraper(BaseScraper):
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         
         cached_domain = get_cached_domain("isaimini")
-        if cached_domain:
+        if not cached_domain:
+            logger.warning(f"[{self.name}] No active domain configured in domain_cache.json. Scraper aborted.")
+            return None
+
+        for attempt in range(1, 3):
             try:
                 resp = await client.get(
                     cached_domain,
@@ -146,44 +178,18 @@ class IsaiminiScraper(BaseScraper):
                 if resp.status_code == 200:
                     final_domain = self._extract_base_domain(str(resp.url))
                     if final_domain != cached_domain:
-                        logger.info(f"[Domain] Active mirror (newly found): {final_domain}")
+                        logger.info(f"[Domain] Active mirror redirected: {cached_domain} -> {final_domain}")
                         save_cached_domain("isaimini", final_domain)
                     else:
                         logger.info(f"[Domain] Active mirror (cached): {final_domain}")
                     return final_domain
             except Exception as e:
-                logger.warning(f"[{self.name}] Cached domain '{cached_domain}' unreachable ({e}). Retrying after short delay...")
-                await asyncio.sleep(2)
-                try:
-                    resp = await client.get(
-                        cached_domain,
-                        headers=headers,
-                        allow_redirects=True,
-                        timeout=8.0
-                    )
-                    if resp.status_code == 200:
-                        final_domain = self._extract_base_domain(str(resp.url))
-                        return final_domain
-                except Exception as retry_e:
-                    logger.warning(f"[{self.name}] Retry on '{cached_domain}' failed: {retry_e}. Checking modern seed mirrors...")
+                logger.warning(f"[{self.name}] Attempt {attempt} failed on '{cached_domain}': {e}")
+                if attempt < 2:
+                    await asyncio.sleep(1.5)
 
-        for seed in SEED_MIRRORS:
-            try:
-                resp = await client.get(
-                    seed,
-                    headers=headers,
-                    allow_redirects=True,
-                    timeout=8.0
-                )
-                if resp.status_code == 200:
-                    active_domain = self._extract_base_domain(str(resp.url))
-                    logger.info(f"[Domain] Active mirror (newly found): {active_domain}")
-                    save_cached_domain("isaimini", active_domain)
-                    return active_domain
-            except Exception as e:
-                logger.warning(f"[{self.name}] Seed mirror '{seed}' failed: {e}")
-
-        return cached_domain
+        logger.warning(f"[{self.name}] Cached domain '{cached_domain}' is unreachable after retries. Please update domain_cache.json.")
+        return None
 
     async def _crawl_movie_page(
         self,
@@ -295,13 +301,46 @@ class IsaiminiScraper(BaseScraper):
                 if on_progress:
                     on_progress("path", f"Movie directory (cached): {movie_page_url}")
 
-            # 2. If not cached, search directory pages 1..N
+            # 2. Check local isaimini_catalog for this year
+            if not movie_page_url:
+                local_entries = get_isaimini_catalog_by_year(year)
+                if local_entries:
+                    local_candidates = self._find_candidates_in_entries(local_entries, target_tokens, base_url)
+                    strict_local = [c for c in local_candidates if c["is_strict"]]
+                    best = None
+                    if strict_local:
+                        strict_local.sort(key=lambda c: (c["extra_tokens"], c["page"]))
+                        best = strict_local[0]
+                    elif local_candidates:
+                        local_candidates.sort(key=lambda c: (-c["overlap"], c["extra_tokens"], c["page"]))
+                        best = local_candidates[0]
+
+                    if best:
+                        movie_page_url = best["url"]
+                        found_page = best["page"]
+                        logger.info(f"[{self.name}] Found match in local isaimini_catalog for '{title}' (Page {found_page}): {movie_page_url}")
+                        if on_progress:
+                            on_progress("path", f"Movie directory (local catalog): {movie_page_url}")
+                        parsed_path = urlparse(movie_page_url).path
+                        save_cached_movie_path(tmdb_id, parsed_path, page=found_page)
+
+            # 3. If still not found, search live directory pages
             if not movie_page_url:
                 category_url = f"{base_url}tamil-{year}-movies/"
                 logger.info(f"[{self.name}] Scanning directory for '{title}' ({year}): {category_url}")
                 
-                resp = await client.get(category_url, headers=headers, timeout=8.0)
-                if resp.status_code != 200:
+                resp = None
+                for attempt in range(1, 3):
+                    try:
+                        resp = await client.get(category_url, headers=headers, timeout=8.0)
+                        if resp.status_code == 200:
+                            break
+                    except Exception as e:
+                        logger.warning(f"[{self.name}] Error fetching page 1 (attempt {attempt}): {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(1.5)
+
+                if not resp or resp.status_code != 200:
                     return results
 
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -313,42 +352,36 @@ class IsaiminiScraper(BaseScraper):
                         if match:
                             max_pages = max(max_pages, int(match.group(1)))
 
-                all_soups = [(1, soup)]
+                # 1. Check Page 1 candidates first (and auto-save Page 1 items to catalog)
+                all_candidates = list(self._find_candidates_in_soup(soup, target_tokens, base_url, year=year, page_num=1))
+                strict_candidates = [c for c in all_candidates if c["is_strict"]]
 
-                if max_pages > 1:
-                    batch_size = 8
-                    scanned_pages = {1}
+                # 2. If not found on Page 1, scan remaining pages in batches of 2
+                if not strict_candidates and max_pages > 1:
+                    batch_size = 2
+                    unscanned = list(range(2, max_pages + 1))
                     
-                    while scanned_pages != set(range(1, max_pages + 1)):
-                        unscanned = sorted(list(set(range(2, max_pages + 1)) - scanned_pages))
-                        batch = unscanned[:batch_size]
-                        if not batch:
-                            break
-                            
+                    for i in range(0, len(unscanned), batch_size):
+                        batch = unscanned[i:i+batch_size]
                         urls = [f"{category_url}?page={p}" for p in batch]
                         tasks = [client.get(url, headers=headers, timeout=8.0) for url in urls]
                         responses = await asyncio.gather(*tasks, return_exceptions=True)
                         
+                        batch_found = False
                         for idx, r in enumerate(responses):
                             if isinstance(r, Exception) or r.status_code != 200:
                                 continue
                             batch_soup = BeautifulSoup(r.text, "html.parser")
-                            all_soups.append((batch[idx], batch_soup))
-                            
-                            for a in batch_soup.find_all("a"):
-                                href = a.get("href")
-                                if href and "?page=" in href:
-                                    match = re.search(r'page=(\d+)', href)
-                                    if match:
-                                        max_pages = max(max_pages, int(match.group(1)))
-                                        
-                        scanned_pages.update(batch)
-
-                # Collect candidates across all scanned directory pages
-                all_candidates = []
-                for p_num, p_soup in all_soups:
-                    cands = self._find_candidates_in_soup(p_soup, target_tokens, base_url, page_num=p_num)
-                    all_candidates.extend(cands)
+                            cands = self._find_candidates_in_soup(batch_soup, target_tokens, base_url, year=year, page_num=batch[idx])
+                            if cands:
+                                all_candidates.extend(cands)
+                                batch_found = True
+                        
+                        # Stop as soon as candidate found in this batch
+                        if batch_found:
+                            strict_candidates = [c for c in all_candidates if c["is_strict"]]
+                            if strict_candidates or all_candidates:
+                                break
 
                 # Filter strict matches (containing all title tokens)
                 strict_candidates = [c for c in all_candidates if c["is_strict"]]
