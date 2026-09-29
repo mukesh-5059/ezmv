@@ -1,34 +1,14 @@
 import asyncio
 import json
 import logging
-from urllib.parse import quote
-import httpx
-from backend.services.scraper_base import BaseScraper
-from backend.services.isaimini import IsaiminiScraper
+from typing import AsyncGenerator
 from backend.services.tmdb import tmdb_client, TTLCache
 from backend.services.catalog import catalog_service
-from backend.models import StreamResponse
+from backend.models import StreamResponse, StreamSource as ModelStreamSource
+from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
+from backend.scrappers.providers.isaimini import IsaiminiScraper
 
 logger = logging.getLogger(__name__)
-
-async def resolve_cdn_redirect(url: str) -> str:
-    if "download.php" not in url and ".php" not in url and "uptomkv" not in url:
-        return url
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://cdn.uptomkv.ch/"
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers=headers, follow_redirects=False)
-            if resp.status_code in (301, 302, 303, 307, 308):
-                loc = resp.headers.get("Location") or resp.headers.get("location")
-                if loc:
-                    return quote(str(loc), safe=":/%?&=#+,-")
-    except Exception as e:
-        logger.warning(f"Failed to resolve 302 redirect for {url}: {e}")
-    return url
 
 class StreamBroadcaster:
     def __init__(self):
@@ -77,14 +57,17 @@ class StreamBroadcaster:
 
 class ScraperManager:
     def __init__(self):
-        self.scrapers = [
+        self.scrapers: list[BaseScraper] = [
             IsaiminiScraper()
         ]
         self._stream_cache = TTLCache(ttl_seconds=180)
         self._in_flight: dict[str, asyncio.Task] = {}
         self._broadcasters: dict[str, StreamBroadcaster] = {}
 
-    async def _get_media_info(self, tmdb_id: int, media_type: str = "movie"):
+    def register_scraper(self, scraper: BaseScraper):
+        self.scrapers.append(scraper)
+
+    async def _get_media_info(self, tmdb_id: int, media_type: str = "movie") -> tuple[str | None, int, str | None]:
         if media_type == "movie":
             details = await tmdb_client.get_movie_details(tmdb_id)
             if not details:
@@ -110,81 +93,21 @@ class ScraperManager:
 
     async def get_streams(
         self,
-        title: str,
-        year: int,
-        media_type: str,
-        tmdb_id: int,
-        imdb_id: str | None = None,
-        season: int | None = None,
-        episode: int | None = None,
+        media: MediaItem,
         bypass_cache: bool = False,
         on_progress = None
     ) -> list[dict]:
-        cache_key = f"{tmdb_id}_{season}_{episode}"
+        cache_key = f"{media.tmdb_id}_{media.season}_{media.episode}"
         if not bypass_cache:
             cached_result = self._stream_cache.get(cache_key)
             if cached_result is not None:
-                logger.info(f"Serving streams for TMDB {tmdb_id} from manager cache")
+                logger.info(f"Serving streams for TMDB {media.tmdb_id} from manager cache")
                 return cached_result
 
-        logger.info(f"Orchestrating scrapers for: {title} ({year}) | Type: {media_type} | TMDb: {tmdb_id} | IMDb: {imdb_id}")
+        logger.info(f"Orchestrating scrapers for: {media.title} ({media.year}) | Type: {media.media_type} | TMDb: {media.tmdb_id} | IMDb: {media.imdb_id}")
 
-        if imdb_id == "tt33764258" or tmdb_id == 1368337:
-            logger.info(f"Serving hardcoded stream response for IMDb {imdb_id} (TMDb {tmdb_id})")
-            if on_progress:
-                on_progress("scraped", "Loaded test streams for tt33764258")
-            hardcoded_streams = [
-                {
-                    "quality": "1080p",
-                    "url": "https://ataraxiaoftheapex.space/pl/H4sIAAAAAAAAAwXB226DIBgA4FcCVKxLejEbD1WLE.VXuUNwMx42Y001ffp9n.VSRTTGxvYItfv..0KRq5XuMCVGueRDVD.4C1dfjWzntffOrOSp67VphUc7UrzgV06ZNQylFVgFvhOIki0jJlJYChmwQEcCZW.B23oIO.GdRjh_HBIAdC4cpk2hNddgcLVw1iLJYFmzCjk2W_CzLi.OqE0KwUkZNq8HWeljgaOLzU1gvuehP1Wjj3nDRj2bVM_zWQqYePN5lPUgJZGEI32o276laNghZouYWWwqSSBO4n6SIgf5.iqu13_3jdpFCQEAAA--/acd823efc024116fcffc4b860d60fe80/index.m3u8?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJteS1hdXRoIiwiaWF0IjoxNzkwNTIwMTA1LCJuYmYiOjE3OTA1MjAxMDUsImV4cCI6MTc5MDUzNDUwNSwiaXBfY2lkciI6IjI0MDU6MjAxOmUwMDU6ZDE5Mjo6LzY0In0.9GQw_KCPHypB-f7tkAL5zMvJu_Ob5VncfHttBYgwqJg",
-                    "type": "hls",
-                    "provider": "Ataraxia (1080p)",
-                    "headers": {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                },
-                {
-                    "quality": "720p",
-                    "url": "https://ataraxiaoftheapex.space/pl/H4sIAAAAAAAAAwXB226DIBgA4FcCVKxLejEbD1WLE.VXuUNwMx42Y001ffp9n.VSRTTGxvYItfv..0KRq5XuMCVGueRDVD.4C1dfjWzntffOrOSp67VphUc7UrzgV06ZNQylFVgFvhOIki0jJlJYChmwQEcCZW.B23oIO.GdRjh_HBIAdC4cpk2hNddgcLVw1iLJYFmzCjk2W_CzLi.OqE0KwUkZNq8HWeljgaOLzU1gvuehP1Wjj3nDRj2bVM_zWQqYePN5lPUgJZGEI32o276laNghZouYWWwqSSBO4n6SIgf5.iqu13_3jdpFCQEAAA--/ed26f7eddab060081a0c19c285d680e2/index.m3u8?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJteS1hdXRoIiwiaWF0IjoxNzkwNTIwMTA1LCJuYmYiOjE3OTA1MjAxMDUsImV4cCI6MTc5MDUzNDUwNSwiaXBfY2lkciI6IjI0MDU6MjAxOmUwMDU6ZDE5Mjo6LzY0In0.9GQw_KCPHypB-f7tkAL5zMvJu_Ob5VncfHttBYgwqJg",
-                    "type": "hls",
-                    "provider": "Ataraxia (720p)",
-                    "headers": {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                },
-                {
-                    "quality": "360p",
-                    "url": "https://ataraxiaoftheapex.space/pl/H4sIAAAAAAAAAwXB226DIBgA4FcCVKxLejEbD1WLE.VXuUNwMx42Y001ffp9n.VSRTTGxvYItfv..0KRq5XuMCVGueRDVD.4C1dfjWzntffOrOSp67VphUc7UrzgV06ZNQylFVgFvhOIki0jJlJYChmwQEcCZW.B23oIO.GdRjh_HBIAdC4cpk2hNddgcLVw1iLJYFmzCjk2W_CzLi.OqE0KwUkZNq8HWeljgaOLzU1gvuehP1Wjj3nDRj2bVM_zWQqYePN5lPUgJZGEI32o276laNghZouYWWwqSSBO4n6SIgf5.iqu13_3jdpFCQEAAA--/bfd573f4747284c6f15f0397fff0df87/index.m3u8?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJteS1hdXRoIiwiaWF0IjoxNzkwNTIwMTA1LCJuYmYiOjE3OTA1MjAxMDUsImV4cCI6MTc5MDUzNDUwNSwiaXBfY2lkciI6IjI0MDU6MjAxOmUwMDU6ZDE5Mjo6LzY0In0.9GQw_KCPHypB-f7tkAL5zMvJu_Ob5VncfHttBYgwqJg",
-                    "type": "hls",
-                    "provider": "Ataraxia (360p)",
-                    "headers": {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                },
-                {
-                    "quality": "Auto",
-                    "url": "https://ataraxiaoftheapex.space/pl/H4sIAAAAAAAAAwXB226DIBgA4FcCVKxLejEbD1WLE.VXuUNwMx42Y001ffp9n.VSRTTGxvYItfv..0KRq5XuMCVGueRDVD.4C1dfjWzntffOrOSp67VphUc7UrzgV06ZNQylFVgFvhOIki0jJlJYChmwQEcCZW.B23oIO.GdRjh_HBIAdC4cpk2hNddgcLVw1iLJYFmzCjk2W_CzLi.OqE0KwUkZNq8HWeljgaOLzU1gvuehP1Wjj3nDRj2bVM_zWQqYePN5lPUgJZGEI32o276laNghZouYWWwqSSBO4n6SIgf5.iqu13_3jdpFCQEAAA--/master.m3u8?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJteS1hdXRoIiwiaWF0IjoxNzkwNTIwMTA1LCJuYmYiOjE3OTA1MjAxMDUsImV4cCI6MTc5MDUzNDUwNSwiaXBfY2lkciI6IjI0MDU6MjAxOmUwMDU6ZDE5Mjo6LzY0In0.9GQw_KCPHypB-f7tkAL5zMvJu_Ob5VncfHttBYgwqJg",
-                    "type": "hls",
-                    "provider": "Ataraxia (Auto HLS)",
-                    "headers": {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                }
-            ]
-            self._stream_cache.set(cache_key, hardcoded_streams)
-            return hardcoded_streams
-        
         tasks = [
-            scraper.scrape(
-                title=title,
-                year=year,
-                media_type=media_type,
-                tmdb_id=tmdb_id,
-                imdb_id=imdb_id,
-                season=season,
-                episode=episode,
-                on_progress=on_progress
-            )
+            scraper.scrape(media, on_progress=on_progress)
             for scraper in self.scrapers
         ]
 
@@ -194,13 +117,13 @@ class ScraperManager:
             logger.error(f"Error gathering scraping tasks: {e}")
             return []
 
-        flat_results = []
+        flat_results: list[StreamSource] = []
         for i, res in enumerate(results):
             scraper_name = self.scrapers[i].name
             if isinstance(res, Exception):
                 logger.error(f"Scraper '{scraper_name}' raised an exception: {res}")
                 continue
-            
+
             if res:
                 logger.info(f"Scraper '{scraper_name}' returned {len(res)} stream sources.")
                 flat_results.extend(res)
@@ -208,21 +131,22 @@ class ScraperManager:
                 logger.info(f"Scraper '{scraper_name}' returned no sources.")
 
         seen_urls = set()
-        deduplicated = []
+        deduplicated: list[dict] = []
         for item in flat_results:
-            url = item.get("url")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                deduplicated.append(item)
+            if item.url and item.url not in seen_urls:
+                seen_urls.add(item.url)
+                deduplicated.append({
+                    "url": item.url,
+                    "quality": item.quality,
+                    "provider": item.provider,
+                    "headers": item.headers
+                })
 
         deduplicated.sort(key=lambda x: 0 if any(k in x.get("provider", "") for k in ["Original", "PreDVD", "Isaimini"]) else 1)
         self._stream_cache.set(cache_key, deduplicated)
 
         for s in deduplicated:
-            quality = s.get("quality", "unknown")
-            provider = s.get("provider", "Direct")
-            final_url = s.get("url")
-            logger.info(f"🎬 [STREAM READY] {quality} ({provider}) -> {final_url}")
+            logger.info(f"🎬 [STREAM READY] {s.get('quality')} ({s.get('provider')}) -> {s.get('url')}")
 
         return deduplicated
 
@@ -247,14 +171,18 @@ class ScraperManager:
             def on_progress(step: str, message: str):
                 broadcaster.emit(step, message)
 
-            links = await self.get_streams(
+            media = MediaItem(
                 title=title,
                 year=year,
                 media_type=media_type,
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
                 season=season,
-                episode=episode,
+                episode=episode
+            )
+
+            links = await self.get_streams(
+                media=media,
                 bypass_cache=bypass_cache,
                 on_progress=on_progress
             )
@@ -296,7 +224,7 @@ class ScraperManager:
                 logger.info(f"Serving streams for TMDB {tmdb_id} from manager cache")
                 title, year, imdb_id = await self._get_media_info(tmdb_id, media_type)
                 return StreamResponse(
-                    title=title,
+                    title=title or "",
                     year=year,
                     media_type=media_type,
                     tmdb_id=tmdb_id,
@@ -333,7 +261,7 @@ class ScraperManager:
         season: int | None = None,
         episode: int | None = None,
         bypass_cache: bool = False
-    ):
+    ) -> AsyncGenerator[str, None]:
         cache_key = f"{tmdb_id}_{season}_{episode}"
 
         if not bypass_cache:
@@ -341,7 +269,7 @@ class ScraperManager:
             if cached_result is not None:
                 title, year, imdb_id = await self._get_media_info(tmdb_id, media_type)
                 resp = StreamResponse(
-                    title=title,
+                    title=title or "",
                     year=year,
                     media_type=media_type,
                     tmdb_id=tmdb_id,

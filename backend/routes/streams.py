@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from backend.models import StreamResponse
-from backend.services.scrapers import scraper_manager
+from backend.scrappers.manager import scraper_manager
 
 router = APIRouter()
 
