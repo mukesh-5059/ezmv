@@ -20,6 +20,7 @@ from .matcher import (
 )
 from .crawler import crawl_movie_page
 from .extractor import extract_streams_from_resolution
+from .resolver import probe_and_resolve_all
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,9 @@ class IsaiminiScraper(BaseScraper):
             for extracted in extraction_results:
                 if isinstance(extracted, list):
                     results.extend(extracted)
+
+            if results:
+                results = await probe_and_resolve_all(results)
 
         except Exception as e:
             logger.error(f"[{self.name}] Error scraping movie streams: {e}", exc_info=True)

@@ -4,7 +4,7 @@ import logging
 from typing import AsyncGenerator
 from backend.services.tmdb import tmdb_client, TTLCache
 from backend.services.catalog import catalog_service
-from backend.models import StreamResponse, StreamSource as ModelStreamSource
+from backend.models import StreamResponse
 from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
 from backend.scrappers.providers.isaimini import IsaiminiScraper
 
