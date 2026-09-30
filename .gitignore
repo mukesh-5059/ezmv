@@ -1,11 +1,8 @@
 .env
-stremsrc/
 __pycache__/
+backend/data/
 *.pyc
 *.db
 *.db-wal
 *.db-shm
 *.apk
-domain_cache.json
-movie_path_cache.json
-file_id_log.json

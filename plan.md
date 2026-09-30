@@ -95,13 +95,4 @@ Five focused, high-engagement lanes tailored for couch viewers:
   * WebView virtual cursor & embed injection engine.
 
 
-  "https://vidsrc2.ru",
-  "https://vidsrc.ir",
-  "https://vidsrcme.ru",
-  "https://vidsrcme.su",
-  "https://vidsrc-me.ru",
-  "https://vidsrc.me",
-  "https://vidsrc.io",
-  "https://vidsrc.tw"
-
   
