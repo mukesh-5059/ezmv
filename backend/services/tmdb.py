@@ -32,8 +32,9 @@ class TTLCache:
                 del self.cache[key]
         return 0
 
-    def set(self, key, val):
-        self.cache[key] = (time.time() + self.ttl, val)
+    def set(self, key, val, ttl: int | None = None):
+        duration = ttl if ttl is not None else self.ttl
+        self.cache[key] = (time.time() + duration, val)
 
     def clear(self):
         self.cache.clear()

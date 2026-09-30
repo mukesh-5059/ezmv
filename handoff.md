@@ -1,46 +1,62 @@
-# Stream URL Resolution — Handoff
+# Stream URL Resolution & Scraper Pipeline — Handoff
 
 ## Summary & Current Architecture
 
-The stream resolution logic is strictly encapsulated inside [`backend/scrappers/providers/isaimini/`](file:///home/mukes/dev/movies/backend/scrappers/providers/isaimini/). The orchestrator [`backend/scrappers/manager.py`](file:///home/mukes/dev/movies/backend/scrappers/manager.py) remains completely generic and provider-agnostic.
-
-### Encapsulation Layout
+The stream resolution and scraping pipeline is cleanly separated between the orchestrator ([`backend/scrappers/manager.py`](file:///home/mukes/dev/movies/backend/scrappers/manager.py)) and provider implementations ([`backend/scrappers/providers/isaimini/`](file:///home/mukes/dev/movies/backend/scrappers/providers/isaimini/)).
 
 ```
 backend/scrappers/
-├── base.py                   # Generic BaseScraper, MediaItem, StreamSource
-├── manager.py                # Pure orchestrator, cache & event broadcaster
+├── base.py                   # MediaItem, StreamSource (url, provider, quality, headers, expires_at, ttl, priority)
+├── manager.py                # Generic orchestrator, dynamic min() TTL cache & SSE broadcaster
 └── providers/
     ├── isaimini/
-    │   ├── constants.py
+    │   ├── constants.py      # INDIAN_LANGUAGES = {"ta", "te", "hi", "ml", "kn"}
     │   ├── crawler.py
     │   ├── domain.py
     │   ├── extractor.py
     │   ├── matcher.py
-    │   ├── resolver.py       # Encapsulated Isaimini/Moviesda URL resolver
-    │   ├── scraper.py        # IsaiminiScraper (runs extraction + resolution internally)
+    │   ├── resolver.py       # URL resolver + exact expiry & priority extraction
+    │   ├── scraper.py        # IsaiminiScraper (Language Guard + Extraction + Resolution)
     │   └── storage.py
-    └── vidsrc/               # Isolated (handled by parallel subagent)
+    └── vidsrc/               # Isolated (handled by parallel agent)
 ```
 
 ---
 
-### Isaimini Resolution Mechanics (`isaimini/resolver.py`)
+## 1. Dynamic Cache TTL Mechanics
 
-1. **Uptomkv CDN (`download.php` -> `mv1.uptomkv.ch`):**
-   - Resolves the 302 redirect on the server.
-   - Percent-encodes path spaces and brackets (`%20`).
-   - Verifies 206 streamability in an isolated session.
-   - Returns sanitized direct `mv1.uptomkv.ch` URL to bypass player seek-loop.
+`Isaimini` provider parses exact expiry timestamps (`e=`, `etag=`, or base64 `dl=` parameter) and sets `StreamSource.expires_at`, `StreamSource.ttl`, and `StreamSource.priority`.
 
-2. **Fastly CDN (`open.php` -> `open.*.xyz` with `htag=`):**
-   - Detects `htag=` / `fastly.` in redirect location.
-   - Preserves and returns original `open.php` URL.
-   - Allows client player (`mpv`/`media_kit`) to perform 302 and capture `Set-Cookie: download_token=...`.
+`ScraperManager` remains provider-agnostic, sorting streams by `priority` and computing effective cache TTL via `min(s.ttl for s in streams if s.ttl)` (with a minimum floor of 30s).
+
+| Stream Type | Expiration Calculation | TTL Set in Response & Cache |
+|---|---|---|
+| **Raw `.php` links** (*Fastly / open.php*) | Decodes base64 `exp=` timestamp minus 30s safety buffer | **~300–330 seconds (~5.5 minutes)** |
+| **Resolved direct URLs** (*mv1.uptomkv.ch*) | Decodes `e=<timestamp>` query parameter | **~864,000s (~10 days)** |
+| **Multi-source bundle** (*e.g. VidSrc + Fastly*) | `min(all_streams_ttl)` | **Matches the shortest stream (~300s)** |
+| **Empty results** | Fast retry window | **60 seconds** |
 
 ---
 
-## Verification
+## 2. Isaimini Language & Origin Guard
 
-- `scripts/scrappers/test_isaimini.py "Dude" 2025 1321108`: All 3 streams autonomously resolved to `https://mv1.uptomkv.ch/files/...%20...mp4?h=...&e=...`.
-- `manager.py`: Has zero provider-specific code.
+To eliminate false-positive title token collisions on non-Indian titles (e.g. *The Matrix*) and save network bandwidth, `IsaiminiScraper.scrape()` checks:
+
+```python
+countries = media.origin_countries or []
+is_indian_origin = (
+    (media.original_language in INDIAN_LANGUAGES) or
+    ("IN" in countries)
+)
+if (media.original_language or countries) and not is_indian_origin:
+    return []  # Immediate fast-exit
+```
+
+---
+
+## 3. Live Verification Test Results
+
+| Title | Media Type & Language | Isaimini Action | Returned Streams | Cache TTL (`cache_expires_in`) |
+|---|---|---|---|---|
+| **The Matrix (1999)** | Movie (`en`, `US`) | **Skipped instantly** via Language Guard | 0 streams | `59s` (empty cache) |
+| **Dude (2025)** | Movie (`ta`, `IN`) | **Scraped & Resolved** to `mv1.uptomkv.ch` | 3 streams (720p, 360p, 1080p) | `864,034s` (10 days) |

@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from backend.session import get_session
 from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
-from .constants import DEFAULT_HEADERS
+from .constants import DEFAULT_HEADERS, INDIAN_LANGUAGES
 from .storage import (
     get_cached_movie_path,
     save_cached_movie_path,
@@ -37,6 +37,18 @@ class IsaiminiScraper(BaseScraper):
         """
         results: list[StreamSource] = []
         if media.media_type != "movie":
+            return results
+
+        countries = media.origin_countries or []
+        is_indian_origin = (
+            (media.original_language in INDIAN_LANGUAGES) or
+            ("IN" in countries)
+        )
+        if (media.original_language or countries) and not is_indian_origin:
+            logger.debug(
+                f"[{self.name}] Skipping non-Indian title '{media.title}' "
+                f"(lang={media.original_language}, origin={countries})"
+            )
             return results
 
         try:

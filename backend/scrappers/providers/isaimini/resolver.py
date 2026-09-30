@@ -1,7 +1,9 @@
 import asyncio
+import base64
 import logging
+import time
 from dataclasses import replace
-from urllib.parse import urlsplit, urlunsplit, quote, unquote, urljoin
+from urllib.parse import urlparse, parse_qs, urlsplit, urlunsplit, quote, unquote, urljoin
 from curl_cffi.requests import AsyncSession
 from curl_cffi import CurlOpt, CurlHttpVersion
 from backend.scrappers.base import StreamSource
@@ -13,6 +15,44 @@ SHARED_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+def extract_url_expiry(url: str) -> tuple[int | None, int | None]:
+    if not url:
+        return None, None
+    now = int(time.time())
+    try:
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        if "e" in qs:
+            exp = int(qs["e"][0])
+            ttl = max(30, exp - now - 30) if exp > now else 30
+            return exp, ttl
+        if "etag" in qs:
+            exp = int(qs["etag"][0])
+            ttl = max(30, exp - now - 30) if exp > now else 30
+            return exp, ttl
+        if "dl" in qs:
+            dl_raw = qs["dl"][0]
+            padded = dl_raw + "=" * (-len(dl_raw) % 4)
+            decoded = base64.urlsafe_b64decode(padded).decode("utf-8", errors="ignore")
+            params = parse_qs(decoded)
+            if "exp" in params:
+                exp = int(params["exp"][0])
+                ttl = max(30, exp - now - 30) if exp > now else 30
+                return exp, ttl
+    except Exception:
+        pass
+    return None, None
+
+def attach_stream_metadata(stream: StreamSource) -> StreamSource:
+    exp, ttl = extract_url_expiry(stream.url)
+    priority = 10 if any(k in stream.provider for k in ["Original", "PreDVD"]) else 20
+    return replace(
+        stream,
+        expires_at=exp,
+        ttl=ttl if ttl is not None else 3600,
+        priority=priority
+    )
+
 def sanitize_redirect_url(base_url: str, location: str) -> str:
     full_url = urljoin(base_url, location.strip())
     parts = urlsplit(full_url)
@@ -22,7 +62,7 @@ def sanitize_redirect_url(base_url: str, location: str) -> str:
 async def probe_and_resolve(stream: StreamSource) -> StreamSource:
     try:
         if not stream.url or ".php" not in stream.url.lower():
-            return stream
+            return attach_stream_metadata(stream)
 
         req_headers = dict(stream.headers) if stream.headers else {}
         req_ua = req_headers.get("User-Agent") or req_headers.get("user-agent") or SHARED_USER_AGENT
@@ -48,15 +88,15 @@ async def probe_and_resolve(stream: StreamSource) -> StreamSource:
                 resp = await session.get(stream.url, headers=no_range_headers, allow_redirects=False, timeout=6)
 
             if resp.status_code not in (301, 302, 303, 307, 308):
-                return stream
+                return attach_stream_metadata(stream)
 
             location = resp.headers.get("location")
             if not location:
-                return stream
+                return attach_stream_metadata(stream)
 
             if "htag=" in location.lower() or "fastly." in stream.url.lower():
                 logger.debug(f"[Isaimini:Resolver] Preserving session-bound Fastly URL: {stream.url}")
-                return stream
+                return attach_stream_metadata(stream)
 
             resolved_url = sanitize_redirect_url(stream.url, location)
 
@@ -88,12 +128,12 @@ async def probe_and_resolve(stream: StreamSource) -> StreamSource:
                 logger.info(f"[Isaimini:Resolver] Resolved stream URL: {stream.url} -> {resolved_url}")
                 updated_headers = dict(stream.headers)
                 updated_headers["User-Agent"] = req_ua
-                return replace(stream, url=resolved_url, headers=updated_headers)
+                return attach_stream_metadata(replace(stream, url=resolved_url, headers=updated_headers))
 
-        return stream
+        return attach_stream_metadata(stream)
     except Exception as e:
         logger.debug(f"[Isaimini:Resolver] Probe failed for {stream.url}: {e}")
-        return stream
+        return attach_stream_metadata(stream)
 
 async def probe_and_resolve_all(streams: list[StreamSource]) -> list[StreamSource]:
     if not streams:

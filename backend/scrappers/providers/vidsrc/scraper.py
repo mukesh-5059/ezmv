@@ -19,13 +19,7 @@ FIREFOX_PREFS = {
 ABORT_RESOURCE_TYPES = {"image", "font", "media"}
 STUB_JS_PATTERNS = ("disable-devtool.js", "cloudflareinsights.com/beacon.min.js")
 DEFAULT_BASE_DOMAINS = [
-    "https://vidsrc.sh",
-    "https://vidsrc.to",
-    "https://vidsrc.me",
-    "https://vidsrc.pm",
-    "https://vidsrc.net",
-    "https://vidsrc.xyz",
-    "https://vidsrc.in",
+    "https://vidsrc.sh"
 ]
 
 @dataclass(slots=True)
@@ -300,7 +294,9 @@ class VidSrcScraper(BaseScraper):
                             url=res.m3u8_url,
                             provider="VidSrc (HLS)",
                             quality="Auto",
-                            headers=res.headers or {}
+                            headers=res.headers or {},
+                            ttl=7200,
+                            priority=30
                         )
                     )
                     break

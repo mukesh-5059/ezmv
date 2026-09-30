@@ -6,7 +6,7 @@ from backend.services.tmdb import tmdb_client, TTLCache
 from backend.services.catalog import catalog_service
 from backend.models import StreamResponse
 from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
-from backend.scrappers.providers.isaimini import IsaiminiScraper
+from backend.scrappers.providers import IsaiminiScraper, VidSrcScraper
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,8 @@ class StreamBroadcaster:
 class ScraperManager:
     def __init__(self):
         self.scrapers: list[BaseScraper] = [
-            IsaiminiScraper()
+            IsaiminiScraper(),
+            VidSrcScraper()
         ]
         self._stream_cache = TTLCache(ttl_seconds=180)
         self._in_flight: dict[str, asyncio.Task] = {}
@@ -67,29 +68,35 @@ class ScraperManager:
     def register_scraper(self, scraper: BaseScraper):
         self.scrapers.append(scraper)
 
-    async def _get_media_info(self, tmdb_id: int, media_type: str = "movie") -> tuple[str | None, int, str | None]:
+    async def _get_media_info(self, tmdb_id: int, media_type: str = "movie") -> tuple[str | None, int, str | None, str | None, list[str]]:
         if media_type == "movie":
             details = await tmdb_client.get_movie_details(tmdb_id)
             if not details:
                 local = catalog_service.get_movie_by_tmdb_id(tmdb_id)
                 if local:
-                    return local["title"], local.get("year") or 0, local.get("imdb_id")
-                return None, 0, None
+                    return local["title"], local.get("year") or 0, local.get("imdb_id"), "ta", ["IN"]
+                return None, 0, None, None, []
             title = details.get("title")
-            release_date = details.get("release_date", "")
+            release_date = details.get("release_date") or ""
             year = int(release_date.split("-")[0]) if release_date else 0
             imdb_id = details.get("imdb_id")
-            return title, year, imdb_id
+            original_language = details.get("original_language")
+            prod_countries = details.get("production_countries") or []
+            origin_countries = details.get("origin_country") or [c.get("iso_3166_1") for c in prod_countries if isinstance(c, dict) and c.get("iso_3166_1")]
+            return title, year, imdb_id, original_language, origin_countries
         else:
             details = await tmdb_client.get_tv_details(tmdb_id)
             if not details:
-                return None, 0, None
+                return None, 0, None, None, []
             title = details.get("name")
-            first_air_date = details.get("first_air_date", "")
+            first_air_date = details.get("first_air_date") or ""
             year = int(first_air_date.split("-")[0]) if first_air_date else 0
-            external_ids = details.get("external_ids", {})
+            external_ids = details.get("external_ids") or {}
             imdb_id = external_ids.get("imdb_id")
-            return title, year, imdb_id
+            original_language = details.get("original_language")
+            prod_countries = details.get("production_countries") or []
+            origin_countries = details.get("origin_country") or [c.get("iso_3166_1") for c in prod_countries if isinstance(c, dict) and c.get("iso_3166_1")]
+            return title, year, imdb_id, original_language, origin_countries
 
     async def get_streams(
         self,
@@ -132,18 +139,24 @@ class ScraperManager:
 
         seen_urls = set()
         deduplicated: list[dict] = []
+        ttls: list[int] = []
         for item in flat_results:
             if item.url and item.url not in seen_urls:
                 seen_urls.add(item.url)
+                if item.ttl is not None:
+                    ttls.append(item.ttl)
                 deduplicated.append({
                     "url": item.url,
                     "quality": item.quality,
                     "provider": item.provider,
-                    "headers": item.headers
+                    "headers": item.headers,
+                    "priority": item.priority
                 })
 
-        deduplicated.sort(key=lambda x: 0 if any(k in x.get("provider", "") for k in ["Original", "PreDVD", "Isaimini"]) else 1)
-        self._stream_cache.set(cache_key, deduplicated)
+        deduplicated.sort(key=lambda x: x.get("priority", 100))
+        effective_ttl = max(30, min(ttls)) if ttls else (60 if not deduplicated else 3600)
+        self._stream_cache.set(cache_key, deduplicated, ttl=effective_ttl)
+        logger.info(f"Cached {len(deduplicated)} streams for TMDB {media.tmdb_id} with TTL {effective_ttl}s")
 
         for s in deduplicated:
             logger.info(f"🎬 [STREAM READY] {s.get('quality')} ({s.get('provider')}) -> {s.get('url')}")
@@ -161,7 +174,7 @@ class ScraperManager:
         bypass_cache: bool
     ) -> StreamResponse | None:
         try:
-            title, year, imdb_id = await self._get_media_info(tmdb_id, media_type)
+            title, year, imdb_id, original_language, origin_countries = await self._get_media_info(tmdb_id, media_type)
             if not title:
                 broadcaster.finish(error="Media not found on TMDB.")
                 return None
@@ -178,7 +191,9 @@ class ScraperManager:
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
                 season=season,
-                episode=episode
+                episode=episode,
+                original_language=original_language,
+                origin_countries=origin_countries
             )
 
             links = await self.get_streams(
@@ -222,7 +237,7 @@ class ScraperManager:
             cached_result = self._stream_cache.get(cache_key)
             if cached_result is not None:
                 logger.info(f"Serving streams for TMDB {tmdb_id} from manager cache")
-                title, year, imdb_id = await self._get_media_info(tmdb_id, media_type)
+                title, year, imdb_id, _, _ = await self._get_media_info(tmdb_id, media_type)
                 return StreamResponse(
                     title=title or "",
                     year=year,
@@ -267,7 +282,7 @@ class ScraperManager:
         if not bypass_cache:
             cached_result = self._stream_cache.get(cache_key)
             if cached_result is not None:
-                title, year, imdb_id = await self._get_media_info(tmdb_id, media_type)
+                title, year, imdb_id, _, _ = await self._get_media_info(tmdb_id, media_type)
                 resp = StreamResponse(
                     title=title or "",
                     year=year,

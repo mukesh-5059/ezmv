@@ -11,6 +11,8 @@ class MediaItem:
     imdb_id: str | None = None
     season: int | None = None
     episode: int | None = None
+    original_language: str | None = None
+    origin_countries: list[str] = field(default_factory=list)
 
 @dataclass(slots=True)
 class StreamSource:
@@ -18,6 +20,9 @@ class StreamSource:
     provider: str
     quality: str
     headers: dict[str, str] = field(default_factory=dict)
+    expires_at: int | None = None
+    ttl: int | None = None
+    priority: int = 100
 
 class BaseScraper(ABC):
     name: str = "BaseScraper"
