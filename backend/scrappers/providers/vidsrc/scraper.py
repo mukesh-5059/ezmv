@@ -2,25 +2,46 @@ import sys
 import time
 import asyncio
 import logging
+import json
+from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Callable, Any
 from urllib.parse import urlparse
+from backend.session import get_session
 from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
 
 logger = logging.getLogger(__name__)
+
+DATA_DIR = Path(__file__).resolve().parents[3] / "data"
+CONFIG_PATH = DATA_DIR / "vidsrc.json"
+
+def get_vidsrc_config() -> tuple[str | None, list[str]]:
+    if not CONFIG_PATH.exists():
+        logger.warning(f"[VidSrc] Missing {CONFIG_PATH}. No active domain configured. Scraper aborted.")
+        return None, []
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            primary = data.get("primary_domain") or data.get("domain")
+            domains = data.get("domains") or []
+            if not primary or not primary.strip():
+                logger.warning(f"[VidSrc] No active domain configured in {CONFIG_PATH}. Scraper aborted.")
+                return None, []
+            return primary.strip().rstrip("/"), [d.rstrip("/") for d in domains]
+    except Exception as e:
+        logger.warning(f"[VidSrc] Failed to read {CONFIG_PATH}: {e}. Scraper aborted.")
+        return None, []
 
 FIREFOX_PREFS = {
     "media.autoplay.default": 0,
     "media.autoplay.blocking_policy": 0,
     "media.block-autoplay-until-in-foreground": False,
     "media.autoplay.allow-extension-background-pages": True,
+    "network.dns.disableIPv6": True,
 }
 
 ABORT_RESOURCE_TYPES = {"image", "font", "media"}
 STUB_JS_PATTERNS = ("disable-devtool.js", "cloudflareinsights.com/beacon.min.js")
-DEFAULT_BASE_DOMAINS = [
-    "https://vidsrc.sh"
-]
 
 @dataclass(slots=True)
 class StreamResult:
@@ -256,6 +277,31 @@ class VidSrcScraper(BaseScraper):
     def __init__(self, extractor: HLSExtractorService | None = None):
         self._extractor = extractor or get_extractor_service()
 
+    async def _check_content_info(self, media: MediaItem, media_id: str, primary_domain: str = "https://vidsrc.sh") -> tuple[bool, str, str | None]:
+        if media.media_type == "tv":
+            s = media.season if media.season is not None and media.season > 0 else 1
+            e = media.episode if media.episode is not None and media.episode > 0 else 1
+            info_url = f"{primary_domain}/info/tv/{media_id}/{s}/{e}.json"
+        else:
+            info_url = f"{primary_domain}/info/movie/{media_id}.json"
+
+        try:
+            session = get_session()
+            resp = await session.get(info_url, timeout=4.0)
+            if resp.status_code == 404:
+                return False, "Auto", None
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status_code") == 404 or "error" in data:
+                    return False, "Auto", None
+                quality = data.get("quality") or "1080p"
+                embed_url = data.get("embed_url") or data.get("embed_url_tmdb")
+                return True, quality, embed_url
+        except Exception as e:
+            logger.debug(f"[{self.name}] Info API check error: {e}")
+
+        return True, "Auto", None
+
     async def scrape(
         self,
         media: MediaItem,
@@ -268,16 +314,34 @@ class VidSrcScraper(BaseScraper):
             logger.warning(f"[{self.name}] No valid IMDb or TMDb identifier provided for '{media.title}'.")
             return results
 
-        candidate_domains = list(DEFAULT_BASE_DOMAINS)
-        for domain in candidate_domains:
-            embed_url = build_embed_url(
-                base_domain=domain,
+        primary_domain, _ = get_vidsrc_config()
+        if not primary_domain:
+            return results
+
+        if on_progress:
+            on_progress("info", f"Checking VidSrc availability for '{media.title}'")
+
+        is_available, quality_label, direct_embed_url = await self._check_content_info(media, media_id, primary_domain=primary_domain)
+        if not is_available:
+            logger.info(f"[{self.name}] '{media.title}' is not available on VidSrc (404).")
+            if on_progress:
+                on_progress("not_found", f"Title not hosted on VidSrc")
+            return results
+
+        candidate_urls: list[str] = []
+        if direct_embed_url:
+            candidate_urls.append(direct_embed_url)
+        else:
+            url = build_embed_url(
+                base_domain=primary_domain,
                 media_id=media_id,
                 media_type=media.media_type,
                 season=media.season,
                 episode=media.episode
             )
+            candidate_urls.append(url)
 
+        for embed_url in candidate_urls:
             if on_progress:
                 on_progress("probe", f"Extracting from: {embed_url}")
 
@@ -292,8 +356,8 @@ class VidSrcScraper(BaseScraper):
                     results.append(
                         StreamSource(
                             url=res.m3u8_url,
-                            provider="VidSrc (HLS)",
-                            quality="Auto",
+                            provider=f"VidSrc ({quality_label})",
+                            quality=quality_label,
                             headers=res.headers or {},
                             ttl=7200,
                             priority=30
