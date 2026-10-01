@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     
     # We can default to Cloudflare's public DNS over HTTPS resolver
     DOH_URL: str = "https://1.1.1.1/dns-query"
+
+    MEDIAFLOW_PORT: int = 8888
+    MEDIAFLOW_API_PASSWORD: str = "mediaflow_secret"
+    MEDIAFLOW_PUBLIC_HOST: str | None = None
     
     model_config = SettingsConfigDict(
         env_file=".env",

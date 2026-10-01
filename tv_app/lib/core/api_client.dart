@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'discovery_service.dart';
 import '../models/movie.model.dart';
 import '../models/movie_details.model.dart';
 import '../models/subtitle.model.dart';
@@ -9,6 +10,26 @@ class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
   static String _currentBaseUrl = defaultBaseUrl;
 
+  static Future<bool> testConnection([String? url]) async {
+    final target = url ?? _currentBaseUrl;
+    try {
+      final rootUri = Uri.parse(target.replaceAll(RegExp(r'/api/v1/?$'), ''));
+      final response = await http.get(rootUri).timeout(const Duration(milliseconds: 1500));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> autoDiscoverAndConnect() async {
+    final discoveredUrl = await DiscoveryService.findServer();
+    if (discoveredUrl != null && discoveredUrl.isNotEmpty) {
+      await setBaseUrl(discoveredUrl);
+      return true;
+    }
+    return false;
+  }
+
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     final savedUrl = prefs.getString('backend_url');
@@ -16,6 +37,11 @@ class ApiClient {
       _currentBaseUrl = savedUrl;
     } else {
       _currentBaseUrl = defaultBaseUrl;
+    }
+
+    final isReachable = await testConnection();
+    if (!isReachable) {
+      await autoDiscoverAndConnect();
     }
   }
 

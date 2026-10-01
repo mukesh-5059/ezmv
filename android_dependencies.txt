@@ -1,0 +1,21 @@
+# System / OS Packages (Arch Linux / Pacman / AUR):
+clang-22.1.8-1
+compiler-rt-22.1.8-1
+lld-22.1.8-1
+llvm-22.1.8-1
+unionfs-fuse-3.7-1.2
+flutter-bin-3.44.6-1
+lib32-gcc-libs-16.1.1+r346+g4e03491b401d-3
+lib32-glibc-2.43+r37+gfdf10644d6ee-1
+android-sdk-26.1.1-2.3
+android-sdk-build-tools-r37.0.0-1
+android-sdk-platform-tools-37.0.0-1
+android-sdk-cmdline-tools-latest-21.0-1
+
+# Custom Android SDK components installed via sdkmanager:
+# To delete or manage these directories:
+# - /opt/android-sdk/platforms/android-34
+# - /opt/android-sdk/build-tools/34.0.0
+# - /opt/android-sdk/platforms/android-36
+# - /opt/android-sdk/build-tools/28.0.3
+# - /opt/android-sdk/cmdline-tools/latest

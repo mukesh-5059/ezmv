@@ -29,7 +29,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
   final TextEditingController _ipController = TextEditingController();
   final FocusNode _saveFocusNode = FocusNode();
   final FocusNode _cancelFocusNode = FocusNode();
+  final FocusNode _scanFocusNode = FocusNode();
   late final FocusNode _textFieldFocusNode;
+  bool _isScanning = false;
 
   @override
   void initState() {
@@ -39,7 +41,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            _saveFocusNode.requestFocus();
+            _scanFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
         }
@@ -54,7 +56,31 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _textFieldFocusNode.dispose();
     _saveFocusNode.dispose();
     _cancelFocusNode.dispose();
+    _scanFocusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _scanLan() async {
+    setState(() => _isScanning = true);
+    final found = await ApiClient.autoDiscoverAndConnect();
+    if (mounted) {
+      setState(() {
+        _isScanning = false;
+        if (found) {
+          _ipController.text = ApiClient.displayBaseUrl;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(found ? 'Server found: ${ApiClient.baseUrl}' : 'No server found via mDNS on LAN'),
+          backgroundColor: found ? Colors.green.shade800 : Colors.orange.shade800,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      if (found) {
+        widget.onSaved();
+      }
+    }
   }
 
   Future<void> _save() async {
@@ -110,11 +136,58 @@ class _SettingsDialogState extends State<SettingsDialog> {
       ),
       actions: [
         Focus(
+          focusNode: _scanFocusNode,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                _textFieldFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                _cancelFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.select ||
+                  event.logicalKey == LogicalKeyboardKey.enter ||
+                  event.logicalKey == LogicalKeyboardKey.space) {
+                if (!_isScanning) _scanLan();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (context) {
+              final focused = Focus.of(context).hasFocus;
+              return OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: focused ? Colors.white.withOpacity(0.2) : Colors.transparent,
+                  foregroundColor: Colors.white,
+                  side: BorderSide(color: focused ? Colors.white : Colors.white38),
+                ),
+                onPressed: _isScanning ? null : _scanLan,
+                icon: _isScanning
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.radar, size: 16),
+                label: Text(_isScanning ? 'Scanning...' : 'Auto Detect'),
+              );
+            },
+          ),
+        ),
+        Focus(
           focusNode: _cancelFocusNode,
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent) {
               if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                 _textFieldFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                _scanFocusNode.requestFocus();
                 return KeyEventResult.handled;
               }
               if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
