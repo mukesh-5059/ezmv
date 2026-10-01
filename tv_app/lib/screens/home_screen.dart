@@ -572,7 +572,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'StreamTV',
+                        'EzMV',
                         style: Theme.of(context).textTheme.displayLarge?.copyWith(
                           color: TVTheme.accent,
                           letterSpacing: 1.5,

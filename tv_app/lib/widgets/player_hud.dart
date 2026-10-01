@@ -7,6 +7,7 @@ enum HudAction {
   seekForward,
   seekBackward,
   subtitleChanged,
+  info,
 }
 
 class PlayerHud extends StatefulWidget {
@@ -58,6 +59,13 @@ class PlayerHudController extends ChangeNotifier {
     currentAction = HudAction.subtitleChanged;
     message = subtitleLabel;
     _scheduleDismiss(durationMs: 1500);
+    notifyListeners();
+  }
+
+  void triggerInfo(String infoText, {int durationMs = 1800}) {
+    currentAction = HudAction.info;
+    message = infoText;
+    _scheduleDismiss(durationMs: durationMs);
     notifyListeners();
   }
 
@@ -178,6 +186,31 @@ class _PlayerHudState extends State<PlayerHud> {
             children: [
               const Icon(Icons.subtitles, color: Colors.white, size: 24),
               const SizedBox(width: 10),
+              Text(
+                widget.controller.message ?? '',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+        break;
+      case HudAction.info:
+        content = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.85),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white30, width: 1.5),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.play_circle_outline_rounded, color: Colors.white, size: 26),
+              const SizedBox(width: 12),
               Text(
                 widget.controller.message ?? '',
                 style: const TextStyle(

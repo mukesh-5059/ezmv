@@ -177,8 +177,16 @@ class ApiClient {
     return [];
   }
 
-  static Future<Map<String, dynamic>> getStreamLinks(int tmdbId, {bool bypassCache = false}) async {
-    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache');
+  static Future<Map<String, dynamic>> getStreamLinks(
+    int tmdbId, {
+    String? provider,
+    bool bypassCache = false,
+  }) async {
+    var query = 'tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache';
+    if (provider != null && provider.isNotEmpty) {
+      query += '&provider=${Uri.encodeComponent(provider)}';
+    }
+    final url = Uri.parse('$_currentBaseUrl/streams/?$query');
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
@@ -193,11 +201,16 @@ class ApiClient {
 
   static Future<Map<String, dynamic>> getStreamLinksWithProgress(
     int tmdbId, {
+    String? provider,
     bool bypassCache = false,
     void Function(String message)? onProgress,
   }) async {
     final client = http.Client();
-    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache&format=sse');
+    var query = 'tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache&format=sse';
+    if (provider != null && provider.isNotEmpty) {
+      query += '&provider=${Uri.encodeComponent(provider)}';
+    }
+    final url = Uri.parse('$_currentBaseUrl/streams/?$query');
     try {
       final request = http.Request('GET', url);
       request.headers['Accept'] = 'text/event-stream';

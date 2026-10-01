@@ -12,6 +12,7 @@ async def get_streaming_links(
     media_type: str = Query("movie", enum=["movie", "tv"], description="Media type: movie or tv"),
     season: int | None = Query(None, description="Season number (required for TV shows)"),
     episode: int | None = Query(None, description="Episode number (required for TV shows)"),
+    provider: str | None = Query(None, description="Optional specific provider name (e.g. Isaimini, VidSrc)"),
     bypass_cache: bool = Query(False, description="Bypass manager cache and force re-scrape"),
     format: str | None = Query(None, description="Response format ('sse' for server-sent events)")
 ):
@@ -29,6 +30,7 @@ async def get_streaming_links(
                 media_type=media_type,
                 season=safe_season,
                 episode=safe_episode,
+                provider=provider,
                 bypass_cache=bypass_cache
             ),
             media_type="text/event-stream",
@@ -43,6 +45,7 @@ async def get_streaming_links(
         media_type=media_type,
         season=safe_season,
         episode=safe_episode,
+        provider=provider,
         bypass_cache=bypass_cache
     )
     if not result:

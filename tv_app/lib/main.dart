@@ -8,16 +8,16 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   await ApiClient.init();
-  runApp(const StreamTVApp());
+  runApp(const EzMVApp());
 }
 
-class StreamTVApp extends StatelessWidget {
-  const StreamTVApp({Key? key}) : super(key: key);
+class EzMVApp extends StatelessWidget {
+  const EzMVApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'StreamTV',
+      title: 'EzMV',
       theme: TVTheme.darkTheme,
       debugShowCheckedModeBanner: false,
       home: const HomeScreen(),

@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.session import init_session, close_session
+from backend.services.cache_db import init_cache_db, purge_expired_cache
 from backend.routes import movies, streams, subtitles
 
 # Setup basic logging
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup actions
     logger.info("Initializing application startup...")
+    init_cache_db()
+    purge_expired_cache()
     
     await init_session()
     yield

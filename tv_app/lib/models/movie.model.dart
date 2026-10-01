@@ -61,6 +61,9 @@ class Movie {
       ? 'https://image.tmdb.org/t/p/w780$backdropPath'
       : '';
 
+  // Get release year
+  String get year => releaseDate.isNotEmpty ? releaseDate.split('-')[0] : '';
+
   static const Map<int, String> _genreMap = {
     28: 'Action',
     12: 'Adventure',

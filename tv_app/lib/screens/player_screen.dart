@@ -10,7 +10,6 @@ import '../models/subtitle.model.dart';
 import '../theme.dart';
 import '../widgets/focusable_button.dart';
 import '../widgets/player_hud.dart';
-import '../widgets/resume_dialog.dart';
 import '../widgets/subtitle_picker_dialog.dart';
 
 String formatDuration(int totalSeconds) {
@@ -33,6 +32,7 @@ class PlayerScreen extends StatefulWidget {
   final int tmdbId;
   final String provider;
   final String quality;
+  final int initialPositionSeconds;
 
   const PlayerScreen({
     super.key,
@@ -42,6 +42,7 @@ class PlayerScreen extends StatefulWidget {
     required this.tmdbId,
     this.provider = 'Direct',
     this.quality = 'HD',
+    this.initialPositionSeconds = 0,
   });
 
   @override
@@ -57,7 +58,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _progressSaveTimer;
   final List<StreamSubscription> _subscriptions = [];
   String? _errorMessage;
-  bool _isShowingResumeDialog = false;
 
   List<SubtitleTrackInfo> _subtitles = [];
   SubtitleTrackInfo? _selectedSubtitle;
@@ -123,24 +123,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }),
     );
 
-    Duration? startPosition;
-    final savedSeconds = await LocalStorage.getProgress(widget.tmdbId);
-    if (savedSeconds > 10 && mounted) {
-      setState(() => _isShowingResumeDialog = true);
-      final resume = await ResumeDialog.show(
-        context: context,
-        savedSeconds: savedSeconds,
-        formatDuration: formatDuration,
-      );
-      if (mounted) setState(() => _isShowingResumeDialog = false);
-      if (resume == true) {
-        startPosition = Duration(seconds: savedSeconds);
-      } else {
-        await LocalStorage.clearProgress(widget.tmdbId);
-      }
-    }
-
-
     try {
       await _player.open(
         Media(
@@ -149,11 +131,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
       );
 
-      if (startPosition != null) {
+      if (widget.initialPositionSeconds > 0) {
+        final startPosition = Duration(seconds: widget.initialPositionSeconds);
         _player.stream.buffer.firstWhere((b) => b > Duration.zero).then((_) async {
           await Future.delayed(const Duration(milliseconds: 300));
           if (mounted) {
-            await _player.seek(startPosition!);
+            await _player.seek(startPosition);
+            _hudController.triggerInfo(
+              'Resumed from ${formatDuration(widget.initialPositionSeconds)}',
+            );
           }
         });
       }
@@ -238,10 +224,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (_isShowingResumeDialog) {
-      return KeyEventResult.ignored;
-    }
-
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
