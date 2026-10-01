@@ -79,11 +79,11 @@ class TMDBClient:
             resp.raise_for_status()
             results = resp.json().get("results", [])
             
-            # Filter out unreleased movies and filter by Tamil original language
+            # Filter out unreleased movies
             today_str = date.today().isoformat()
             filtered_results = [
                 m for m in results
-                if m.get("release_date") and m.get("release_date") <= today_str and m.get("original_language") == "ta"
+                if m.get("release_date") and m.get("release_date") <= today_str
             ]
             
             self._search_cache.set(cache_key, filtered_results)
@@ -109,13 +109,7 @@ class TMDBClient:
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
             resp.raise_for_status()
             results = resp.json().get("results", [])
-            
-            # Filter to only show Tamil TV shows
-            filtered_results = [
-                t for t in results
-                if t.get("original_language") == "ta"
-            ]
-            return filtered_results
+            return results
         except Exception as e:
             logger.error(f"TMDB TV search failed for '{query}': {e}")
             return []
@@ -129,7 +123,7 @@ class TMDBClient:
             return cached_result
 
         url = f"{self.BASE_URL}/movie/{movie_id}"
-        params = {"append_to_response": "external_ids"}
+        params = {"append_to_response": "external_ids,credits"}
 
         try:
             client = get_session()
@@ -148,7 +142,7 @@ class TMDBClient:
         Get full details for a TV show.
         """
         url = f"{self.BASE_URL}/tv/{tv_id}"
-        params = {"append_to_response": "external_ids"}
+        params = {"append_to_response": "external_ids,credits"}
 
         try:
             client = get_session()

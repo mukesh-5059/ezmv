@@ -51,6 +51,16 @@ class MovieSummary(BaseModel):
         )
 
 
+class CastMember(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str = ""
+    character: str = ""
+    profile_path: str | None = None
+    order: int = 0
+
+
 class MovieDetails(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -67,6 +77,7 @@ class MovieDetails(BaseModel):
     runtime: int | None = None
     tagline: str | None = None
     external_ids: dict = Field(default_factory=dict)
+    cast: list[CastMember] = Field(default_factory=list)
 
     @classmethod
     def from_tmdb(cls, details: dict, media_type: str = "movie") -> "MovieDetails":
@@ -78,6 +89,20 @@ class MovieDetails(BaseModel):
         data["title"] = data.get("title") if media_type == "movie" else (data.get("name") or "")
         data["release_date"] = data.get("release_date") if media_type == "movie" else (data.get("first_air_date") or "")
         data["external_ids"] = external_ids
+
+        credits_data = data.get("credits", {})
+        raw_cast = credits_data.get("cast", []) if isinstance(credits_data, dict) else []
+        data["cast"] = [
+            CastMember(
+                id=c.get("id", 0),
+                name=c.get("name", ""),
+                character=c.get("character", ""),
+                profile_path=c.get("profile_path"),
+                order=c.get("order", 0)
+            )
+            for c in raw_cast
+            if isinstance(c, dict)
+        ]
         return cls(**data)
 
 
