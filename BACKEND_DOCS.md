@@ -1,15 +1,13 @@
 # Movie Streaming Backend Documentation
 
-The comprehensive backend documentation has been authored and is maintained at [`app/BACKEND_DOCUMENTATION.md`](file:///home/mukes/dev/movies/app/BACKEND_DOCUMENTATION.md).
+The comprehensive backend documentation has been authored and is maintained at [`backend/BACKEND_DOCUMENTATION.md`](file:///home/mukes/dev/movies/backend/BACKEND_DOCUMENTATION.md).
 
 Please refer to that document for:
-- System Architecture & High-Level Mermaid Diagrams
-- Directory Structure & Component Responsibilities
+- System Architecture & Component Responsibilities
+- Directory Structure & Component Layers
 - Environment Variables & Local Setup Guide
 - Full API Reference (Endpoints, Request/Response Schemas, Query Params)
-- Internal Workflows:
-  - DNS-over-HTTPS (DoH) and TLS Fingerprint Impersonation via `curl_cffi`
-  - Multi-tier TTL and Persistent Disk Caching
-  - Dynamic Mirror Discovery and Recursive Scraper Pipeline
-  - HTTP Range Reverse Video Streaming Proxy
-- Error Handling, Edge Cases, and Verification Commands
+- Multi-Provider Scraping Pipeline (VidSrc Playwright & Isaimini)
+- Multi-tier In-Memory TTL & Persistent SQLite Caching
+- Server-Sent Events (SSE) Scraper Progress Stream
+- Subtitle Provider Integration & Cast Enrichment

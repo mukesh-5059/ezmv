@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.session import init_session, close_session
-from backend.routes import movies, streams
+from backend.routes import movies, streams, subtitles
 
 # Setup basic logging
 logging.basicConfig(
@@ -45,6 +45,7 @@ app.add_middleware(
 # Mount API routes
 app.include_router(movies.router, prefix="/api/v1/movies", tags=["movies"])
 app.include_router(streams.router, prefix="/api/v1/streams", tags=["streams"])
+app.include_router(subtitles.router, prefix="/api/v1/subtitles", tags=["subtitles"])
 
 @app.get("/")
 def read_root():

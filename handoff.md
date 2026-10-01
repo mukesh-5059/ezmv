@@ -1,62 +1,68 @@
-# Stream URL Resolution & Scraper Pipeline — Handoff
+# Stream URL Resolution, Scrapers & Subtitles Pipeline — Handoff
 
 ## Summary & Current Architecture
 
-The stream resolution and scraping pipeline is cleanly separated between the orchestrator ([`backend/scrappers/manager.py`](file:///home/mukes/dev/movies/backend/scrappers/manager.py)) and provider implementations ([`backend/scrappers/providers/isaimini/`](file:///home/mukes/dev/movies/backend/scrappers/providers/isaimini/)).
+The stream resolution, scraping, and subtitle subsystem is modularly separated between orchestrators, core services, and provider implementations:
 
-```
-backend/scrappers/
-├── base.py                   # MediaItem, StreamSource (url, provider, quality, headers, expires_at, ttl, priority)
-├── manager.py                # Generic orchestrator, dynamic min() TTL cache & SSE broadcaster
-└── providers/
-    ├── isaimini/
-    │   ├── constants.py      # INDIAN_LANGUAGES = {"ta", "te", "hi", "ml", "kn"}
-    │   ├── crawler.py
-    │   ├── domain.py
-    │   ├── extractor.py
-    │   ├── matcher.py
-    │   ├── resolver.py       # URL resolver + exact expiry & priority extraction
-    │   ├── scraper.py        # IsaiminiScraper (Language Guard + Extraction + Resolution)
-    │   └── storage.py
-    └── vidsrc/               # Isolated (handled by parallel agent)
-```
-
----
-
-## 1. Dynamic Cache TTL Mechanics
-
-`Isaimini` provider parses exact expiry timestamps (`e=`, `etag=`, or base64 `dl=` parameter) and sets `StreamSource.expires_at`, `StreamSource.ttl`, and `StreamSource.priority`.
-
-`ScraperManager` remains provider-agnostic, sorting streams by `priority` and computing effective cache TTL via `min(s.ttl for s in streams if s.ttl)` (with a minimum floor of 30s).
-
-| Stream Type | Expiration Calculation | TTL Set in Response & Cache |
-|---|---|---|
-| **Raw `.php` links** (*Fastly / open.php*) | Decodes base64 `exp=` timestamp minus 30s safety buffer | **~300–330 seconds (~5.5 minutes)** |
-| **Resolved direct URLs** (*mv1.uptomkv.ch*) | Decodes `e=<timestamp>` query parameter | **~864,000s (~10 days)** |
-| **Multi-source bundle** (*e.g. VidSrc + Fastly*) | `min(all_streams_ttl)` | **Matches the shortest stream (~300s)** |
-| **Empty results** | Fast retry window | **60 seconds** |
-
----
-
-## 2. Isaimini Language & Origin Guard
-
-To eliminate false-positive title token collisions on non-Indian titles (e.g. *The Matrix*) and save network bandwidth, `IsaiminiScraper.scrape()` checks:
-
-```python
-countries = media.origin_countries or []
-is_indian_origin = (
-    (media.original_language in INDIAN_LANGUAGES) or
-    ("IN" in countries)
-)
-if (media.original_language or countries) and not is_indian_origin:
-    return []  # Immediate fast-exit
+```text
+backend/
+├── routes/
+│   ├── movies.py             # Universal Search, Discover, Popular, and Details (with cast)
+│   ├── streams.py            # Stream resolution and SSE progress broadcasting
+│   └── subtitles.py          # Multi-language subtitle lookup (English prioritized)
+├── services/
+│   ├── catalog.py            # SQLite WAL catalog queries & fallback search
+│   ├── subtitles.py          # SubtitlesService (OpenSubtitles v3, TTLCache, language sorting)
+│   └── tmdb.py               # TMDBClient (with TTLCache, credits, external_ids)
+├── scrappers/
+│   ├── base.py               # MediaItem, StreamSource models
+│   ├── manager.py            # ScraperManager (Dynamic min() TTL cache & SSE StreamBroadcaster)
+│   └── providers/
+│       ├── isaimini/         # Isaimini provider (Language Guard + Token Matcher + Resolver)
+│       └── vidsrc/           # VidSrc provider (Playwright Firefox HLS extractor + fast-path info check)
+└── data/                     # Ignored runtime databases & domain configs
+    ├── catalog.db            # SQLite database with IMDb curated lanes
+    ├── isaimini.db           # SQLite database for Isaimini path indexing
+    ├── isaimini.json         # Active Isaimini mirror configuration
+    └── vidsrc.json           # Primary VidSrc domain & mirrors reference
 ```
 
 ---
 
-## 3. Live Verification Test Results
+## 1. Dual-Provider Scraper Pipeline
 
-| Title | Media Type & Language | Isaimini Action | Returned Streams | Cache TTL (`cache_expires_in`) |
-|---|---|---|---|---|
-| **The Matrix (1999)** | Movie (`en`, `US`) | **Skipped instantly** via Language Guard | 0 streams | `59s` (empty cache) |
-| **Dude (2025)** | Movie (`ta`, `IN`) | **Scraped & Resolved** to `mv1.uptomkv.ch` | 3 streams (720p, 360p, 1080p) | `864,034s` (10 days) |
+1. **VidSrc (`backend/scrappers/providers/vidsrc/`)**:
+   - Headless Playwright Firefox extractor (`HLSExtractorService`) with custom Gecko preferences.
+   - Neutralizes `disable-devtool.js` with HTTP 200 empty stubs.
+   - Fast pre-flight check via `/info/movie/{id}.json` to extract quality tags (`1080p`, `720p`, `CAM`) before launching browser.
+   - Configured strictly via `backend/data/vidsrc.json`.
+
+2. **Isaimini (`backend/scrappers/providers/isaimini/`)**:
+   - Language Guard: Immediately exits non-Indian titles (`INDIAN_LANGUAGES = {"ta", "te", "hi", "ml", "kn"}`).
+   - Multi-pattern tokenizer and `.php` gatekeeper URL resolver (`mv1.uptomkv.ch`).
+   - Dynamic mirror resolution stored in `backend/data/isaimini.json`.
+
+3. **Orchestrator (`backend/scrappers/manager.py`)**:
+   - Concurrently executes scrapers via `asyncio.gather(..., return_exceptions=True)`.
+   - Deduplicates stream URLs and sorts by stream priority.
+   - Computes dynamic TTL: `min(s.ttl for s in streams if s.ttl)` (60s for empty, 7200s for VidSrc, 10 days for resolved direct links).
+   - Emits real-time SSE progress events for client UI via `GET /api/v1/streams/?format=sse`.
+
+---
+
+## 2. Subtitles Integration
+
+1. **Subtitles Endpoint**: `GET /api/v1/subtitles/?tmdb_id=...&media_type=...`
+2. **Features**:
+   - Resolves IMDb identifier and queries OpenSubtitles v3 API.
+   - Normalizes ISO language codes and ranks **English subtitles first**.
+   - Supports optional language filtering (`language=en`, `language=ta`).
+   - 24-hour in-memory TTL caching.
+
+---
+
+## 3. Metadata & Cast Enrichment
+
+- `GET /api/v1/movies/{media_type}/{tmdb_id}` requests `append_to_response=external_ids,credits`.
+- Populates `cast: list[CastMember]` with `id`, `name`, `character`, and `profile_path`.
+- Universal search on `/api/v1/movies/search` supports all global languages without restrictions.

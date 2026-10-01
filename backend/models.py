@@ -128,3 +128,26 @@ class StreamResponse(BaseModel):
     episode: int | None = None
     cache_expires_in: int = 0
     streams: list[StreamSource] = Field(default_factory=list)
+
+
+class SubtitleTrack(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = ""
+    language: str = "English"
+    code: str = "en"
+    url: str
+    format: str = "vtt"
+    release: str | None = None
+
+
+class SubtitleResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    tmdb_id: int
+    imdb_id: str | None = None
+    media_type: str = "movie"
+    season: int | None = None
+    episode: int | None = None
+    subtitles: list[SubtitleTrack] = Field(default_factory=list)
+
