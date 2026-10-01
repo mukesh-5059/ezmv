@@ -55,13 +55,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final FocusNode _focusNode = FocusNode();
   final PlayerHudController _hudController = PlayerHudController();
 
+  final FocusNode _backButtonFocus = FocusNode();
+  final FocusNode _subtitleButtonFocus = FocusNode();
+  final FocusNode _rewindButtonFocus = FocusNode();
+  final FocusNode _playPauseButtonFocus = FocusNode();
+  final FocusNode _forwardButtonFocus = FocusNode();
+  final FocusNode _seekBarFocus = FocusNode();
+
   Timer? _progressSaveTimer;
+  Timer? _osdHideTimer;
   final List<StreamSubscription> _subscriptions = [];
   String? _errorMessage;
+  bool _isExiting = false;
+  bool _showOsd = false;
+
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  Duration _buffer = Duration.zero;
+  bool _isPlaying = true;
+  bool _isBuffering = false;
 
   List<SubtitleTrackInfo> _subtitles = [];
   SubtitleTrackInfo? _selectedSubtitle;
   bool _isLoadingSubtitles = false;
+  double _subtitleFontSize = 44.0;
+  double _subtitleDelaySeconds = 0.0;
 
   Map<String, String> get _requestHeaders {
     if (widget.headers != null) {
@@ -100,19 +118,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
 
+    LocalStorage.getSubtitleFontSize().then((size) {
+      if (mounted) setState(() => _subtitleFontSize = size);
+    });
+
     _initPlayerAndMedia();
   }
 
   Future<void> _initPlayerAndMedia() async {
     _subscriptions.add(
+      _player.stream.position.listen((pos) {
+        if (mounted) setState(() => _position = pos);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.duration.listen((dur) {
+        if (mounted) setState(() => _duration = dur);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.buffer.listen((buf) {
+        if (mounted) setState(() => _buffer = buf);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.playing.listen((playing) {
+        if (mounted) setState(() => _isPlaying = playing);
+      }),
+    );
+    _subscriptions.add(
+      _player.stream.buffering.listen((buffering) {
+        if (mounted) setState(() => _isBuffering = buffering);
+      }),
+    );
+    _subscriptions.add(
       _player.stream.completed.listen((completed) {
         if (completed && mounted) {
           LocalStorage.clearProgress(widget.tmdbId);
-          Navigator.of(context).pop();
+          _exitPlayer();
         }
       }),
     );
-
     _subscriptions.add(
       _player.stream.error.listen((err) {
         if (mounted) {
@@ -152,7 +198,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     _loadSubtitlesAsync();
-
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -163,48 +208,66 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _loadSubtitlesAsync() async {
     if (!mounted) return;
     setState(() => _isLoadingSubtitles = true);
-
     try {
-      final subs = await ApiClient.getSubtitles(widget.tmdbId);
+      final tracks = await ApiClient.getSubtitles(widget.tmdbId);
       if (mounted) {
         setState(() {
-          _subtitles = subs;
+          _subtitles = tracks;
           _isLoadingSubtitles = false;
         });
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingSubtitles = false);
-      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingSubtitles = false);
     }
   }
 
-  Future<void> _selectSubtitle(SubtitleTrackInfo? subtitle) async {
-    setState(() {
-      _selectedSubtitle = subtitle;
-    });
-
-    if (subtitle != null) {
-      await _player.setSubtitleTrack(
-        SubtitleTrack.uri(
-          subtitle.url,
-          title: subtitle.language,
-          language: subtitle.code,
-        ),
-      );
-      _hudController.triggerSubtitle('Subtitles: ${subtitle.language}');
+  Future<void> _selectSubtitle(SubtitleTrackInfo? track) async {
+    setState(() => _selectedSubtitle = track);
+    if (track != null) {
+      try {
+        final uri = Uri.parse(track.url);
+        await _player.setSubtitleTrack(
+          SubtitleTrack.uri(
+            uri.toString(),
+            title: track.label,
+            language: track.language,
+          ),
+        );
+        _hudController.triggerSubtitle('Subtitles: ${track.label}');
+      } catch (e) {
+        _hudController.triggerSubtitle('Failed to load subtitle');
+      }
     } else {
       await _player.setSubtitleTrack(SubtitleTrack.no());
       _hudController.triggerSubtitle('Subtitles: Off');
     }
   }
 
+  void _updateSubtitleFontSize(double newSize) {
+    setState(() => _subtitleFontSize = newSize);
+    LocalStorage.saveSubtitleFontSize(newSize);
+  }
+
+  void _updateSubtitleDelay(double newDelay) {
+    setState(() => _subtitleDelaySeconds = newDelay);
+    try {
+      (_player.platform as dynamic)?.setProperty('sub-delay', newDelay.toStringAsFixed(3));
+      final sign = newDelay > 0 ? '+' : '';
+      _hudController.triggerInfo('Subtitle Sync: $sign${newDelay.toStringAsFixed(1)}s');
+    } catch (_) {}
+  }
+
   void _showSubtitleDialog() async {
+    _hideOsdControls();
     final selected = await SubtitlePickerDialog.show(
       context: context,
       subtitles: _subtitles,
       selectedSubtitle: _selectedSubtitle,
       isLoading: _isLoadingSubtitles,
+      initialFontSize: _subtitleFontSize,
+      initialDelaySeconds: _subtitleDelaySeconds,
+      onFontSizeChanged: _updateSubtitleFontSize,
+      onDelayChanged: _updateSubtitleDelay,
     );
     if (mounted && selected != _selectedSubtitle) {
       await _selectSubtitle(selected);
@@ -223,12 +286,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  void _showOsdControls([FocusNode? targetFocus]) {
+    setState(() => _showOsd = true);
+    _resetOsdTimer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        (targetFocus ?? _playPauseButtonFocus).requestFocus();
+      }
+    });
+  }
+
+  void _hideOsdControls() {
+    _osdHideTimer?.cancel();
+    setState(() => _showOsd = false);
+    _focusNode.requestFocus();
+  }
+
+  void _resetOsdTimer() {
+    _osdHideTimer?.cancel();
+    _osdHideTimer = Timer(const Duration(milliseconds: 4500), () {
+      if (mounted && _showOsd) {
+        _hideOsdControls();
+      }
+    });
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
 
     final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+      if (_showOsd) {
+        _hideOsdControls();
+        return KeyEventResult.handled;
+      } else {
+        _exitPlayer();
+        return KeyEventResult.handled;
+      }
+    }
 
     if (key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
@@ -245,29 +343,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
+    if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.arrowUp) {
+      if (!_showOsd) {
+        _showOsdControls(_playPauseButtonFocus);
+        return KeyEventResult.handled;
+      }
+    }
+
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
-      final current = _player.state.position;
-      final target = current - const Duration(seconds: 10);
-      final finalTarget = target < Duration.zero ? Duration.zero : target;
-      _player.seek(finalTarget);
-      _hudController.triggerSeek(
-        deltaSeconds: -10,
-        targetTime: formatDuration(finalTarget.inSeconds),
-      );
-      return KeyEventResult.handled;
+      if (!_showOsd) {
+        _seekDelta(-10);
+        return KeyEventResult.handled;
+      }
     }
 
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
-      final current = _player.state.position;
-      final duration = _player.state.duration;
-      final target = current + const Duration(seconds: 10);
-      final finalTarget = target > duration ? duration : target;
-      _player.seek(finalTarget);
-      _hudController.triggerSeek(
-        deltaSeconds: 10,
-        targetTime: formatDuration(finalTarget.inSeconds),
-      );
-      return KeyEventResult.handled;
+      if (!_showOsd) {
+        _seekDelta(10);
+        return KeyEventResult.handled;
+      }
     }
 
     if (key == LogicalKeyboardKey.closedCaptionToggle ||
@@ -278,21 +372,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
-    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-      _exitPlayer();
-      return KeyEventResult.handled;
-    }
-
     return KeyEventResult.ignored;
   }
 
+  void _seekDelta(int seconds) {
+    final current = _player.state.position;
+    final duration = _player.state.duration;
+    final target = current + Duration(seconds: seconds);
+    final clamped = target < Duration.zero
+        ? Duration.zero
+        : (duration > Duration.zero && target > duration ? duration : target);
+    _player.seek(clamped);
+    _hudController.triggerSeek(
+      deltaSeconds: seconds,
+      targetTime: formatDuration(clamped.inSeconds),
+    );
+  }
+
   void _exitPlayer() {
+    if (_isExiting) return;
+    _isExiting = true;
     _saveProgress();
-    Navigator.of(context).pop();
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
   }
 
   @override
   void dispose() {
+    _osdHideTimer?.cancel();
     _progressSaveTimer?.cancel();
     for (final sub in _subscriptions) {
       sub.cancel();
@@ -301,6 +409,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveProgress();
     _player.dispose();
     _focusNode.dispose();
+    _backButtonFocus.dispose();
+    _subtitleButtonFocus.dispose();
+    _rewindButtonFocus.dispose();
+    _playPauseButtonFocus.dispose();
+    _forwardButtonFocus.dispose();
+    _seekBarFocus.dispose();
     _hudController.dispose();
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -312,78 +426,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
 
-  MaterialVideoControlsThemeData _buildThemeData() {
-    final qualityBadge = widget.provider.isNotEmpty ? widget.provider : 'Direct';
-
-    return MaterialVideoControlsThemeData(
-      displaySeekBar: true,
-      seekGesture: true,
-      seekOnDoubleTap: true,
-      seekOnDoubleTapBackwardDuration: const Duration(seconds: 10),
-      seekOnDoubleTapForwardDuration: const Duration(seconds: 10),
-      speedUpOnLongPress: true,
-      seekBarPositionColor: TVTheme.accent,
-      seekBarThumbColor: TVTheme.accent,
-      topButtonBar: [
-        IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: _exitPlayer,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            widget.movieTitle,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: TVTheme.accent.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: TVTheme.accent, width: 1),
-          ),
-          child: Text(
-            qualityBadge,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-          ),
-        ),
-        IconButton(
-          icon: Icon(
-            _selectedSubtitle != null ? Icons.subtitles : Icons.subtitles_outlined,
-            color: _selectedSubtitle != null ? TVTheme.accent : Colors.white,
-          ),
-          tooltip: 'Subtitles',
-          onPressed: _showSubtitleDialog,
-        ),
-      ],
-      bottomButtonBar: const [
-        MaterialPositionIndicator(),
-        Spacer(),
-        MaterialFullscreenButton(),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final themeData = _buildThemeData();
-
-    return WillPopScope(
-      onWillPop: () async {
-        _exitPlayer();
-        return false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_showOsd) {
+          _hideOsdControls();
+        } else {
+          _exitPlayer();
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -394,62 +447,402 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              MaterialVideoControlsTheme(
-                normal: themeData,
-                fullscreen: themeData,
-                child: Video(
-                  controller: _videoController,
-                  controls: MaterialVideoControls,
+              // Video Layer
+              Video(
+                controller: _videoController,
+                controls: NoVideoControls,
+                subtitleViewConfiguration: SubtitleViewConfiguration(
+                  style: TextStyle(
+                    height: 1.35,
+                    fontSize: _subtitleFontSize,
+                    letterSpacing: 0.2,
+                    wordSpacing: 0.5,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    backgroundColor: const Color(0xB3000000),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(32.0, 0.0, 32.0, 36.0),
                 ),
               ),
+
+              // Quick HUD Toast Layer
               PlayerHud(controller: _hudController),
-              if (_errorMessage != null)
-                Container(
-                  color: Colors.black.withOpacity(0.9),
-                  padding: const EdgeInsets.all(32),
-                  child: Center(
+
+              // Buffering indicator
+              if (_isBuffering)
+                const Center(
+                  child: CircularProgressIndicator(color: TVTheme.accent, strokeWidth: 3),
+                ),
+
+              // 10-Foot TV OSD Overlay Layer
+              if (_showOsd) _buildTvOsdOverlay(),
+
+              // Playback Error Overlay
+              if (_errorMessage != null) _buildErrorOverlay(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTvOsdOverlay() {
+    final posSeconds = _position.inSeconds;
+    final durSeconds = _duration.inSeconds;
+    final progressRatio = durSeconds > 0 ? (posSeconds / durSeconds).clamp(0.0, 1.0) : 0.0;
+    final bufferRatio = durSeconds > 0 ? (_buffer.inSeconds / durSeconds).clamp(0.0, 1.0) : 0.0;
+
+    return GestureDetector(
+      onTap: _resetOsdTimer,
+      behavior: HitTestBehavior.translucent,
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xCC000000),
+              Color(0x33000000),
+              Color(0xEE000000),
+            ],
+            stops: [0.0, 0.4, 1.0],
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0),
+        child: Column(
+          children: [
+            // Top Bar
+            Row(
+              children: [
+                _buildOsdIconButton(
+                  focusNode: _backButtonFocus,
+                  icon: Icons.arrow_back_rounded,
+                  label: 'Back',
+                  onTap: _exitPlayer,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.movieTitle,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: TVTheme.accent.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: TVTheme.accent, width: 1),
+                            ),
+                            child: Text(
+                              '${widget.provider} • ${widget.quality}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                          if (_selectedSubtitle != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white12,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'CC: ${_selectedSubtitle!.label}',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                _buildOsdIconButton(
+                  focusNode: _subtitleButtonFocus,
+                  icon: _selectedSubtitle != null ? Icons.subtitles_rounded : Icons.subtitles_outlined,
+                  label: 'Subtitles',
+                  highlight: _selectedSubtitle != null,
+                  onTap: _showSubtitleDialog,
+                ),
+              ],
+            ),
+
+            const Spacer(),
+
+            // Center Quick Controls
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildOsdIconButton(
+                  focusNode: _rewindButtonFocus,
+                  icon: Icons.replay_10_rounded,
+                  label: '-10s',
+                  size: 48,
+                  iconSize: 28,
+                  onTap: () {
+                    _resetOsdTimer();
+                    _seekDelta(-10);
+                  },
+                ),
+                const SizedBox(width: 24),
+                _buildOsdIconButton(
+                  focusNode: _playPauseButtonFocus,
+                  icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  label: _isPlaying ? 'Pause' : 'Play',
+                  size: 64,
+                  iconSize: 40,
+                  isPrimary: true,
+                  onTap: () {
+                    _resetOsdTimer();
+                    _player.playOrPause();
+                  },
+                ),
+                const SizedBox(width: 24),
+                _buildOsdIconButton(
+                  focusNode: _forwardButtonFocus,
+                  icon: Icons.forward_10_rounded,
+                  label: '+10s',
+                  size: 48,
+                  iconSize: 28,
+                  onTap: () {
+                    _resetOsdTimer();
+                    _seekDelta(10);
+                  },
+                ),
+              ],
+            ),
+
+            const Spacer(),
+
+            // Bottom Progress & Seek Bar
+            Focus(
+              focusNode: _seekBarFocus,
+              onKeyEvent: (node, event) {
+                _resetOsdTimer();
+                if (event is KeyDownEvent || event is KeyRepeatEvent) {
+                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                    _seekDelta(-10);
+                    return KeyEventResult.handled;
+                  }
+                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                    _seekDelta(10);
+                    return KeyEventResult.handled;
+                  }
+                  if (event.logicalKey == LogicalKeyboardKey.select ||
+                      event.logicalKey == LogicalKeyboardKey.enter ||
+                      event.logicalKey == LogicalKeyboardKey.space) {
+                    _player.playOrPause();
+                    return KeyEventResult.handled;
+                  }
+                }
+                return KeyEventResult.ignored;
+              },
+              child: Builder(
+                builder: (context) {
+                  final focused = Focus.of(context).hasFocus;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: focused ? Colors.white12 : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: focused ? TVTheme.accent : Colors.transparent,
+                        width: 1.5,
+                      ),
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline, color: Colors.redAccent, size: 64),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Playback Error',
-                          style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70, fontSize: 14),
-                        ),
-                        const SizedBox(height: 24),
+                        // Time Display
                         Row(
-                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            FocusableButton(
-                              label: 'Retry',
-                              color: TVTheme.accent,
-                              autofocus: true,
-                              onPressed: () {
-                                setState(() => _errorMessage = null);
-                                _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
-                              },
+                            Text(
+                              formatDuration(posSeconds),
+                              style: TextStyle(
+                                color: focused ? Colors.white : Colors.white70,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
                             ),
-                            const SizedBox(width: 16),
-                            FocusableButton(
-                              label: 'Exit',
-                              color: Colors.white24,
-                              onPressed: _exitPlayer,
+                            Text(
+                              formatDuration(durSeconds),
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 14,
+                              ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 8),
+                        // Track
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Stack(
+                            children: [
+                              Container(
+                                height: 6,
+                                color: Colors.white24,
+                              ),
+                              FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: bufferRatio,
+                                child: Container(
+                                  height: 6,
+                                  color: Colors.white38,
+                                ),
+                              ),
+                              FractionallySizedBox(
+                                alignment: Alignment.centerLeft,
+                                widthFactor: progressRatio,
+                                child: Container(
+                                  height: 6,
+                                  color: TVTheme.accent,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOsdIconButton({
+    required FocusNode focusNode,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    double size = 44,
+    double iconSize = 22,
+    bool isPrimary = false,
+    bool highlight = false,
+  }) {
+    return Focus(
+      focusNode: focusNode,
+      onKeyEvent: (node, event) {
+        _resetOsdTimer();
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (context) {
+          final focused = Focus.of(context).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: AnimatedScale(
+              scale: focused ? 1.15 : 1.0,
+              duration: const Duration(milliseconds: 140),
+              child: Container(
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isPrimary
+                      ? (focused ? Colors.white : TVTheme.accent)
+                      : (focused ? Colors.white24 : (highlight ? TVTheme.accent.withOpacity(0.3) : Colors.white10)),
+                  border: Border.all(
+                    color: focused ? Colors.white : (highlight ? TVTheme.accent : Colors.white12),
+                    width: focused ? 2.0 : 1.0,
                   ),
+                  boxShadow: focused
+                      ? [
+                          BoxShadow(
+                            color: (isPrimary ? TVTheme.accent : Colors.white).withOpacity(0.5),
+                            blurRadius: 16,
+                            spreadRadius: 2,
+                          )
+                        ]
+                      : [],
                 ),
-            ],
-          ),
+                child: Icon(
+                  icon,
+                  size: iconSize,
+                  color: isPrimary
+                      ? (focused ? Colors.black : Colors.white)
+                      : (focused ? Colors.white : (highlight ? TVTheme.accent : Colors.white70)),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildErrorOverlay() {
+    return Container(
+      color: Colors.black.withOpacity(0.92),
+      padding: const EdgeInsets.all(32),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 64),
+            const SizedBox(height: 16),
+            const Text(
+              'Playback Error',
+              style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FocusableButton(
+                  label: 'Retry',
+                  color: TVTheme.accent,
+                  autofocus: true,
+                  onPressed: () {
+                    setState(() => _errorMessage = null);
+                    _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
+                  },
+                ),
+                const SizedBox(width: 16),
+                FocusableButton(
+                  label: 'Exit',
+                  color: Colors.white24,
+                  onPressed: _exitPlayer,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );

@@ -70,4 +70,16 @@ class LocalStorage {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_progressKey(tmdbId));
   }
+
+  static const String _subFontSizeKey = 'subtitle_font_size';
+
+  static Future<double> getSubtitleFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_subFontSizeKey) ?? 44.0;
+  }
+
+  static Future<void> saveSubtitleFontSize(double size) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_subFontSizeKey, size);
+  }
 }

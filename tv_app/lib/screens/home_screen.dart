@@ -84,8 +84,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final keys = <String>[];
     if (_searchResults.isNotEmpty) keys.add('search');
     if (_history.isNotEmpty) keys.add('history');
-    keys.add('top');
     keys.add('latest');
+    keys.add('top');
     keys.add('comedy');
     return keys;
   }

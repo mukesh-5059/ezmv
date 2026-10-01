@@ -4,16 +4,24 @@ import 'package:flutter/services.dart';
 import '../models/subtitle.model.dart';
 import '../theme.dart';
 
-class SubtitlePickerDialog extends StatelessWidget {
+class SubtitlePickerDialog extends StatefulWidget {
   final List<SubtitleTrackInfo> subtitles;
   final SubtitleTrackInfo? selectedSubtitle;
   final bool isLoading;
+  final double initialFontSize;
+  final double initialDelaySeconds;
+  final ValueChanged<double>? onFontSizeChanged;
+  final ValueChanged<double>? onDelayChanged;
 
   const SubtitlePickerDialog({
     super.key,
     required this.subtitles,
     this.selectedSubtitle,
     this.isLoading = false,
+    this.initialFontSize = 44.0,
+    this.initialDelaySeconds = 0.0,
+    this.onFontSizeChanged,
+    this.onDelayChanged,
   });
 
   static Future<SubtitleTrackInfo?> show({
@@ -21,6 +29,10 @@ class SubtitlePickerDialog extends StatelessWidget {
     required List<SubtitleTrackInfo> subtitles,
     SubtitleTrackInfo? selectedSubtitle,
     bool isLoading = false,
+    double initialFontSize = 44.0,
+    double initialDelaySeconds = 0.0,
+    ValueChanged<double>? onFontSizeChanged,
+    ValueChanged<double>? onDelayChanged,
   }) {
     return showGeneralDialog<SubtitleTrackInfo?>(
       context: context,
@@ -35,6 +47,10 @@ class SubtitlePickerDialog extends StatelessWidget {
             subtitles: subtitles,
             selectedSubtitle: selectedSubtitle,
             isLoading: isLoading,
+            initialFontSize: initialFontSize,
+            initialDelaySeconds: initialDelaySeconds,
+            onFontSizeChanged: onFontSizeChanged,
+            onDelayChanged: onDelayChanged,
           ),
         );
       },
@@ -52,8 +68,40 @@ class SubtitlePickerDialog extends StatelessWidget {
   }
 
   @override
+  State<SubtitlePickerDialog> createState() => _SubtitlePickerDialogState();
+}
+
+class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
+  late double _fontSize;
+  late double _delay;
+
+  @override
+  void initState() {
+    super.initState();
+    _fontSize = widget.initialFontSize;
+    _delay = widget.initialDelaySeconds;
+  }
+
+  void _adjustFontSize(double delta) {
+    final newSize = (_fontSize + delta).clamp(28.0, 68.0);
+    setState(() => _fontSize = newSize);
+    widget.onFontSizeChanged?.call(newSize);
+  }
+
+  void _adjustDelay(double delta) {
+    final newDelay = double.parse((_delay + delta).toStringAsFixed(1));
+    setState(() => _delay = newDelay);
+    widget.onDelayChanged?.call(newDelay);
+  }
+
+  void _resetDelay() {
+    setState(() => _delay = 0.0);
+    widget.onDelayChanged?.call(0.0);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isOffSelected = selectedSubtitle == null;
+    final isOffSelected = widget.selectedSubtitle == null;
     final size = MediaQuery.of(context).size;
 
     return Material(
@@ -66,7 +114,7 @@ class SubtitlePickerDialog extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
           child: Container(
-            width: (size.width * 0.35).clamp(320.0, 420.0),
+            width: (size.width * 0.35).clamp(340.0, 440.0),
             height: double.infinity,
             decoration: BoxDecoration(
               color: const Color(0xE0181818),
@@ -75,7 +123,7 @@ class SubtitlePickerDialog extends StatelessWidget {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   blurRadius: 30,
                   spreadRadius: 5,
                 ),
@@ -101,7 +149,7 @@ class SubtitlePickerDialog extends StatelessWidget {
                           ),
                         ),
                         const Spacer(),
-                        if (isLoading)
+                        if (widget.isLoading)
                           const SizedBox(
                             width: 16,
                             height: 16,
@@ -109,19 +157,115 @@ class SubtitlePickerDialog extends StatelessWidget {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 16),
-                    const Divider(color: Colors.white12, height: 1),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
+
+                    // Subtitle Adjustments Card (Size & Sync)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Size Row
+                          Row(
+                            children: [
+                              const Icon(Icons.format_size_rounded, color: Colors.white70, size: 18),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Size',
+                                style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                              ),
+                              const Spacer(),
+                              _MiniStepperButton(
+                                label: '−',
+                                onPressed: () => _adjustFontSize(-4.0),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                                child: Text(
+                                  '${_fontSize.toInt()}px',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              _MiniStepperButton(
+                                label: '+',
+                                onPressed: () => _adjustFontSize(4.0),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          // Sync Delay Row
+                          Row(
+                            children: [
+                              const Icon(Icons.av_timer_rounded, color: Colors.white70, size: 18),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Sync',
+                                style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                              ),
+                              const Spacer(),
+                              _MiniStepperButton(
+                                label: '−0.5s',
+                                onPressed: () => _adjustDelay(-0.5),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                                child: Text(
+                                  '${_delay > 0 ? '+' : ''}${_delay.toStringAsFixed(1)}s',
+                                  style: TextStyle(
+                                    color: _delay != 0.0 ? TVTheme.accent : Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              _MiniStepperButton(
+                                label: '+0.5s',
+                                onPressed: () => _adjustDelay(0.5),
+                              ),
+                              if (_delay != 0.0) ...[
+                                const SizedBox(width: 6),
+                                _MiniStepperButton(
+                                  label: '↺',
+                                  onPressed: _resetDelay,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    const Text(
+                      'TRACKS',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
                     // Content
                     Expanded(
-                      child: isLoading && subtitles.isEmpty
+                      child: widget.isLoading && widget.subtitles.isEmpty
                           ? const Center(
                               child: Text(
                                 'Searching subtitle tracks...',
                                 style: TextStyle(color: Colors.white60, fontSize: 14),
                               ),
                             )
-                          : subtitles.isEmpty && !isLoading
+                          : widget.subtitles.isEmpty && !widget.isLoading
                               ? const Center(
                                   child: Text(
                                     'No subtitles found for this title.',
@@ -140,8 +284,8 @@ class SubtitlePickerDialog extends StatelessWidget {
                                       padding: EdgeInsets.symmetric(vertical: 8.0),
                                       child: Divider(color: Colors.white10, height: 1),
                                     ),
-                                    ...subtitles.map((sub) {
-                                      final isSelected = selectedSubtitle?.url == sub.url;
+                                    ...widget.subtitles.map((sub) {
+                                      final isSelected = widget.selectedSubtitle?.url == sub.url;
                                       return _SubtitleOptionTile(
                                         label: sub.label,
                                         isSelected: isSelected,
@@ -163,6 +307,73 @@ class SubtitlePickerDialog extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniStepperButton extends StatefulWidget {
+  final String label;
+  final VoidCallback onPressed;
+
+  const _MiniStepperButton({
+    required this.label,
+    required this.onPressed,
+  });
+
+  @override
+  State<_MiniStepperButton> createState() => _MiniStepperButtonState();
+}
+
+class _MiniStepperButtonState extends State<_MiniStepperButton> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (focused) => setState(() => _isFocused = focused),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onPressed();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: _isFocused ? TVTheme.accent : Colors.white.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: _isFocused ? Colors.white : Colors.white24,
+              width: 1.5,
+            ),
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: TVTheme.accent.withValues(alpha: 0.5),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    )
+                  ]
+                : [],
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: _isFocused ? Colors.white : Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
