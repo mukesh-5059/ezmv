@@ -12,7 +12,10 @@ def get_session() -> AsyncSession:
         current_loop = None
 
     if _session is None or _session.loop is None or _session.loop.is_closed() or (current_loop and _session.loop != current_loop):
-        curl_opts = {CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query"}
+        curl_opts = {
+            CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query",
+            CurlOpt.IPRESOLVE: 1,
+        }
         _session = AsyncSession(curl_options=curl_opts, loop=current_loop)
     return _session
 
@@ -20,7 +23,10 @@ async def init_session():
     global _session
     current_loop = asyncio.get_running_loop()
     if _session is None or _session.loop != current_loop:
-        curl_opts = {CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query"}
+        curl_opts = {
+            CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query",
+            CurlOpt.IPRESOLVE: 1,
+        }
         _session = AsyncSession(curl_options=curl_opts, loop=current_loop)
 
 async def close_session():

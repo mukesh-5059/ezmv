@@ -37,6 +37,8 @@ FIREFOX_PREFS = {
     "media.autoplay.blocking_policy": 0,
     "media.block-autoplay-until-in-foreground": False,
     "media.autoplay.allow-extension-background-pages": True,
+    "network.dns.disableIPv6": True,
+    "network.trr.mode": 5,
 }
 
 ABORT_RESOURCE_TYPES = {"image", "font", "media"}

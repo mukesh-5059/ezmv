@@ -4,11 +4,13 @@ import '../models/movie.model.dart';
 import '../core/api_client.dart';
 import '../core/local_storage.dart';
 import '../theme.dart';
-import '../widgets/movie_card.dart';
+import '../widgets/movie_lane.dart';
+import '../widgets/search_dialog.dart';
+import '../widgets/settings_dialog.dart';
 import 'details_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -16,40 +18,37 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Movie> _history = [];
-  
-  // Tamil screen lists
+
   List<Movie> _topTamil = [];
   List<Movie> _latestTamil = [];
   List<Movie> _comedyTamil = [];
-  
-  // English screen lists
+
   List<Movie> _topEnglish = [];
   List<Movie> _latestEnglish = [];
   List<Movie> _comedyEnglish = [];
-  
+
   List<Movie> _searchResults = [];
-  
+
   Movie? _focusedMovie;
   bool _isLoading = true;
   String? _errorMessage;
   bool _isTamilSelected = true;
-  
-  // Search & Pagination states
-  String _searchQuery = "";
+
+  String _searchQuery = '';
   int _searchPage = 1;
-  
+
   int _topTamilPage = 1;
   int _latestTamilPage = 1;
   int _comedyTamilPage = 1;
-  
+
   int _topEnglishPage = 1;
   int _latestEnglishPage = 1;
   int _comedyEnglishPage = 1;
-  
+
   String? _activeSearchText;
   int? _activeSearchYear;
   int? _activeSearchGenreId;
-  
+
   bool _isLoadingMore = false;
 
   final FocusNode _languageFocusNode = FocusNode();
@@ -58,7 +57,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final FocusNode _settingsFocusNode = FocusNode();
   final FocusNode _clearSearchFocusNode = FocusNode();
 
-  // Focus tracking maps for row-to-row traversal
   final Map<String, int> _rowLastFocusedIndex = {
     'search': 0,
     'history': 0,
@@ -120,71 +118,62 @@ class _HomeScreenState extends State<HomeScreen> {
   ) {
     if (event is! RawKeyDownEvent) return KeyEventResult.ignored;
 
+    final key = event.logicalKey;
     final visibleRows = _visibleRowKeys;
-    final rowPos = visibleRows.indexOf(rowKey);
+    final currentVisibleRowIndex = visibleRows.indexOf(rowKey);
 
-    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      if (rowPos > 0) {
-        final prevRowKey = visibleRows[rowPos - 1];
-        final maxCount = _getRowItemCount(prevRowKey);
-        if (maxCount > 0) {
-          var destIndex = _rowLastFocusedIndex[prevRowKey] ?? 0;
-          if (destIndex >= maxCount) {
-            destIndex = maxCount - 1;
-          }
-          final targetNode = _getFocusNode(prevRowKey, destIndex);
-          targetNode.requestFocus();
-          return KeyEventResult.handled;
-        }
-      }
-      // If we are on the first row, navigate to the Clear Search button if visible, else top bar
-      if (rowKey == 'search' && _searchQuery.isNotEmpty) {
-        _clearSearchFocusNode.requestFocus();
-      } else {
-        _searchFocusNode.requestFocus();
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      if (index > 0) {
+        _getFocusNode(rowKey, index - 1).requestFocus();
+        return KeyEventResult.handled;
       }
       return KeyEventResult.handled;
     }
 
-    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      if (rowPos >= 0 && rowPos < visibleRows.length - 1) {
-        final nextRowKey = visibleRows[rowPos + 1];
-        final maxCount = _getRowItemCount(nextRowKey);
-        if (maxCount > 0) {
+    if (key == LogicalKeyboardKey.arrowRight) {
+      if (index < itemCount - 1) {
+        _getFocusNode(rowKey, index + 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowDown) {
+      if (currentVisibleRowIndex >= 0 && currentVisibleRowIndex < visibleRows.length - 1) {
+        final nextRowKey = visibleRows[currentVisibleRowIndex + 1];
+        final nextRowCount = _getRowItemCount(nextRowKey);
+        if (nextRowCount > 0) {
           var destIndex = _rowLastFocusedIndex[nextRowKey] ?? 0;
-          if (destIndex >= maxCount) {
-            destIndex = maxCount - 1;
-          }
-          final targetNode = _getFocusNode(nextRowKey, destIndex);
-          targetNode.requestFocus();
+          if (destIndex >= nextRowCount) destIndex = nextRowCount - 1;
+          _getFocusNode(nextRowKey, destIndex).requestFocus();
           return KeyEventResult.handled;
         }
       }
-      // If we are on the last row, consume arrowDown to prevent focus escaping
       return KeyEventResult.handled;
     }
 
-    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      if (index == 0) {
-        // Prevent going left past the first item (prevents jumping rows)
+    if (key == LogicalKeyboardKey.arrowUp) {
+      if (currentVisibleRowIndex > 0) {
+        final prevRowKey = visibleRows[currentVisibleRowIndex - 1];
+        final prevRowCount = _getRowItemCount(prevRowKey);
+        if (prevRowCount > 0) {
+          var destIndex = _rowLastFocusedIndex[prevRowKey] ?? 0;
+          if (destIndex >= prevRowCount) destIndex = prevRowCount - 1;
+          _getFocusNode(prevRowKey, destIndex).requestFocus();
+          return KeyEventResult.handled;
+        }
+      } else if (currentVisibleRowIndex == 0) {
+        if (rowKey == 'search' && _searchQuery.isNotEmpty) {
+          _clearSearchFocusNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+        _languageFocusNode.requestFocus();
         return KeyEventResult.handled;
       }
-      return KeyEventResult.ignored;
-    }
-
-    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-      if (index == itemCount - 1) {
-        // Prevent going right past the last item (prevents jumping rows)
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
     }
 
     return KeyEventResult.ignored;
   }
-
-  final TextEditingController _ipController = TextEditingController();
-  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -194,18 +183,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _rowFocusNodes.values.forEach((list) {
-      for (var node in list) {
-        node.dispose();
-      }
-    });
     _languageFocusNode.dispose();
     _searchFocusNode.dispose();
     _refreshFocusNode.dispose();
     _settingsFocusNode.dispose();
     _clearSearchFocusNode.dispose();
-    _ipController.dispose();
-    _searchController.dispose();
+
+    for (final nodeList in _rowFocusNodes.values) {
+      for (final node in nodeList) {
+        node.dispose();
+      }
+    }
     super.dispose();
   }
 
@@ -213,954 +201,289 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _topTamilPage = 1;
-      _latestTamilPage = 1;
-      _comedyTamilPage = 1;
-      _topEnglishPage = 1;
-      _latestEnglishPage = 1;
-      _comedyEnglishPage = 1;
-      _searchPage = 1;
-      _searchResults = [];
-      _searchQuery = "";
-
-      _rowLastFocusedIndex['search'] = 0;
-      _rowLastFocusedIndex['history'] = 0;
-      _rowLastFocusedIndex['top'] = 0;
-      _rowLastFocusedIndex['latest'] = 0;
-      _rowLastFocusedIndex['comedy'] = 0;
-
-      _rowFocusNodes.values.forEach((list) {
-        for (var node in list) {
-          node.dispose();
-        }
-      });
-      _rowFocusNodes['search'] = [];
-      _rowFocusNodes['history'] = [];
-      _rowFocusNodes['top'] = [];
-      _rowFocusNodes['latest'] = [];
-      _rowFocusNodes['comedy'] = [];
     });
-    
-    await _fetchHomeMovies();
-  }
 
-  Future<void> _fetchHomeMovies() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-      _topTamilPage = 1;
-      _latestTamilPage = 1;
-      _comedyTamilPage = 1;
-      _topEnglishPage = 1;
-      _latestEnglishPage = 1;
-      _comedyEnglishPage = 1;
-      _searchPage = 1;
-      _searchResults = [];
-      _searchQuery = "";
-    });
-    
     try {
-      // Load local history
-      final history = await LocalStorage.getHistory();
-      
-      // Load Tamil lists
-      final topTamilList = await ApiClient.getPopularMovies(language: 'ta-IN', page: 1);
-      final latestTamilList = await ApiClient.discoverMovies(language: 'ta-IN', page: 1);
-      final comedyTamilList = await ApiClient.discoverMovies(language: 'ta-IN', genreId: 35, page: 1);
-      
-      // Load English lists
-      final topEnglishList = await ApiClient.getPopularMovies(language: 'en-US', page: 1);
-      final latestEnglishList = await ApiClient.discoverMovies(language: 'en-US', page: 1);
-      final comedyEnglishList = await ApiClient.discoverMovies(language: 'en-US', genreId: 35, page: 1);
+      await Future.wait([
+        _loadHistory(),
+        _fetchHomeMovies(),
+      ]);
 
-      setState(() {
-        _history = history;
-        _topTamil = topTamilList;
-        _latestTamil = latestTamilList;
-        _comedyTamil = comedyTamilList;
-        
-        _topEnglish = topEnglishList;
-        _latestEnglish = latestEnglishList;
-        _comedyEnglish = comedyEnglishList;
-        
-        _isLoading = false;
-        
-        // If remote queries returned nothing, it indicates a connection issue
-        if (topTamilList.isEmpty && topEnglishList.isEmpty) {
-          _errorMessage = "Connection Error: Unable to reach the backend server at '${ApiClient.baseUrl}'.";
-          _showSettingsDialog();
-        }
-        
-        // Default focused movie based on initial language (Tamil)
-        final currentList = _isTamilSelected ? latestTamilList : latestEnglishList;
-        if (currentList.isNotEmpty) {
-          _focusedMovie = currentList.first;
-        } else if (history.isNotEmpty) {
-          _focusedMovie = history.first;
-        } else {
-          _focusedMovie = null;
-        }
-      });
+      if (mounted) {
+        final initialList = _isTamilSelected ? _latestTamil : _latestEnglish;
+        setState(() {
+          _focusedMovie = initialList.isNotEmpty
+              ? initialList.first
+              : _history.isNotEmpty
+                  ? _history.first
+                  : null;
+          _isLoading = false;
+        });
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final visibleRows = _visibleRowKeys;
+          if (visibleRows.isNotEmpty) {
+            final firstRowKey = visibleRows.first;
+            if (_getRowItemCount(firstRowKey) > 0) {
+              _getFocusNode(firstRowKey, 0).requestFocus();
+            }
+          }
+        });
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = "Connection Error: $e";
-      });
-      _showSettingsDialog();
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Failed to load movie catalogs: $e';
+          _isLoading = false;
+        });
+      }
     }
   }
 
-  // Load history silently (when returning from Details page)
+  Future<void> _fetchHomeMovies() async {
+    _topTamilPage = 1;
+    _latestTamilPage = 1;
+    _comedyTamilPage = 1;
+    _topEnglishPage = 1;
+    _latestEnglishPage = 1;
+    _comedyEnglishPage = 1;
+
+    try {
+      final results = await Future.wait([
+        ApiClient.discoverMovies(language: 'ta', page: 1),
+        ApiClient.getPopularMovies(language: 'ta', page: 1),
+        ApiClient.discoverMovies(language: 'ta', genreId: 35, page: 1),
+        ApiClient.discoverMovies(language: 'en', page: 1),
+        ApiClient.getPopularMovies(language: 'en', page: 1),
+        ApiClient.discoverMovies(language: 'en', genreId: 35, page: 1),
+      ]);
+
+      if (mounted) {
+        setState(() {
+          _latestTamil = results[0];
+          _topTamil = results[1];
+          _comedyTamil = results[2];
+
+          _latestEnglish = results[3];
+          _topEnglish = results[4];
+          _comedyEnglish = results[5];
+        });
+      }
+    } catch (e) {
+      print('Fetch home movies failed: $e');
+    }
+  }
+
   Future<void> _loadHistory() async {
     final history = await LocalStorage.getHistory();
-    setState(() {
-      _history = history;
-    });
+    if (mounted) {
+      setState(() => _history = history);
+    }
   }
 
   Future<void> _loadMoreTopTamil() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
+    _isLoadingMore = true;
     final nextPage = _topTamilPage + 1;
-    final newMovies = await ApiClient.getPopularMovies(language: 'ta-IN', page: nextPage);
-    setState(() {
-      _topTamil.addAll(newMovies);
-      _topTamilPage = nextPage;
-      _isLoadingMore = false;
-    });
+    final newMovies = await ApiClient.getPopularMovies(language: 'ta', page: nextPage);
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _topTamilPage = nextPage;
+        _topTamil.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
   Future<void> _loadMoreLatestTamil() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
+    _isLoadingMore = true;
     final nextPage = _latestTamilPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'ta-IN', page: nextPage);
-    setState(() {
-      _latestTamil.addAll(newMovies);
-      _latestTamilPage = nextPage;
-      _isLoadingMore = false;
-    });
+    final newMovies = await ApiClient.discoverMovies(language: 'ta', page: nextPage);
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _latestTamilPage = nextPage;
+        _latestTamil.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
   Future<void> _loadMoreComedyTamil() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
+    _isLoadingMore = true;
     final nextPage = _comedyTamilPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'ta-IN', genreId: 35, page: nextPage);
-    setState(() {
-      _comedyTamil.addAll(newMovies);
-      _comedyTamilPage = nextPage;
-      _isLoadingMore = false;
-    });
+    final newMovies = await ApiClient.discoverMovies(language: 'ta', genreId: 35, page: nextPage);
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _comedyTamilPage = nextPage;
+        _comedyTamil.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
   Future<void> _loadMoreTopEnglish() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
+    _isLoadingMore = true;
     final nextPage = _topEnglishPage + 1;
-    final newMovies = await ApiClient.getPopularMovies(language: 'en-US', page: nextPage);
-    setState(() {
-      _topEnglish.addAll(newMovies);
-      _topEnglishPage = nextPage;
-      _isLoadingMore = false;
-    });
+    final newMovies = await ApiClient.getPopularMovies(language: 'en', page: nextPage);
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _topEnglishPage = nextPage;
+        _topEnglish.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
   Future<void> _loadMoreLatestEnglish() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
+    _isLoadingMore = true;
     final nextPage = _latestEnglishPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'en-US', page: nextPage);
-    setState(() {
-      _latestEnglish.addAll(newMovies);
-      _latestEnglishPage = nextPage;
-      _isLoadingMore = false;
-    });
+    final newMovies = await ApiClient.discoverMovies(language: 'en', page: nextPage);
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _latestEnglishPage = nextPage;
+        _latestEnglish.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
   Future<void> _loadMoreComedyEnglish() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
+    _isLoadingMore = true;
     final nextPage = _comedyEnglishPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'en-US', genreId: 35, page: nextPage);
-    setState(() {
-      _comedyEnglish.addAll(newMovies);
-      _comedyEnglishPage = nextPage;
-      _isLoadingMore = false;
-    });
+    final newMovies = await ApiClient.discoverMovies(language: 'en', genreId: 35, page: nextPage);
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _comedyEnglishPage = nextPage;
+        _comedyEnglish.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
   Future<void> _loadMoreSearch() async {
     if (_isLoadingMore) return;
-    setState(() => _isLoadingMore = true);
-
+    _isLoadingMore = true;
     final nextPage = _searchPage + 1;
-    List<Movie> newMovies = [];
 
+    List<Movie> newMovies = [];
     if (_activeSearchText != null) {
       newMovies = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
     } else {
-      final results = await Future.wait([
-        ApiClient.discoverMovies(
-          language: 'ta-IN',
-          year: _activeSearchYear,
-          genreId: _activeSearchGenreId,
-          page: nextPage,
-        ),
-        ApiClient.discoverMovies(
-          language: 'en-US',
-          year: _activeSearchYear,
-          genreId: _activeSearchGenreId,
-          page: nextPage,
-        ),
-      ]);
-      final List<Movie> combined = [...results[0], ...results[1]];
-      final seen = <int>{};
-      newMovies = combined.where((m) => seen.add(m.tmdbId)).toList();
+      final lang = _isTamilSelected ? 'ta' : 'en';
+      newMovies = await ApiClient.discoverMovies(
+        language: lang,
+        year: _activeSearchYear,
+        genreId: _activeSearchGenreId,
+        page: nextPage,
+      );
     }
 
-    setState(() {
-      _searchResults.addAll(newMovies);
-      _searchPage = nextPage;
-      _isLoadingMore = false;
-    });
+    if (mounted && newMovies.isNotEmpty) {
+      setState(() {
+        _searchPage = nextPage;
+        _searchResults.addAll(newMovies);
+      });
+    }
+    _isLoadingMore = false;
   }
 
-  // Search Movies Flow
   Future<void> _performSearch(String query) async {
     if (query.trim().isEmpty) return;
     setState(() {
       _isLoading = true;
-      _searchQuery = query;
-      _searchPage = 1;
-      _activeSearchText = query;
+      _searchQuery = query.trim();
+      _activeSearchText = query.trim();
       _activeSearchYear = null;
       _activeSearchGenreId = null;
-      
-      _rowLastFocusedIndex['search'] = 0;
-      _rowFocusNodes['search']?.forEach((node) => node.dispose());
-      _rowFocusNodes['search'] = [];
+      _searchPage = 1;
     });
 
-    final results = await ApiClient.searchMovies(query);
-    setState(() {
-      _searchResults = results;
-      _isLoading = false;
-      if (results.isNotEmpty) {
-        _focusedMovie = results.first;
-      }
-    });
+    final results = await ApiClient.searchMovies(query, page: 1);
+    if (mounted) {
+      setState(() {
+        _searchResults = results;
+        _isLoading = false;
+        if (results.isNotEmpty) {
+          _focusedMovie = results.first;
+        }
+      });
 
-    if (results.isNotEmpty) {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _getFocusNode('search', 0).requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_searchResults.isNotEmpty) {
+          _getFocusNode('search', 0).requestFocus();
+        }
       });
     }
   }
 
-  // Discover movies filterable by genre or year for Quick Tags (Querying Tamil and English parallelly)
   Future<void> _performDiscover(String label, {int? year, int? genreId}) async {
     setState(() {
       _isLoading = true;
       _searchQuery = label;
-      _searchPage = 1;
       _activeSearchText = null;
       _activeSearchYear = year;
       _activeSearchGenreId = genreId;
-
-      _rowLastFocusedIndex['search'] = 0;
-      _rowFocusNodes['search']?.forEach((node) => node.dispose());
-      _rowFocusNodes['search'] = [];
+      _searchPage = 1;
     });
 
-    final results = await Future.wait([
-      ApiClient.discoverMovies(language: 'ta-IN', year: year, genreId: genreId),
-      ApiClient.discoverMovies(language: 'en-US', year: year, genreId: genreId),
-    ]);
+    final lang = _isTamilSelected ? 'ta' : 'en';
+    final results = await ApiClient.discoverMovies(
+      language: lang,
+      year: year,
+      genreId: genreId,
+      page: 1,
+    );
 
-    final List<Movie> combined = [...results[0], ...results[1]];
-    final seen = <int>{};
-    final unique = combined.where((m) => seen.add(m.tmdbId)).toList();
+    if (mounted) {
+      setState(() {
+        _searchResults = results;
+        _isLoading = false;
+        if (results.isNotEmpty) {
+          _focusedMovie = results.first;
+        }
+      });
 
-    setState(() {
-      _searchResults = unique;
-      _isLoading = false;
-      if (unique.isNotEmpty) {
-        _focusedMovie = unique.first;
-      }
-    });
-
-    if (unique.isNotEmpty) {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _getFocusNode('search', 0).requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_searchResults.isNotEmpty) {
+          _getFocusNode('search', 0).requestFocus();
+        }
       });
     }
   }
 
   void _clearSearch() {
     setState(() {
-      _searchQuery = "";
-      _searchResults = [];
-      _searchPage = 1;
+      _searchQuery = '';
       _activeSearchText = null;
       _activeSearchYear = null;
       _activeSearchGenreId = null;
+      _searchResults.clear();
+      _searchPage = 1;
 
-      _rowLastFocusedIndex['search'] = 0;
-      _rowFocusNodes['search']?.forEach((node) => node.dispose());
-      _rowFocusNodes['search'] = [];
-      
       final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
       if (currentList.isNotEmpty) {
         _focusedMovie = currentList.first;
       } else if (_history.isNotEmpty) {
         _focusedMovie = _history.first;
-      } else {
-        _focusedMovie = null;
       }
     });
 
-    // Request focus on the first item of the first visible row (e.g. history or top) to prevent focus loss
-    Future.delayed(const Duration(milliseconds: 100), () {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       final visibleRows = _visibleRowKeys;
       if (visibleRows.isNotEmpty) {
-        final firstRowKey = visibleRows.first;
-        final targetNode = _getFocusNode(firstRowKey, 0);
-        targetNode.requestFocus();
+        final firstRow = visibleRows.first;
+        if (_getRowItemCount(firstRow) > 0) {
+          _getFocusNode(firstRow, 0).requestFocus();
+        }
       }
     });
   }
 
-  Widget _buildSearchTag(BuildContext context, String label, VoidCallback onTap, {bool isLeftMost = false, FocusNode? leftFocusNode}) {
-    return Focus(
-      onKey: (node, event) {
-        if (event is RawKeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-              event.logicalKey == LogicalKeyboardKey.space) {
-            Navigator.pop(context);
-            onTap();
-            return KeyEventResult.handled;
-          }
-          if (isLeftMost && event.logicalKey == LogicalKeyboardKey.arrowLeft && leftFocusNode != null) {
-            leftFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (context) {
-          final focused = Focus.of(context).hasFocus;
-          return ActionChip(
-            backgroundColor: focused ? Colors.white : TVTheme.surface,
-            label: Text(
-              label,
-              style: TextStyle(
-                color: focused ? Colors.black : Colors.white,
-                fontWeight: focused ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: BorderSide(
-                color: focused ? Colors.white : Colors.grey.shade800,
-                width: 1,
-              ),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              onTap();
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  // Open Search Query input dialog with focusable Quick Search tags
-  void _showSearchDialog() {
-    _searchController.clear();
-    final searchButtonFocusNode = FocusNode();
-    final textFieldFocusNode = FocusNode(
-      onKey: (node, event) {
-        if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-          searchButtonFocusNode.requestFocus();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-    );
-    final cancelButtonFocusNode = FocusNode();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: TVTheme.surface,
-          title: const Text('Search Movies'),
-          content: SizedBox(
-            width: 750, // Wider for side-by-side split screen
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Left Column: Custom Text Input & Search/Cancel Buttons
-                SizedBox(
-                  width: 280,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Type Movie Title',
-                        style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        focusNode: textFieldFocusNode,
-                        controller: _searchController,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: 'Enter title...',
-                          border: OutlineInputBorder(),
-                        ),
-                        onSubmitted: (val) {
-                          Future.delayed(const Duration(milliseconds: 150), () {
-                            if (searchButtonFocusNode.canRequestFocus) {
-                              searchButtonFocusNode.requestFocus();
-                            }
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Focus(
-                              focusNode: cancelButtonFocusNode,
-                              onKey: (node, event) {
-                                if (event is RawKeyDownEvent) {
-                                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                                    textFieldFocusNode.requestFocus();
-                                    return KeyEventResult.handled;
-                                  }
-                                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                                    searchButtonFocusNode.requestFocus();
-                                    return KeyEventResult.handled;
-                                  }
-                                  if (event.logicalKey == LogicalKeyboardKey.select ||
-                                      event.logicalKey == LogicalKeyboardKey.enter ||
-                                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                      event.logicalKey == LogicalKeyboardKey.space) {
-                                    Navigator.pop(context);
-                                    return KeyEventResult.handled;
-                                  }
-                                }
-                                return KeyEventResult.ignored;
-                              },
-                              child: Builder(
-                                builder: (context) {
-                                  final focused = Focus.of(context).hasFocus;
-                                  return TextButton(
-                                    style: TextButton.styleFrom(
-                                      backgroundColor: focused ? Colors.white.withOpacity(0.15) : Colors.transparent,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                    ),
-                                    onPressed: () => Navigator.pop(context),
-                                    child: const Text('Cancel', style: TextStyle(color: Colors.white)),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Focus(
-                              focusNode: searchButtonFocusNode,
-                              onKey: (node, event) {
-                                if (event is RawKeyDownEvent) {
-                                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                                    textFieldFocusNode.requestFocus();
-                                    return KeyEventResult.handled;
-                                  }
-                                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                                    cancelButtonFocusNode.requestFocus();
-                                    return KeyEventResult.handled;
-                                  }
-                                  if (event.logicalKey == LogicalKeyboardKey.select ||
-                                      event.logicalKey == LogicalKeyboardKey.enter ||
-                                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                      event.logicalKey == LogicalKeyboardKey.space) {
-                                    Navigator.pop(context);
-                                    _performSearch(_searchController.text);
-                                    return KeyEventResult.handled;
-                                  }
-                                }
-                                return KeyEventResult.ignored;
-                              },
-                              child: Builder(
-                                builder: (context) {
-                                  final focused = Focus.of(context).hasFocus;
-                                  return ElevatedButton(
-                                    onPressed: () {
-                                      Navigator.pop(context);
-                                      _performSearch(_searchController.text);
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: focused ? Colors.white : TVTheme.accent,
-                                      foregroundColor: focused ? Colors.black : Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                    ),
-                                    child: const Text('Search'),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                
-                // Vertical Divider
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20.0),
-                  child: SizedBox(
-                    height: 280,
-                    child: VerticalDivider(color: Colors.grey, width: 1, thickness: 1),
-                  ),
-                ),
-                
-                // Right Column: All Quick Search Tags (Scrollable list of Genres and Years)
-                Expanded(
-                  child: SizedBox(
-                    height: 280,
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Quick Search Genres',
-                            style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _buildSearchTag(context, 'Action', () => _performDiscover('Action', genreId: 28), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
-                              _buildSearchTag(context, 'Comedy', () => _performDiscover('Comedy', genreId: 35)),
-                              _buildSearchTag(context, 'Thriller', () => _performDiscover('Thriller', genreId: 53)),
-                              _buildSearchTag(context, 'Horror', () => _performDiscover('Horror', genreId: 27)),
-                              _buildSearchTag(context, 'Sci-Fi', () => _performDiscover('Sci-Fi', genreId: 878), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
-                              _buildSearchTag(context, 'Romance', () => _performDiscover('Romance', genreId: 10749)),
-                              _buildSearchTag(context, 'Animation', () => _performDiscover('Animation', genreId: 16)),
-                              _buildSearchTag(context, 'Drama', () => _performDiscover('Drama', genreId: 18), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          const Text(
-                            'Quick Search Years',
-                            style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _buildSearchTag(context, '2026', () => _performDiscover('2026', year: 2026), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
-                              _buildSearchTag(context, '2025', () => _performDiscover('2025', year: 2025)),
-                              _buildSearchTag(context, '2024', () => _performDiscover('2024', year: 2024)),
-                              _buildSearchTag(context, '2023', () => _performDiscover('2023', year: 2023)),
-                              _buildSearchTag(context, '2022', () => _performDiscover('2022', year: 2022)),
-                              _buildSearchTag(context, '2021', () => _performDiscover('2021', year: 2021), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
-                              _buildSearchTag(context, '2020', () => _performDiscover('2020', year: 2020)),
-                              _buildSearchTag(context, '2019', () => _performDiscover('2019', year: 2019)),
-                              _buildSearchTag(context, '2018', () => _performDiscover('2018', year: 2018)),
-                              _buildSearchTag(context, '2015', () => _performDiscover('2015', year: 2015)),
-                              _buildSearchTag(context, '2010', () => _performDiscover('2010', year: 2010), isLeftMost: true, leftFocusNode: searchButtonFocusNode),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    ).then((_) {
-      textFieldFocusNode.dispose();
-      cancelButtonFocusNode.dispose();
-      searchButtonFocusNode.dispose();
-    });
-  }
-
-  // Open API server settings modal (TV D-pad focus trap resolved)
-  void _showSettingsDialog() {
-    _ipController.text = ApiClient.displayBaseUrl;
-    final saveFocusNode = FocusNode();
-    final textFieldFocusNode = FocusNode(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            // D-pad down from text field focuses Save Settings button
-            saveFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-    );
-    final cancelFocusNode = FocusNode();
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: TVTheme.surface,
-          title: const Text('Backend API Settings'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Specify the server IP and port where the FastAPI python server is running.',
-                style: TextStyle(color: TVTheme.textSecondary, fontSize: 12),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                focusNode: textFieldFocusNode,
-                autofocus: true,
-                controller: _ipController,
-                decoration: const InputDecoration(
-                  labelText: 'Server IP / Port / URL',
-                  hintText: 'e.g., 192.168.29.50:8080',
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (val) {
-                  // Auto focus Save button when 'Done/OK' is pressed on virtual keyboard
-                  // Wrapped in Future.delayed to bypass Android keyboard dismissal focus resets
-                  Future.delayed(const Duration(milliseconds: 150), () {
-                    if (saveFocusNode.canRequestFocus) {
-                      saveFocusNode.requestFocus();
-                    }
-                  });
-                },
-              ),
-            ],
-          ),
-          actions: [
-            Focus(
-              focusNode: cancelFocusNode,
-              onKeyEvent: (node, event) {
-                if (event is KeyDownEvent) {
-                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                    textFieldFocusNode.requestFocus();
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                    saveFocusNode.requestFocus();
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.select ||
-                      event.logicalKey == LogicalKeyboardKey.enter ||
-                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                      event.logicalKey == LogicalKeyboardKey.space) {
-                    FocusManager.instance.primaryFocus?.unfocus();
-                    Navigator.pop(context);
-                    return KeyEventResult.handled;
-                  }
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Builder(
-                builder: (context) {
-                  final focused = Focus.of(context).hasFocus;
-                  return TextButton(
-                    style: TextButton.styleFrom(
-                      backgroundColor: focused ? Colors.white.withOpacity(0.1) : Colors.transparent,
-                    ),
-                    onPressed: () {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      Navigator.pop(context);
-                    },
-                    child: const Text('Cancel', style: TextStyle(color: Colors.white)),
-                  );
-                },
-              ),
-            ),
-            Focus(
-              focusNode: saveFocusNode,
-              onKeyEvent: (node, event) {
-                if (event is KeyDownEvent) {
-                  if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                    textFieldFocusNode.requestFocus();
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                    cancelFocusNode.requestFocus();
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.select ||
-                      event.logicalKey == LogicalKeyboardKey.enter ||
-                      event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                      event.logicalKey == LogicalKeyboardKey.space) {
-                    FocusManager.instance.primaryFocus?.unfocus();
-                    ApiClient.setBaseUrl(_ipController.text).then((_) {
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                        _loadAllData();
-                      }
-                    });
-                    return KeyEventResult.handled;
-                  }
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Builder(
-                builder: (context) {
-                  final focused = Focus.of(context).hasFocus;
-                  return ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: focused ? Colors.white : TVTheme.accent,
-                      foregroundColor: focused ? Colors.black : Colors.white,
-                    ),
-                    onPressed: () async {
-                      FocusManager.instance.primaryFocus?.unfocus();
-                      await ApiClient.setBaseUrl(_ipController.text);
-                      if (context.mounted) {
-                        Navigator.pop(context);
-                        _loadAllData();
-                      }
-                    },
-                    child: const Text('Save Settings'),
-                  );
-                },
-              ),
-            )
-          ],
-        );
-      },
-    ).then((_) {
-      textFieldFocusNode.dispose();
-      cancelFocusNode.dispose();
-      saveFocusNode.dispose();
-    });
-  }
-
-  Widget _buildMovieRow(String rowKey, String title, List<Movie> movies, {VoidCallback? onLoadMore, bool showClear = false}) {
-    if (movies.isEmpty && !showClear) {
-      return SizedBox.shrink(key: ValueKey('${rowKey}_empty'));
-    }
-    
-    // Add 1 extra item for the focusable "Load More" card if pagination is available
-    final hasLoadMore = onLoadMore != null && movies.isNotEmpty;
-    final itemCount = movies.length + (hasLoadMore ? 1 : 0);
-
-    return Builder(
-      builder: (rowContext) {
-        return Column(
-          key: ValueKey(rowKey),
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 24.0, top: 16.0, bottom: 4.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.titleLarge),
-                  if (showClear)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 24.0),
-                      child: Focus(
-                        focusNode: _clearSearchFocusNode,
-                        onKey: (node, event) {
-                          if (event is RawKeyDownEvent) {
-                            if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                              final destIndex = _rowLastFocusedIndex['search'] ?? 0;
-                              final maxCount = _getRowItemCount('search');
-                              final targetIndex = destIndex < maxCount ? destIndex : 0;
-                              _getFocusNode('search', targetIndex).requestFocus();
-                              return KeyEventResult.handled;
-                            }
-                            if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                              _searchFocusNode.requestFocus();
-                              return KeyEventResult.handled;
-                            }
-                            if (event.logicalKey == LogicalKeyboardKey.select ||
-                                event.logicalKey == LogicalKeyboardKey.enter ||
-                                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                event.logicalKey == LogicalKeyboardKey.space) {
-                              _clearSearch();
-                              return KeyEventResult.handled;
-                            }
-                          }
-                          return KeyEventResult.ignored;
-                        },
-                        child: Builder(
-                          builder: (context) {
-                            final focused = Focus.of(context).hasFocus;
-                            return TextButton.icon(
-                              style: TextButton.styleFrom(
-                                backgroundColor: focused ? TVTheme.accent : Colors.transparent,
-                                foregroundColor: Colors.white,
-                              ),
-                              icon: const Icon(Icons.close, size: 16),
-                              label: const Text('Clear Search', style: TextStyle(fontSize: 12)),
-                              onPressed: _clearSearch,
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            SizedBox(
-              height: 240,
-              child: movies.isEmpty && showClear
-                  ? const Center(
-                      child: Text(
-                        'No search results found.',
-                        style: TextStyle(color: TVTheme.textSecondary),
-                      ),
-                    )
-                  : ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 18),
-                      itemCount: itemCount,
-                      itemBuilder: (context, index) {
-                        // Check if this is the last item and we have a load-more option
-                        if (hasLoadMore && index == movies.length) {
-                          final node = _getFocusNode(rowKey, index);
-                          return Focus(
-                            focusNode: node,
-                            onFocusChange: (focused) {
-                              if (focused) {
-                                setState(() {
-                                  _rowLastFocusedIndex[rowKey] = index;
-                                });
-                                if (node.context != null) {
-                                  Scrollable.ensureVisible(
-                                    node.context!,
-                                    duration: const Duration(milliseconds: 300),
-                                    alignment: 0.5,
-                                    curve: Curves.easeInOut,
-                                  );
-                                  Scrollable.ensureVisible(
-                                    rowContext,
-                                    duration: const Duration(milliseconds: 300),
-                                    alignment: 0.5,
-                                    curve: Curves.easeInOut,
-                                  );
-                                }
-                              }
-                            },
-                            onKey: (node, event) {
-                              final navResult = _handleRowKeyNavigation(rowKey, index, itemCount, event);
-                              if (navResult != KeyEventResult.ignored) {
-                                return navResult;
-                              }
-                              if (event is RawKeyDownEvent) {
-                                if (event.logicalKey == LogicalKeyboardKey.select ||
-                                    event.logicalKey == LogicalKeyboardKey.enter ||
-                                    event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                    event.logicalKey == LogicalKeyboardKey.space) {
-                                  onLoadMore();
-                                  return KeyEventResult.handled;
-                                }
-                              }
-                              return KeyEventResult.ignored;
-                            },
-                            child: Builder(
-                              builder: (context) {
-                                final focused = Focus.of(context).hasFocus;
-                                return GestureDetector(
-                                  onTap: onLoadMore,
-                                  child: Container(
-                                    width: 130,
-                                    margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                                    decoration: TVTheme.focusDecoration(focused),
-                                    child: Card(
-                                      color: TVTheme.surface,
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            _isLoadingMore ? Icons.hourglass_empty : Icons.arrow_forward,
-                                            color: focused ? Colors.white : TVTheme.accent,
-                                            size: 32,
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Text(
-                                            _isLoadingMore ? 'Loading...' : 'Load More',
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        }
-
-                        final movie = movies[index];
-                        final node = _getFocusNode(rowKey, index);
-                        return MovieCard(
-                          movie: movie,
-                          focusNode: node,
-                          onKey: (node, event) {
-                            return _handleRowKeyNavigation(rowKey, index, itemCount, event);
-                          },
-                          onFocusChanged: (hasFocus) {
-                            if (hasFocus) {
-                              setState(() {
-                                _focusedMovie = movie;
-                                _rowLastFocusedIndex[rowKey] = index;
-                              });
-                              if (node.context != null) {
-                                Scrollable.ensureVisible(
-                                  node.context!,
-                                  duration: const Duration(milliseconds: 300),
-                                  alignment: 0.5,
-                                  curve: Curves.easeInOut,
-                                );
-                                Scrollable.ensureVisible(
-                                  rowContext,
-                                  duration: const Duration(milliseconds: 300),
-                                  alignment: 0.5,
-                                  curve: Curves.easeInOut,
-                                );
-                              }
-                            }
-                          },
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => DetailsScreen(movie: movie),
-                              ),
-                            ).then((_) => _loadHistory()); // Silently refresh history list on return
-                          },
-                        );
-                      },
-                    ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  // D-pad focus-aware action buttons for TV top-bar
   Widget _buildTopBarAction({
     required IconData icon,
     required String label,
@@ -1182,11 +505,8 @@ class _HomeScreenState extends State<HomeScreen> {
               final maxCount = _getRowItemCount(firstRowKey);
               if (maxCount > 0) {
                 var destIndex = _rowLastFocusedIndex[firstRowKey] ?? 0;
-                if (destIndex >= maxCount) {
-                  destIndex = maxCount - 1;
-                }
-                final targetNode = _getFocusNode(firstRowKey, destIndex);
-                targetNode.requestFocus();
+                if (destIndex >= maxCount) destIndex = maxCount - 1;
+                _getFocusNode(firstRowKey, destIndex).requestFocus();
                 return KeyEventResult.handled;
               }
             }
@@ -1225,6 +545,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _openMovieDetails(Movie movie) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DetailsScreen(movie: movie),
+      ),
+    ).then((_) => _loadHistory());
+  }
+
   @override
   Widget build(BuildContext context) {
     final Size size = MediaQuery.of(context).size;
@@ -1234,7 +563,6 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top Bar / Title & Search/Settings Buttons
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
               child: Row(
@@ -1277,14 +605,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             _rowLastFocusedIndex['latest'] = 0;
                             _rowLastFocusedIndex['comedy'] = 0;
 
-                            _rowFocusNodes['top']?.forEach((node) => node.dispose());
-                            _rowFocusNodes['latest']?.forEach((node) => node.dispose());
-                            _rowFocusNodes['comedy']?.forEach((node) => node.dispose());
+                            for (final node in _rowFocusNodes['top'] ?? <FocusNode>[]) { node.dispose(); }
+                            for (final node in _rowFocusNodes['latest'] ?? <FocusNode>[]) { node.dispose(); }
+                            for (final node in _rowFocusNodes['comedy'] ?? <FocusNode>[]) { node.dispose(); }
                             _rowFocusNodes['top'] = [];
                             _rowFocusNodes['latest'] = [];
                             _rowFocusNodes['comedy'] = [];
 
-                            // Update focused movie on category change
                             final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
                             if (currentList.isNotEmpty) {
                               _focusedMovie = currentList.first;
@@ -1300,7 +627,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.search,
                         label: 'Search Movies',
                         focusNode: _searchFocusNode,
-                        onTap: _showSearchDialog,
+                        onTap: () => SearchDialog.show(
+                          context: context,
+                          onSearch: _performSearch,
+                          onDiscover: _performDiscover,
+                        ),
                       ),
                       _buildTopBarAction(
                         icon: Icons.refresh,
@@ -1312,136 +643,90 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.settings,
                         label: 'Server Settings',
                         focusNode: _settingsFocusNode,
-                        onTap: _showSettingsDialog,
+                        onTap: () => SettingsDialog.show(
+                          context: context,
+                          onSaved: _loadAllData,
+                        ),
                       ),
                     ],
                   )
                 ],
               ),
             ),
-
-            // Loader / Error Banner / Main Lanes
             Expanded(
               child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: TVTheme.accent))
+                  ? const Center(
+                      child: CircularProgressIndicator(color: TVTheme.accent),
+                    )
                   : _errorMessage != null
                       ? Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(32),
-                            margin: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: TVTheme.surface,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.red.shade900, width: 2),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.error_outline, color: TVTheme.accent, size: 64),
-                                const SizedBox(height: 16),
-                                Text(
-                                  _errorMessage!,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  'Please verify that your python backend is running and that your TV/Phone is connected to the same Wi-Fi network.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
-                                ),
-                                const SizedBox(height: 24),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Focus(
-                                      autofocus: true,
-                                      onKeyEvent: (node, event) {
-                                        if (event is KeyUpEvent) {
-                                          if (event.logicalKey == LogicalKeyboardKey.select ||
-                                              event.logicalKey == LogicalKeyboardKey.enter ||
-                                              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                              event.logicalKey == LogicalKeyboardKey.space) {
-                                            _loadAllData();
-                                            return KeyEventResult.handled;
-                                          }
-                                        }
-                                        return KeyEventResult.ignored;
-                                      },
-                                      child: Builder(
-                                        builder: (context) {
-                                          final focused = Focus.of(context).hasFocus;
-                                          return ElevatedButton.icon(
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: focused ? Colors.white : TVTheme.accent,
-                                              foregroundColor: focused ? Colors.black : Colors.white,
-                                            ),
-                                            onPressed: _loadAllData,
-                                            icon: const Icon(Icons.refresh),
-                                            label: const Text('Try Again'),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Focus(
-                                      onKeyEvent: (node, event) {
-                                        if (event is KeyUpEvent) {
-                                          if (event.logicalKey == LogicalKeyboardKey.select ||
-                                              event.logicalKey == LogicalKeyboardKey.enter ||
-                                              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                              event.logicalKey == LogicalKeyboardKey.space) {
-                                            _showSettingsDialog();
-                                            return KeyEventResult.handled;
-                                          }
-                                        }
-                                        return KeyEventResult.ignored;
-                                      },
-                                      child: Builder(
-                                        builder: (context) {
-                                          final focused = Focus.of(context).hasFocus;
-                                          return ElevatedButton.icon(
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: focused ? Colors.white : Colors.grey.shade800,
-                                              foregroundColor: focused ? Colors.black : Colors.white,
-                                            ),
-                                            onPressed: _showSettingsDialog,
-                                            icon: const Icon(Icons.settings),
-                                            label: const Text('Configure Server'),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              ],
-                            ),
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(color: TVTheme.accent),
                           ),
                         )
-                      : SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const SizedBox(height: 12),
-
-                              // Search results row (Tamil & English combined)
-                              _buildMovieRow('search', 'Search Results for "$_searchQuery"', _searchResults, onLoadMore: _loadMoreSearch, showClear: _searchQuery.isNotEmpty),
-                              
-                              _buildMovieRow('history', 'Resume Watching', _history),
-                              
-                              if (_isTamilSelected) ...[
-                                _buildMovieRow('top', 'Top Tamil Movies', _topTamil, onLoadMore: _loadMoreTopTamil),
-                                _buildMovieRow('latest', 'Latest Tamil Movies', _latestTamil, onLoadMore: _loadMoreLatestTamil),
-                                _buildMovieRow('comedy', 'Tamil Comedy Movies', _comedyTamil, onLoadMore: _loadMoreComedyTamil),
-                              ] else ...[
-                                _buildMovieRow('top', 'Top English Movies', _topEnglish, onLoadMore: _loadMoreTopEnglish),
-                                _buildMovieRow('latest', 'Latest English Movies', _latestEnglish, onLoadMore: _loadMoreLatestEnglish),
-                                _buildMovieRow('comedy', 'English Comedy Movies', _comedyEnglish, onLoadMore: _loadMoreComedyEnglish),
-                              ],
-                              
-                              const SizedBox(height: 40),
-                            ],
-                          ),
+                      : ListView(
+                          padding: const EdgeInsets.only(bottom: 40),
+                          children: [
+                            if (_searchResults.isNotEmpty)
+                              MovieLane(
+                                rowKey: 'search',
+                                title: 'Search Results: "$_searchQuery"',
+                                movies: _searchResults,
+                                onMovieTap: _openMovieDetails,
+                                onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                                onLoadMore: _loadMoreSearch,
+                                onClear: _clearSearch,
+                                clearFocusNode: _clearSearchFocusNode,
+                                getFocusNode: _getFocusNode,
+                                onKeyNav: _handleRowKeyNavigation,
+                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                              ),
+                            if (_history.isNotEmpty)
+                              MovieLane(
+                                rowKey: 'history',
+                                title: 'Recently Watched',
+                                movies: _history,
+                                onMovieTap: _openMovieDetails,
+                                onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                                getFocusNode: _getFocusNode,
+                                onKeyNav: _handleRowKeyNavigation,
+                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                              ),
+                            MovieLane(
+                              rowKey: 'latest',
+                              title: _isTamilSelected ? 'Latest Tamil Releases' : 'Latest Releases',
+                              movies: _isTamilSelected ? _latestTamil : _latestEnglish,
+                              onMovieTap: _openMovieDetails,
+                              onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                              onLoadMore: _isTamilSelected ? _loadMoreLatestTamil : _loadMoreLatestEnglish,
+                              getFocusNode: _getFocusNode,
+                              onKeyNav: _handleRowKeyNavigation,
+                              onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                            ),
+                            MovieLane(
+                              rowKey: 'top',
+                              title: _isTamilSelected ? 'Popular Tamil Movies' : 'Popular Movies',
+                              movies: _isTamilSelected ? _topTamil : _topEnglish,
+                              onMovieTap: _openMovieDetails,
+                              onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                              onLoadMore: _isTamilSelected ? _loadMoreTopTamil : _loadMoreTopEnglish,
+                              getFocusNode: _getFocusNode,
+                              onKeyNav: _handleRowKeyNavigation,
+                              onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                            ),
+                            MovieLane(
+                              rowKey: 'comedy',
+                              title: _isTamilSelected ? 'Tamil Comedy Hits' : 'Comedy Hits',
+                              movies: _isTamilSelected ? _comedyTamil : _comedyEnglish,
+                              onMovieTap: _openMovieDetails,
+                              onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                              onLoadMore: _isTamilSelected ? _loadMoreComedyTamil : _loadMoreComedyEnglish,
+                              getFocusNode: _getFocusNode,
+                              onKeyNav: _handleRowKeyNavigation,
+                              onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                            ),
+                          ],
                         ),
             ),
           ],

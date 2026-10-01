@@ -4,8 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../core/api_client.dart';
 import '../core/local_storage.dart';
+import '../models/subtitle.model.dart';
 import '../theme.dart';
+import '../widgets/focusable_button.dart';
+import '../widgets/player_hud.dart';
+import '../widgets/resume_dialog.dart';
+import '../widgets/subtitle_picker_dialog.dart';
 
 String formatDuration(int totalSeconds) {
   if (totalSeconds <= 0) return '0:00';
@@ -25,6 +31,8 @@ class PlayerScreen extends StatefulWidget {
   final Map<String, String>? headers;
   final String movieTitle;
   final int tmdbId;
+  final String provider;
+  final String quality;
 
   const PlayerScreen({
     super.key,
@@ -32,6 +40,8 @@ class PlayerScreen extends StatefulWidget {
     this.headers,
     required this.movieTitle,
     required this.tmdbId,
+    this.provider = 'Direct',
+    this.quality = 'HD',
   });
 
   @override
@@ -42,27 +52,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final Player _player;
   late final VideoController _videoController;
   final FocusNode _focusNode = FocusNode();
+  final PlayerHudController _hudController = PlayerHudController();
 
   Timer? _progressSaveTimer;
   final List<StreamSubscription> _subscriptions = [];
   String? _errorMessage;
   bool _isShowingResumeDialog = false;
 
+  List<SubtitleTrackInfo> _subtitles = [];
+  SubtitleTrackInfo? _selectedSubtitle;
+  bool _isLoadingSubtitles = false;
+
   Map<String, String> get _requestHeaders {
     if (widget.headers != null) {
       return {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         ...widget.headers!,
       };
     }
     return {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     };
   }
 
   @override
   void initState() {
     super.initState();
+
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([
@@ -70,13 +88,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeRight,
     ]);
 
-    _initPlayer();
+    _player = Player(
+      configuration: const PlayerConfiguration(
+        bufferSize: 32 * 1024 * 1024,
+      ),
+    );
+    _videoController = VideoController(
+      _player,
+      configuration: const VideoControllerConfiguration(
+        enableHardwareAcceleration: true,
+      ),
+    );
+
+    _initPlayerAndMedia();
   }
 
-  Future<void> _initPlayer() async {
-    _player = Player();
-    _videoController = VideoController(_player);
-
+  Future<void> _initPlayerAndMedia() async {
     _subscriptions.add(
       _player.stream.completed.listen((completed) {
         if (completed && mounted) {
@@ -100,33 +127,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final savedSeconds = await LocalStorage.getProgress(widget.tmdbId);
     if (savedSeconds > 10 && mounted) {
       setState(() => _isShowingResumeDialog = true);
-      final resume = await showDialog<bool>(
+      final resume = await ResumeDialog.show(
         context: context,
-        barrierDismissible: false,
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1E1E1E),
-            title: const Text('Resume Playback?', style: TextStyle(color: Colors.white)),
-            content: Text(
-              'Would you like to resume watching from ${formatDuration(savedSeconds)}?',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            actions: [
-              _FocusableDialogButton(
-                label: 'Start Over',
-                color: Colors.redAccent,
-                onPressed: () => Navigator.pop(context, false),
-              ),
-              const SizedBox(width: 8),
-              _FocusableDialogButton(
-                label: 'Resume',
-                color: TVTheme.accent,
-                autofocus: true,
-                onPressed: () => Navigator.pop(context, true),
-              ),
-            ],
-          );
-        },
+        savedSeconds: savedSeconds,
+        formatDuration: formatDuration,
       );
       if (mounted) setState(() => _isShowingResumeDialog = false);
       if (resume == true) {
@@ -135,6 +139,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await LocalStorage.clearProgress(widget.tmdbId);
       }
     }
+
 
     try {
       await _player.open(
@@ -160,11 +165,64 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
+    _loadSubtitlesAsync();
+
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
+  }
+
+  Future<void> _loadSubtitlesAsync() async {
+    if (!mounted) return;
+    setState(() => _isLoadingSubtitles = true);
+
+    try {
+      final subs = await ApiClient.getSubtitles(widget.tmdbId);
+      if (mounted) {
+        setState(() {
+          _subtitles = subs;
+          _isLoadingSubtitles = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingSubtitles = false);
+      }
+    }
+  }
+
+  Future<void> _selectSubtitle(SubtitleTrackInfo? subtitle) async {
+    setState(() {
+      _selectedSubtitle = subtitle;
+    });
+
+    if (subtitle != null) {
+      await _player.setSubtitleTrack(
+        SubtitleTrack.uri(
+          subtitle.url,
+          title: subtitle.language,
+          language: subtitle.code,
+        ),
+      );
+      _hudController.triggerSubtitle('Subtitles: ${subtitle.language}');
+    } else {
+      await _player.setSubtitleTrack(SubtitleTrack.no());
+      _hudController.triggerSubtitle('Subtitles: Off');
+    }
+  }
+
+  void _showSubtitleDialog() async {
+    final selected = await SubtitlePickerDialog.show(
+      context: context,
+      subtitles: _subtitles,
+      selectedSubtitle: _selectedSubtitle,
+      isLoading: _isLoadingSubtitles,
+    );
+    if (mounted && selected != _selectedSubtitle) {
+      await _selectSubtitle(selected);
+    }
   }
 
   void _saveProgress() {
@@ -197,18 +255,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
         key == LogicalKeyboardKey.mediaPlayPause) {
       if (event is KeyRepeatEvent) return KeyEventResult.handled;
       _player.playOrPause();
+      if (_player.state.playing) {
+        _hudController.triggerPause();
+      } else {
+        _hudController.triggerPlay();
+      }
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
-      final target = _player.state.position - const Duration(seconds: 10);
-      _player.seek(target < Duration.zero ? Duration.zero : target);
+      final current = _player.state.position;
+      final target = current - const Duration(seconds: 10);
+      final finalTarget = target < Duration.zero ? Duration.zero : target;
+      _player.seek(finalTarget);
+      _hudController.triggerSeek(
+        deltaSeconds: -10,
+        targetTime: formatDuration(finalTarget.inSeconds),
+      );
       return KeyEventResult.handled;
     }
 
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
-      final target = _player.state.position + const Duration(seconds: 10);
-      _player.seek(target > _player.state.duration ? _player.state.duration : target);
+      final current = _player.state.position;
+      final duration = _player.state.duration;
+      final target = current + const Duration(seconds: 10);
+      final finalTarget = target > duration ? duration : target;
+      _player.seek(finalTarget);
+      _hudController.triggerSeek(
+        deltaSeconds: 10,
+        targetTime: formatDuration(finalTarget.inSeconds),
+      );
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.closedCaptionToggle ||
+        key == LogicalKeyboardKey.keyC ||
+        key == LogicalKeyboardKey.mediaAudioTrack) {
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
+      _showSubtitleDialog();
       return KeyEventResult.handled;
     }
 
@@ -235,6 +319,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _saveProgress();
     _player.dispose();
     _focusNode.dispose();
+    _hudController.dispose();
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([
@@ -246,6 +331,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   MaterialVideoControlsThemeData _buildThemeData() {
+    final qualityBadge = widget.provider.isNotEmpty ? widget.provider : 'Direct';
+
     return MaterialVideoControlsThemeData(
       displaySeekBar: true,
       seekGesture: true,
@@ -274,40 +361,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
         Container(
+          margin: const EdgeInsets.symmetric(horizontal: 8),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: TVTheme.accent.withValues(alpha: 0.2),
+            color: TVTheme.accent.withOpacity(0.3),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: TVTheme.accent),
+            border: Border.all(color: TVTheme.accent, width: 1),
           ),
-          child: const Text(
-            'Direct HD',
-            style: TextStyle(
-              color: TVTheme.accent,
-              fontSize: 12,
+          child: Text(
+            qualityBadge,
+            style: const TextStyle(
+              color: Colors.white,
               fontWeight: FontWeight.bold,
+              fontSize: 12,
             ),
           ),
         ),
+        IconButton(
+          icon: Icon(
+            _selectedSubtitle != null ? Icons.subtitles : Icons.subtitles_outlined,
+            color: _selectedSubtitle != null ? TVTheme.accent : Colors.white,
+          ),
+          tooltip: 'Subtitles',
+          onPressed: _showSubtitleDialog,
+        ),
       ],
-      primaryButtonBar: [
-        MaterialCustomButton(
-          icon: const Icon(Icons.replay_10, color: Colors.white),
-          onPressed: () {
-            final target = _player.state.position - const Duration(seconds: 10);
-            _player.seek(target < Duration.zero ? Duration.zero : target);
-          },
-        ),
-        const SizedBox(width: 32),
-        const MaterialPlayOrPauseButton(iconSize: 64),
-        const SizedBox(width: 32),
-        MaterialCustomButton(
-          icon: const Icon(Icons.forward_10, color: Colors.white),
-          onPressed: () {
-            final target = _player.state.position + const Duration(seconds: 10);
-            _player.seek(target > _player.state.duration ? _player.state.duration : target);
-          },
-        ),
+      bottomButtonBar: const [
+        MaterialPositionIndicator(),
+        Spacer(),
+        MaterialFullscreenButton(),
       ],
     );
   }
@@ -316,20 +398,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget build(BuildContext context) {
     final themeData = _buildThemeData();
 
-    return PopScope(
-      canPop: true,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) {
-          _saveProgress();
-        }
+    return WillPopScope(
+      onWillPop: () async {
+        _exitPlayer();
+        return false;
       },
-      child: Focus(
-        focusNode: _focusNode,
-        autofocus: true,
-        onKeyEvent: _handleKeyEvent,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          focusNode: _focusNode,
+          autofocus: true,
+          onKeyEvent: _handleKeyEvent,
+          child: Stack(
             fit: StackFit.expand,
             children: [
               MaterialVideoControlsTheme(
@@ -340,129 +420,53 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   controls: MaterialVideoControls,
                 ),
               ),
+              PlayerHud(controller: _hudController),
               if (_errorMessage != null)
-                _buildErrorOverlay(),
+                Container(
+                  color: Colors.black.withOpacity(0.9),
+                  padding: const EdgeInsets.all(32),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.redAccent, size: 64),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Playback Error',
+                          style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _errorMessage!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            FocusableButton(
+                              label: 'Retry',
+                              color: TVTheme.accent,
+                              autofocus: true,
+                              onPressed: () {
+                                setState(() => _errorMessage = null);
+                                _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
+                              },
+                            ),
+                            const SizedBox(width: 16),
+                            FocusableButton(
+                              label: 'Exit',
+                              color: Colors.white24,
+                              onPressed: _exitPlayer,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildErrorOverlay() {
-    return Container(
-      color: Colors.black87,
-      padding: const EdgeInsets.all(32),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, color: TVTheme.accent, size: 48),
-            const SizedBox(height: 16),
-            const Text(
-              'Playback Error',
-              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _errorMessage ?? 'Failed to play stream',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _FocusableDialogButton(
-                  label: 'Retry',
-                  color: TVTheme.accent,
-                  autofocus: true,
-                  onPressed: () {
-                    setState(() {
-                      _errorMessage = null;
-                    });
-                    _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
-                  },
-                ),
-                const SizedBox(width: 16),
-                _FocusableDialogButton(
-                  label: 'Exit',
-                  color: Colors.white24,
-                  onPressed: _exitPlayer,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FocusableDialogButton extends StatefulWidget {
-  final String label;
-  final Color color;
-  final bool autofocus;
-  final VoidCallback onPressed;
-
-  const _FocusableDialogButton({
-    required this.label,
-    required this.color,
-    this.autofocus = false,
-    required this.onPressed,
-  });
-
-  @override
-  State<_FocusableDialogButton> createState() => _FocusableDialogButtonState();
-}
-
-class _FocusableDialogButtonState extends State<_FocusableDialogButton> {
-  bool _isFocused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      autofocus: widget.autofocus,
-      onFocusChange: (focused) => setState(() => _isFocused = focused),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-             event.logicalKey == LogicalKeyboardKey.enter ||
-             event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onPressed();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          decoration: BoxDecoration(
-            color: _isFocused ? widget.color : Colors.white10,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _isFocused ? Colors.white : Colors.transparent,
-              width: 2,
-            ),
-            boxShadow: _isFocused
-                ? [
-                    BoxShadow(
-                      color: widget.color.withValues(alpha: 0.4),
-                      blurRadius: 12,
-                      spreadRadius: 2,
-                    )
-                  ]
-                : [],
-          ),
-          child: Text(
-            widget.label,
-            style: TextStyle(
-              color: _isFocused ? Colors.white : Colors.white70,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
           ),
         ),
       ),

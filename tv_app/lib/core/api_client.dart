@@ -2,12 +2,13 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/movie.model.dart';
+import '../models/movie_details.model.dart';
+import '../models/subtitle.model.dart';
 
 class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
   static String _currentBaseUrl = defaultBaseUrl;
 
-  // Initialize and load the configured backend URL
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     final savedUrl = prefs.getString('backend_url');
@@ -18,20 +19,16 @@ class ApiClient {
     }
   }
 
-  // Get current base URL
   static String get baseUrl => _currentBaseUrl;
 
-  // Format shorthand input to a full API endpoint URL
   static String formatInputToUrl(String input) {
     var trimmed = input.trim();
     if (trimmed.isEmpty) return defaultBaseUrl;
 
-    // If it doesn't start with http:// or https://, prepend http://
     if (!trimmed.startsWith(RegExp(r'^https?://'))) {
       trimmed = 'http://$trimmed';
     }
 
-    // If it doesn't end with /api/v1 (or /api/v1/), append it
     if (!trimmed.endsWith('/api/v1') && !trimmed.endsWith('/api/v1/')) {
       if (trimmed.endsWith('/')) {
         trimmed = trimmed.substring(0, trimmed.length - 1);
@@ -42,7 +39,6 @@ class ApiClient {
     return trimmed;
   }
 
-  // Get display base URL (clean IP/host representation for UI text editing)
   static String get displayBaseUrl {
     var display = _currentBaseUrl;
     if (display.startsWith('http://')) {
@@ -56,7 +52,6 @@ class ApiClient {
     return display;
   }
 
-  // Set and save new backend URL (automatically formatting raw IP input)
   static Future<void> setBaseUrl(String input) async {
     final formattedUrl = formatInputToUrl(input);
     final prefs = await SharedPreferences.getInstance();
@@ -64,7 +59,6 @@ class ApiClient {
     _currentBaseUrl = formattedUrl;
   }
 
-  // Search movies with page support
   static Future<List<Movie>> searchMovies(String query, {int page = 1}) async {
     final url = Uri.parse('$_currentBaseUrl/movies/search?query=${Uri.encodeComponent(query)}&media_type=movie&page=$page');
     try {
@@ -80,7 +74,6 @@ class ApiClient {
     return [];
   }
 
-  // Get popular movies filtered by original language
   static Future<List<Movie>> getPopularMovies({required String language, int page = 1}) async {
     final url = Uri.parse('$_currentBaseUrl/movies/popular?language=$language&page=$page');
     try {
@@ -96,7 +89,6 @@ class ApiClient {
     return [];
   }
 
-  // Discover movies filterable by language, release year, and genre
   static Future<List<Movie>> discoverMovies({required String language, int? year, int? genreId, int page = 1}) async {
     var queryParams = 'language=$language&page=$page';
     if (year != null) {
@@ -115,6 +107,46 @@ class ApiClient {
       }
     } catch (e) {
       print('Discover movies failed: $e');
+    }
+    return [];
+  }
+
+  static Future<MovieDetails?> getMovieDetails(int tmdbId, {String mediaType = 'movie'}) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/$mediaType/$tmdbId');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return MovieDetails.fromJson(Map<String, dynamic>.from(data));
+      }
+    } catch (e) {
+      print('Get movie details failed: $e');
+    }
+    return null;
+  }
+
+  static Future<List<SubtitleTrackInfo>> getSubtitles(
+    int tmdbId, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+    String? language,
+  }) async {
+    var query = 'tmdb_id=$tmdbId&media_type=$mediaType';
+    if (season != null) query += '&season=$season';
+    if (episode != null) query += '&episode=$episode';
+    if (language != null) query += '&language=$language';
+
+    final url = Uri.parse('$_currentBaseUrl/subtitles/?$query');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final subtitleResponse = SubtitleResponse.fromJson(Map<String, dynamic>.from(data));
+        return subtitleResponse.subtitles;
+      }
+    } catch (e) {
+      print('Get subtitles failed: $e');
     }
     return [];
   }

@@ -1,22 +1,25 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
+import '../models/movie_details.model.dart';
 import '../core/api_client.dart';
 import '../core/local_storage.dart';
 import '../theme.dart';
+import '../widgets/cast_carousel.dart';
+import '../widgets/stream_selector.dart';
 import 'player_screen.dart';
 
 class DetailsScreen extends StatefulWidget {
   final Movie movie;
 
-  const DetailsScreen({Key? key, required this.movie}) : super(key: key);
+  const DetailsScreen({super.key, required this.movie});
 
   @override
   State<DetailsScreen> createState() => _DetailsScreenState();
 }
 
 class _DetailsScreenState extends State<DetailsScreen> {
+  MovieDetails? _details;
   List<Map<String, dynamic>> _streams = [];
   bool _isLoadingStreams = true;
   int _cacheExpiresIn = 0;
@@ -29,6 +32,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   @override
   void initState() {
     super.initState();
+    _fetchDetails();
     _fetchStreams();
   }
 
@@ -40,6 +44,15 @@ class _DetailsScreenState extends State<DetailsScreen> {
     super.dispose();
   }
 
+  Future<void> _fetchDetails() async {
+    final details = await ApiClient.getMovieDetails(widget.movie.tmdbId);
+    if (mounted && details != null) {
+      setState(() {
+        _details = details;
+      });
+    }
+  }
+
   Future<void> _fetchStreams({bool bypassCache = false}) async {
     _cacheTimer?.cancel();
     setState(() {
@@ -47,6 +60,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       _cacheExpiresIn = 0;
       _statusMessage = 'Connecting to scrapers...';
     });
+
     final response = await ApiClient.getStreamLinksWithProgress(
       widget.movie.tmdbId,
       bypassCache: bypassCache,
@@ -57,7 +71,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
         });
       },
     );
+
     if (!mounted) return;
+
     setState(() {
       final List streamList = response['streams'] ?? [];
       _streams = List<Map<String, dynamic>>.from(streamList);
@@ -71,67 +87,37 @@ class _DetailsScreenState extends State<DetailsScreen> {
           timer.cancel();
           return;
         }
-        if (_cacheExpiresIn > 0) {
-          setState(() {
+        setState(() {
+          if (_cacheExpiresIn > 0) {
             _cacheExpiresIn--;
-          });
-        } else {
-          timer.cancel();
-        }
+          } else {
+            timer.cancel();
+          }
+        });
       });
     }
 
-    if (_streams.isNotEmpty) {
-      Future.delayed(const Duration(milliseconds: 150), () {
-        if (_firstStreamFocusNode.canRequestFocus) {
-          _firstStreamFocusNode.requestFocus();
-        }
-      });
-    } else {
-      Future.delayed(const Duration(milliseconds: 150), () {
-        if (_retryFocusNode.canRequestFocus) {
-          _retryFocusNode.requestFocus();
-        }
-      });
-    }
-  }
-
-  String _formatCacheTime(int seconds) {
-    if (seconds <= 0) return 'Cache expired';
-    final int hours = seconds ~/ 3600;
-    final int minutes = (seconds % 3600) ~/ 60;
-    final int secs = seconds % 60;
-    if (hours > 0) {
-      return 'Cache expires in: ${hours}h ${minutes}m';
-    } else if (minutes > 0) {
-      return 'Cache expires in: ${minutes}m ${secs}s';
-    } else {
-      return 'Cache expires in: ${secs}s';
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_streams.isNotEmpty && _firstStreamFocusNode.canRequestFocus) {
+        _firstStreamFocusNode.requestFocus();
+      } else if (_streams.isEmpty && _retryFocusNode.canRequestFocus) {
+        _retryFocusNode.requestFocus();
+      }
+    });
   }
 
   void _startPlayback(Map<String, dynamic> stream) {
-    if (_cacheExpiresIn <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Stream link expired. Refreshing sources...'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      _fetchStreams(bypassCache: true);
-      return;
+    LocalStorage.addToHistory(widget.movie);
+
+    final rawHeaders = stream['headers'];
+    Map<String, String>? headers;
+    if (rawHeaders is Map) {
+      headers = rawHeaders.map((k, v) => MapEntry(k.toString(), v.toString()));
     }
 
-    // 1. Add movie to recently viewed history list asynchronously
-    LocalStorage.addToHistory(widget.movie);
-    
-    // Parse headers if present
-    Map<String, String>? headers;
-    if (stream['headers'] != null) {
-      headers = Map<String, String>.from(stream['headers']);
-    }
-    
-    // 2. Play stream immediately
+    final provider = stream['provider']?.toString() ?? 'Direct';
+    final quality = stream['quality']?.toString() ?? '';
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -140,6 +126,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
           headers: headers,
           movieTitle: widget.movie.title,
           tmdbId: widget.movie.tmdbId,
+          provider: provider,
+          quality: quality,
         ),
       ),
     );
@@ -148,275 +136,152 @@ class _DetailsScreenState extends State<DetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final Size size = MediaQuery.of(context).size;
+    final backdropUrl = _details?.backdropUrl.isNotEmpty == true
+        ? _details!.backdropUrl
+        : widget.movie.backdropUrl;
+    final posterUrl = _details?.posterUrl.isNotEmpty == true
+        ? _details!.posterUrl
+        : widget.movie.posterUrl;
+    final releaseYear = (_details?.releaseDate.isNotEmpty == true
+            ? _details!.releaseDate
+            : widget.movie.releaseDate)
+        .split('-')[0];
+    final rating = _details?.voteAverage ?? widget.movie.voteAverage;
+    final overview = _details?.overview.isNotEmpty == true
+        ? _details!.overview
+        : widget.movie.overview;
+    final genreText = _details?.genreNamesString.isNotEmpty == true
+        ? _details!.genreNamesString
+        : widget.movie.genreTags;
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: BackButton(color: Colors.white),
+        leading: const BackButton(color: Colors.white),
       ),
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // 1. Full Screen Backdrop Image
-          if (widget.movie.backdropUrl.isNotEmpty)
+          if (backdropUrl.isNotEmpty)
             Positioned.fill(
               child: Image.network(
-                widget.movie.backdropUrl,
+                backdropUrl,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
             ),
-          // Vignette
           Positioned.fill(
             child: Container(
-              color: TVTheme.background.withOpacity(0.85),
+              color: TVTheme.background.withOpacity(0.88),
             ),
           ),
-
-          // 2. Details Content
           Positioned.fill(
             child: SafeArea(
               child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20.0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                  // Poster Card
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      width: size.width * 0.22,
-                      child: AspectRatio(
-                        aspectRatio: 2 / 3,
-                        child: Image.network(
-                          widget.movie.posterUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(color: TVTheme.surface),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(
+                          width: size.width * 0.22,
+                          child: AspectRatio(
+                            aspectRatio: 2 / 3,
+                            child: Image.network(
+                              posterUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(color: TVTheme.surface),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 40),
-
-                  // Metadata Description & Stream Selector
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.movie.title,
-                          style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 20,
-                          runSpacing: 8,
+                      const SizedBox(width: 40),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              widget.movie.releaseDate.isNotEmpty
-                                  ? widget.movie.releaseDate.split('-')[0]
-                                  : 'N/A',
-                              style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14),
+                              widget.movie.title,
+                              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
                             ),
-                            Text(
-                              'Language: ${widget.movie.originalLanguage.toUpperCase()}',
-                              style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14),
-                            ),
-                            Text(
-                              'Rating: ${widget.movie.voteAverage.toStringAsFixed(1)}',
-                              style: const TextStyle(color: TVTheme.accent, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            if (widget.movie.genreTags.isNotEmpty)
+                            if (_details?.tagline != null && _details!.tagline!.isNotEmpty) ...[
+                              const SizedBox(height: 6),
                               Text(
-                                'Genres: ${widget.movie.genreTags}',
-                                style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          widget.movie.overview,
-                          style: const TextStyle(color: TVTheme.textSecondary, fontSize: 14, height: 1.5),
-                        ),
-                        const SizedBox(height: 40),
-
-                        // Action Play & Stream Options
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'Select Server Source:',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            if (!_isLoadingStreams)
-                              Row(
-                                children: [
-                                  if (_streams.isNotEmpty) ...[
-                                    Text(
-                                      _formatCacheTime(_cacheExpiresIn),
-                                      style: TextStyle(
-                                        color: _cacheExpiresIn <= 0 ? Colors.redAccent : Colors.white54,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  Focus(
-                                    onKey: (node, event) {
-                                      if (event is RawKeyDownEvent) {
-                                        if (event.logicalKey == LogicalKeyboardKey.select ||
-                                            event.logicalKey == LogicalKeyboardKey.enter ||
-                                            event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                            event.logicalKey == LogicalKeyboardKey.space) {
-                                          _fetchStreams(bypassCache: true);
-                                          return KeyEventResult.handled;
-                                        }
-                                      }
-                                      return KeyEventResult.ignored;
-                                    },
-                                    child: Builder(
-                                      builder: (context) {
-                                        final focused = Focus.of(context).hasFocus;
-                                        return IconButton(
-                                          icon: const Icon(Icons.refresh, size: 18),
-                                          style: IconButton.styleFrom(
-                                            backgroundColor: focused ? Colors.red : Colors.white12,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.all(8),
-                                          ),
-                                          onPressed: () => _fetchStreams(bypassCache: true),
-                                          tooltip: 'Force re-scrape',
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (_isLoadingStreams)
-                          Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Row(
-                              children: [
-                                const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(color: TVTheme.accent, strokeWidth: 2),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(_statusMessage, style: const TextStyle(color: TVTheme.textSecondary)),
-                                ),
-                              ],
-                            ),
-                          )
-                        else if (_streams.isEmpty)
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'No streams found or failed to connect. Verify your backend server is online.',
-                                style: TextStyle(color: TVTheme.accent, fontSize: 13),
-                              ),
-                              const SizedBox(height: 12),
-                              Focus(
-                                focusNode: _retryFocusNode,
-                                onKey: (node, event) {
-                                  if (event is RawKeyDownEvent) {
-                                    if (event.logicalKey == LogicalKeyboardKey.select ||
-                                        event.logicalKey == LogicalKeyboardKey.enter ||
-                                        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                        event.logicalKey == LogicalKeyboardKey.space) {
-                                      _fetchStreams(bypassCache: false);
-                                      return KeyEventResult.handled;
-                                    }
-                                  }
-                                  return KeyEventResult.ignored;
-                                },
-                                child: Builder(
-                                  builder: (context) {
-                                    final focused = Focus.of(context).hasFocus;
-                                    return ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: focused ? Colors.white : TVTheme.surface,
-                                        foregroundColor: focused ? Colors.black : Colors.white,
-                                      ),
-                                      onPressed: () => _fetchStreams(bypassCache: false),
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Retry Fetching'),
-                                    );
-                                  },
+                                '"${_details!.tagline}"',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontStyle: FontStyle.italic,
+                                  color: Colors.white70,
                                 ),
                               ),
                             ],
-                          )
-                        else
-                          // Render horizontal list of focused stream button options
-                          SizedBox(
-                            height: 50,
-                            child: ListView.builder(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _streams.length,
-                              itemBuilder: (context, index) {
-                                final stream = _streams[index];
-                                final providerName = stream['provider'] ?? 'Source ${index + 1}';
-
-                                return Focus(
-                                  focusNode: index == 0 ? _firstStreamFocusNode : null,
-                                  onKey: (node, event) {
-                                    if (event is RawKeyDownEvent) {
-                                      if (event.logicalKey == LogicalKeyboardKey.select ||
-                                          event.logicalKey == LogicalKeyboardKey.enter ||
-                                          event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                          event.logicalKey == LogicalKeyboardKey.space) {
-                                        _startPlayback(stream);
-                                        return KeyEventResult.handled;
-                                      }
-                                    }
-                                    return KeyEventResult.ignored;
-                                  },
-                                  child: Builder(
-                                    builder: (context) {
-                                      final focused = Focus.of(context).hasFocus;
-                                      return Padding(
-                                        padding: const EdgeInsets.only(right: 12.0),
-                                        child: ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: focused ? TVTheme.accent : TVTheme.surface,
-                                            foregroundColor: Colors.white,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              side: BorderSide(
-                                                color: focused ? Colors.white : Colors.transparent,
-                                                width: 2,
-                                              ),
-                                            ),
-                                          ),
-                                          onPressed: () => _startPlayback(stream),
-                                          child: Text(providerName),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                );
-                              },
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 16,
+                              runSpacing: 8,
+                              children: [
+                                if (releaseYear.isNotEmpty)
+                                  _buildBadge(Icons.calendar_today, releaseYear),
+                                if (_details?.formattedRuntime.isNotEmpty == true)
+                                  _buildBadge(Icons.timer_outlined, _details!.formattedRuntime),
+                                _buildBadge(
+                                  Icons.language,
+                                  widget.movie.originalLanguage.toUpperCase(),
+                                ),
+                                _buildBadge(Icons.star, rating.toStringAsFixed(1), iconColor: Colors.amber),
+                                if (genreText.isNotEmpty)
+                                  _buildBadge(Icons.movie_filter_outlined, genreText),
+                              ],
                             ),
-                          ),
-                      ],
-                    ),
+                            const SizedBox(height: 18),
+                            Text(
+                              overview,
+                              style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                            ),
+                            if (_details != null && _details!.cast.isNotEmpty) ...[
+                              const SizedBox(height: 24),
+                              CastCarousel(cast: _details!.cast),
+                            ],
+                            const SizedBox(height: 28),
+                            StreamSelector(
+                              streams: _streams,
+                              isLoading: _isLoadingStreams,
+                              statusMessage: _statusMessage,
+                              cacheExpiresIn: _cacheExpiresIn,
+                              onRetry: () => _fetchStreams(bypassCache: false),
+                              onForceRescrape: () => _fetchStreams(bypassCache: true),
+                              onStreamSelected: _startPlayback,
+                              firstStreamFocusNode: _firstStreamFocusNode,
+                              retryFocusNode: _retryFocusNode,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBadge(IconData icon, String text, {Color iconColor = TVTheme.textSecondary}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: iconColor),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: const TextStyle(color: TVTheme.textSecondary, fontSize: 13),
         ),
-      ),
       ],
-      ),
     );
   }
 }
