@@ -144,6 +144,47 @@ class TMDBClient:
             logger.error(f"Failed to fetch TMDB movie details for id {movie_id}: {e}")
             return None
 
+    async def get_tv_details(self, tv_id: int) -> dict | None:
+        cache_key = f"tv_details:{tv_id}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        url = f"{self.BASE_URL}/tv/{tv_id}"
+        params = {"append_to_response": "external_ids,credits"}
+
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            details = resp.json()
+
+            set_tmdb_cache(cache_key, details, ttl_seconds=1296000)
+            return details
+        except Exception as e:
+            logger.error(f"Failed to fetch TMDB TV details for id {tv_id}: {e}")
+            return None
+
+    async def get_tv_season(self, tv_id: int, season_number: int) -> dict | None:
+        cache_key = f"tv_season:{tv_id}:{season_number}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        url = f"{self.BASE_URL}/tv/{tv_id}/season/{season_number}"
+
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, impersonate="chrome")
+            resp.raise_for_status()
+            details = resp.json()
+
+            set_tmdb_cache(cache_key, details, ttl_seconds=1296000)
+            return details
+        except Exception as e:
+            logger.error(f"Failed to fetch TMDB TV season {season_number} for id {tv_id}: {e}")
+            return None
+
     async def get_popular_movies(self, language: str = "en-US", page: int = 1) -> list[dict]:
         return await self.discover_movies(language=language, page=page, sort_by="popularity.desc")
 

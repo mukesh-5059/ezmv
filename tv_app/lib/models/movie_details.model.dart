@@ -1,3 +1,5 @@
+import 'tv_season.model.dart';
+
 class CastMember {
   final int id;
   final String name;
@@ -54,8 +56,12 @@ class MovieDetails {
   final int voteCount;
   final int? runtime;
   final String? tagline;
+  final String mediaType;
+  final int numberOfSeasons;
+  final int numberOfEpisodes;
   final List<GenreItem> genres;
   final List<CastMember> cast;
+  final List<TvSeason> seasons;
   final Map<String, dynamic> externalIds;
 
   MovieDetails({
@@ -70,14 +76,21 @@ class MovieDetails {
     required this.voteCount,
     this.runtime,
     this.tagline,
+    this.mediaType = 'movie',
+    this.numberOfSeasons = 0,
+    this.numberOfEpisodes = 0,
     this.genres = const [],
     this.cast = const [],
+    this.seasons = const [],
     this.externalIds = const {},
   });
+
+  bool get isTv => mediaType == 'tv';
 
   factory MovieDetails.fromJson(Map<String, dynamic> json) {
     final rawGenres = json['genres'] as List? ?? [];
     final rawCast = json['cast'] as List? ?? [];
+    final rawSeasons = json['seasons'] as List? ?? [];
     return MovieDetails(
       tmdbId: json['tmdb_id'] ?? 0,
       imdbId: json['imdb_id'],
@@ -90,8 +103,12 @@ class MovieDetails {
       voteCount: json['vote_count'] ?? 0,
       runtime: json['runtime'],
       tagline: json['tagline'],
+      mediaType: json['media_type'] ?? 'movie',
+      numberOfSeasons: json['number_of_seasons'] ?? rawSeasons.length,
+      numberOfEpisodes: json['number_of_episodes'] ?? 0,
       genres: rawGenres.map((g) => GenreItem.fromJson(Map<String, dynamic>.from(g))).toList(),
       cast: rawCast.map((c) => CastMember.fromJson(Map<String, dynamic>.from(c))).toList(),
+      seasons: rawSeasons.map((s) => TvSeason.fromJson(Map<String, dynamic>.from(s))).toList(),
       externalIds: json['external_ids'] != null
           ? Map<String, dynamic>.from(json['external_ids'])
           : {},

@@ -7,6 +7,7 @@ class Movie {
   final String backdropPath;
   final double voteAverage;
   final String originalLanguage;
+  final String mediaType;
   final List<int> genreIds;
 
   Movie({
@@ -18,6 +19,7 @@ class Movie {
     required this.backdropPath,
     required this.voteAverage,
     required this.originalLanguage,
+    this.mediaType = 'movie',
     this.genreIds = const [],
   });
 
@@ -31,6 +33,7 @@ class Movie {
       backdropPath: json['backdrop_path'] ?? '',
       voteAverage: (json['vote_average'] as num?)?.toDouble() ?? 0.0,
       originalLanguage: json['original_language'] ?? 'en',
+      mediaType: json['media_type'] ?? 'movie',
       genreIds: json['genre_ids'] != null
           ? List<int>.from(json['genre_ids'])
           : const [],
@@ -47,6 +50,7 @@ class Movie {
       'backdrop_path': backdropPath,
       'vote_average': voteAverage,
       'original_language': originalLanguage,
+      'media_type': mediaType,
       'genre_ids': genreIds,
     };
   }
@@ -63,6 +67,8 @@ class Movie {
 
   // Get release year
   String get year => releaseDate.isNotEmpty ? releaseDate.split('-')[0] : '';
+
+  bool get isTv => mediaType == 'tv';
 
   static const Map<int, String> _genreMap = {
     28: 'Action',

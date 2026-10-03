@@ -27,20 +27,30 @@ class TraktClient:
 
     async def _enrich_tmdb_movies(self, raw_items: list[dict]) -> list[MovieSummary]:
         tasks = []
+        item_types = []
         for item in raw_items:
-            movie_data = item.get("movie", item)
-            tmdb_id = movie_data.get("ids", {}).get("tmdb")
-            if tmdb_id:
-                tasks.append(tmdb_client.get_movie_details(tmdb_id))
+            item_type = item.get("type")
+            if item_type == "show" or ("show" in item and "movie" not in item):
+                show_data = item.get("show", item)
+                tmdb_id = show_data.get("ids", {}).get("tmdb")
+                if tmdb_id:
+                    tasks.append(tmdb_client.get_tv_details(tmdb_id))
+                    item_types.append("tv")
+            else:
+                movie_data = item.get("movie", item)
+                tmdb_id = movie_data.get("ids", {}).get("tmdb")
+                if tmdb_id:
+                    tasks.append(tmdb_client.get_movie_details(tmdb_id))
+                    item_types.append("movie")
 
         if not tasks:
             return []
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         summaries = []
-        for res in results:
+        for res, m_type in zip(results, item_types):
             if isinstance(res, dict) and res.get("id"):
-                summaries.append(MovieSummary.from_tmdb(res, media_type="movie"))
+                summaries.append(MovieSummary.from_tmdb(res, media_type=m_type))
         return summaries
 
     async def get_trending(self, page: int = 1, limit: int = 20) -> list[MovieSummary]:
@@ -152,7 +162,7 @@ class TraktClient:
         if not self.client_id:
             return []
 
-        url = f"{self.BASE_URL}/lists/{list_id}/items/movies"
+        url = f"{self.BASE_URL}/lists/{list_id}/items"
         params = {"page": str(page), "limit": str(limit), "extended": "full"}
         try:
             async with AsyncSession(impersonate="chrome") as session:
@@ -189,7 +199,7 @@ class TraktClient:
         if not self.client_id:
             return []
 
-        url = f"{self.BASE_URL}/search/movie"
+        url = f"{self.BASE_URL}/search/movie,show"
         params = {"query": clean_q, "page": str(page), "limit": str(limit), "extended": "full"}
         if year:
             params["years"] = str(year)

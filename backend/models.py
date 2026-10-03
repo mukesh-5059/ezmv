@@ -61,6 +61,33 @@ class CastMember(BaseModel):
     order: int = 0
 
 
+class TvEpisode(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    episode_number: int
+    season_number: int = 1
+    name: str = ""
+    overview: str = ""
+    still_path: str | None = None
+    air_date: str | None = None
+    vote_average: float = 0.0
+    runtime: int | None = None
+
+
+class TvSeason(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    season_number: int
+    name: str = ""
+    overview: str = ""
+    poster_path: str | None = None
+    episode_count: int = 0
+    air_date: str | None = None
+    episodes: list[TvEpisode] = Field(default_factory=list)
+
+
 class MovieDetails(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -76,6 +103,10 @@ class MovieDetails(BaseModel):
     genres: list[dict] = Field(default_factory=list)
     runtime: int | None = None
     tagline: str | None = None
+    media_type: str = "movie"
+    number_of_seasons: int = 0
+    number_of_episodes: int = 0
+    seasons: list[TvSeason] = Field(default_factory=list)
     external_ids: dict = Field(default_factory=dict)
     cast: list[CastMember] = Field(default_factory=list)
 
@@ -86,9 +117,28 @@ class MovieDetails(BaseModel):
         imdb_id = data.get("imdb_id") or external_ids.get("imdb_id")
         data["tmdb_id"] = data.get("id") or 0
         data["imdb_id"] = imdb_id
-        data["title"] = data.get("title") if media_type == "movie" else (data.get("name") or "")
-        data["release_date"] = data.get("release_date") if media_type == "movie" else (data.get("first_air_date") or "")
+        is_tv = media_type == "tv" or "first_air_date" in data or "number_of_seasons" in data
+        data["media_type"] = "tv" if is_tv else "movie"
+        data["title"] = (data.get("name") or data.get("title") or "") if is_tv else (data.get("title") or "")
+        data["release_date"] = (data.get("first_air_date") or data.get("release_date") or "") if is_tv else (data.get("release_date") or "")
         data["external_ids"] = external_ids
+
+        raw_seasons = data.get("seasons", [])
+        data["seasons"] = [
+            TvSeason(
+                id=s.get("id", 0),
+                season_number=s.get("season_number", 0),
+                name=s.get("name", ""),
+                overview=s.get("overview", ""),
+                poster_path=s.get("poster_path"),
+                episode_count=s.get("episode_count", 0),
+                air_date=s.get("air_date"),
+            )
+            for s in raw_seasons
+            if isinstance(s, dict)
+        ]
+        data["number_of_seasons"] = data.get("number_of_seasons") or len(data["seasons"])
+        data["number_of_episodes"] = data.get("number_of_episodes") or 0
 
         credits_data = data.get("credits", {})
         raw_cast = credits_data.get("cast", []) if isinstance(credits_data, dict) else []

@@ -9,6 +9,7 @@ import '../models/dashboard_lane.model.dart';
 import '../models/filter.model.dart';
 
 import '../models/trakt_list.model.dart';
+import '../models/tv_season.model.dart';
 
 class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
@@ -234,7 +235,8 @@ class ApiClient {
   }
 
   static Future<MovieDetails?> getMovieDetails(int tmdbId, {String mediaType = 'movie'}) async {
-    final url = Uri.parse('$_currentBaseUrl/movies/$mediaType/$tmdbId');
+    final cleanType = mediaType.toLowerCase() == 'tv' ? 'tv' : 'movie';
+    final url = Uri.parse('$_currentBaseUrl/movies/$cleanType/$tmdbId');
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
@@ -243,6 +245,20 @@ class ApiClient {
       }
     } catch (e) {
       print('Get movie details failed: $e');
+    }
+    return null;
+  }
+
+  static Future<TvSeason?> getTvSeason(int tmdbId, int seasonNumber) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/tv/$tmdbId/season/$seasonNumber');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return TvSeason.fromJson(Map<String, dynamic>.from(data));
+      }
+    } catch (e) {
+      print('Get TV season failed: $e');
     }
     return null;
   }
@@ -270,11 +286,18 @@ class ApiClient {
 
   static Future<Map<String, dynamic>> getStreamLinksWithProgress(
     int tmdbId, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
     bool bypassCache = false,
     void Function(String message)? onProgress,
   }) async {
     final client = http.Client();
-    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&bypass_cache=$bypassCache');
+    var queryParams = 'tmdb_id=$tmdbId&media_type=$mediaType&bypass_cache=$bypassCache';
+    if (season != null) queryParams += '&season=$season';
+    if (episode != null) queryParams += '&episode=$episode';
+
+    final url = Uri.parse('$_currentBaseUrl/streams/?$queryParams');
     try {
       final request = http.Request('GET', url);
       request.headers['Accept'] = 'text/event-stream';

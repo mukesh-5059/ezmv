@@ -10,6 +10,8 @@ from backend.models import (
     FilterOption,
     FiltersResponse,
     TraktListSummary,
+    TvSeason,
+    TvEpisode,
 )
 from backend.services.tmdb import tmdb_client
 from backend.services.catalog import catalog_service
@@ -271,14 +273,65 @@ async def get_list_items_endpoint(
     return {"results": items}
 
 
+@router.get("/tv/{tmdb_id}/season/{season_number}", response_model=TvSeason)
+async def get_tv_season_endpoint(
+    tmdb_id: int,
+    season_number: int,
+):
+    details = await tmdb_client.get_tv_season(tmdb_id, season_number)
+    if not details:
+        raise HTTPException(status_code=404, detail=f"Season {season_number} not found on TMDB.")
+
+    raw_episodes = details.get("episodes", [])
+    episodes = [
+        TvEpisode(
+            id=ep.get("id", 0),
+            episode_number=ep.get("episode_number", 0),
+            season_number=ep.get("season_number", season_number),
+            name=ep.get("name", ""),
+            overview=ep.get("overview", ""),
+            still_path=ep.get("still_path"),
+            air_date=ep.get("air_date"),
+            vote_average=float(ep.get("vote_average") or 0.0),
+            runtime=ep.get("runtime"),
+        )
+        for ep in raw_episodes
+        if isinstance(ep, dict)
+    ]
+    return TvSeason(
+        id=details.get("id", 0),
+        season_number=details.get("season_number", season_number),
+        name=details.get("name", f"Season {season_number}"),
+        overview=details.get("overview", ""),
+        poster_path=details.get("poster_path"),
+        episode_count=len(episodes),
+        air_date=details.get("air_date"),
+        episodes=episodes,
+    )
+
+
 @router.get("/{tmdb_id}", response_model=MovieDetails)
 @router.get("/{media_type}/{tmdb_id}", response_model=MovieDetails)
 async def get_details(
     tmdb_id: int,
     media_type: str = "movie",
 ):
-    details = await tmdb_client.get_movie_details(tmdb_id)
-    if not details:
-        raise HTTPException(status_code=404, detail="Movie not found on TMDB.")
+    clean_type = (media_type or "movie").strip().lower()
+    if clean_type == "tv":
+        details = await tmdb_client.get_tv_details(tmdb_id)
+        if details:
+            return MovieDetails.from_tmdb(details, media_type="tv")
+        # Fallback to movie
+        details = await tmdb_client.get_movie_details(tmdb_id)
+        if details:
+            return MovieDetails.from_tmdb(details, media_type="movie")
+    else:
+        details = await tmdb_client.get_movie_details(tmdb_id)
+        if details:
+            return MovieDetails.from_tmdb(details, media_type="movie")
+        # Fallback to tv
+        details = await tmdb_client.get_tv_details(tmdb_id)
+        if details:
+            return MovieDetails.from_tmdb(details, media_type="tv")
 
-    return MovieDetails.from_tmdb(details, media_type="movie")
+    raise HTTPException(status_code=404, detail="Media not found on TMDB.")
