@@ -8,6 +8,8 @@ import '../models/subtitle.model.dart';
 import '../models/dashboard_lane.model.dart';
 import '../models/filter.model.dart';
 
+import '../models/trakt_list.model.dart';
+
 class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
   static String _currentBaseUrl = defaultBaseUrl;
@@ -101,41 +103,51 @@ class ApiClient {
     return null;
   }
 
+  static Future<List<TraktList>> searchLists({String? query, int page = 1, int limit = 20}) async {
+    var queryParams = 'page=$page&limit=$limit';
+    if (query != null && query.trim().isNotEmpty) {
+      queryParams += '&query=${Uri.encodeComponent(query.trim())}';
+    }
+    final url = Uri.parse('$_currentBaseUrl/movies/search/lists?$queryParams');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List results = data['results'] ?? [];
+        return results.map((item) => TraktList.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Search lists failed: $e');
+    }
+    return [];
+  }
+
+  static Future<List<Movie>> getListItems({required String listId, int page = 1, int limit = 20}) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/lists/$listId/items?page=$page&limit=$limit');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List results = data['results'] ?? [];
+        return results.map((item) => Movie.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Get list items failed: $e');
+    }
+    return [];
+  }
+
   static Future<List<Movie>> searchMovies({
     String? query,
-    String? language,
-    int? year,
-    int? yearMin,
-    int? yearMax,
-    dynamic genreId,
-    String? sortBy,
     int page = 1,
   }) async {
     var queryParams = 'page=$page';
     if (query != null && query.trim().isNotEmpty) {
       queryParams += '&query=${Uri.encodeComponent(query.trim())}';
     }
-    if (language != null && language != 'all') {
-      queryParams += '&language=$language';
-    }
-    if (year != null) {
-      queryParams += '&year=$year';
-    }
-    if (yearMin != null) {
-      queryParams += '&year_min=$yearMin';
-    }
-    if (yearMax != null) {
-      queryParams += '&year_max=$yearMax';
-    }
-    if (genreId != null && genreId.toString() != 'all' && genreId.toString() != '0') {
-      queryParams += '&genre=$genreId';
-    }
-    if (sortBy != null && sortBy.isNotEmpty) {
-      queryParams += '&sort_by=$sortBy';
-    }
     final url = Uri.parse('$_currentBaseUrl/movies/search?$queryParams');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];

@@ -7,6 +7,9 @@ from backend.services.cache_db import get_tmdb_cache, set_tmdb_cache
 logger = logging.getLogger(__name__)
 
 
+EXCLUDED_ADULT_KEYWORD_IDS = "18321,155477,239225,190370,156470,224636,10714,596,207317,227652,298835"
+
+
 class TMDBClient:
     BASE_URL = "https://api.themoviedb.org/3"
 
@@ -91,7 +94,9 @@ class TMDBClient:
         }
         if year:
             params["primary_release_year"] = str(year)
-        if language and language != "all":
+        if language == "anime":
+            pass
+        elif language and language != "all":
             params["language"] = language
 
         try:
@@ -105,6 +110,11 @@ class TMDBClient:
                 m for m in results
                 if m.get("release_date") and m.get("release_date") <= today_str
             ]
+            if language == "anime":
+                filtered = [
+                    m for m in filtered
+                    if m.get("original_language") == "ja" or 16 in m.get("genre_ids", [])
+                ]
 
             if len(clean_q) >= 2 and len(filtered) > 0:
                 set_tmdb_cache(cache_key, filtered, ttl_seconds=86400)
@@ -181,13 +191,24 @@ class TMDBClient:
             "page": str(page),
             "primary_release_date.lte": today_str,
             "include_adult": "false",
+            "without_keywords": EXCLUDED_ADULT_KEYWORD_IDS,
         }
 
-        if language and language != "all":
+        if language == "anime":
+            params["with_original_language"] = "ja"
+            if genre and str(genre).lower() != "all" and str(genre) != "0":
+                if "16" not in str(genre).split(","):
+                    params["with_genres"] = f"16,{genre}"
+                else:
+                    params["with_genres"] = str(genre)
+            else:
+                params["with_genres"] = "16"
+        elif language and language != "all":
             lang_code = language.split("-")[0] if "-" in language else language
             params["with_original_language"] = lang_code
-
-        if genre and str(genre).lower() != "all" and str(genre) != "0":
+            if genre and str(genre).lower() != "all" and str(genre) != "0":
+                params["with_genres"] = str(genre)
+        elif genre and str(genre).lower() != "all" and str(genre) != "0":
             params["with_genres"] = str(genre)
 
         if year:

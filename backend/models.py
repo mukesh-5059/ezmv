@@ -196,3 +196,16 @@ class FiltersResponse(BaseModel):
     years: list[FilterOption]
     sort_options: list[FilterOption]
 
+
+class TraktListSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int | str
+    name: str
+    description: str = ""
+    item_count: int = 0
+    likes: int = 0
+    user_name: str = ""
+    slug: str = ""
+
+

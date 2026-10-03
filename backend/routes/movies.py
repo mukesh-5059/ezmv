@@ -9,9 +9,11 @@ from backend.models import (
     LaneMoviesResponse,
     FilterOption,
     FiltersResponse,
+    TraktListSummary,
 )
 from backend.services.tmdb import tmdb_client
 from backend.services.catalog import catalog_service
+from backend.services.trakt import trakt_client
 
 router = APIRouter()
 
@@ -45,26 +47,32 @@ async def get_dashboard(
             )
     else:
         results = await asyncio.gather(
-            tmdb_client.get_popular_movies(language=safe_lang, page=1),
-            tmdb_client.get_trending_movies(time_window="week", page=1),
-            tmdb_client.discover_movies(language=safe_lang, vote_count_gte=2000, sort_by="vote_average.desc", page=1),
-            tmdb_client.discover_movies(language=safe_lang, genre="28,878", vote_count_gte=1000, sort_by="popularity.desc", page=1),
-            tmdb_client.discover_movies(language=safe_lang, genre="16", vote_count_gte=500, sort_by="popularity.desc", page=1),
+            trakt_client.get_trending(page=1, limit=20),
+            trakt_client.get_watched(period="weekly", page=1, limit=20),
+            trakt_client.get_box_office(),
+            trakt_client.get_anticipated(page=1, limit=20),
+            trakt_client.get_list_items("2142753", page=1, limit=20),
+            trakt_client.get_list_items("800238", page=1, limit=20),
+            trakt_client.get_list_items("1248149", page=1, limit=20),
             return_exceptions=True,
         )
 
         en_configs = [
-            ("popular", "Popular Movies"),
-            ("trending", "Trending This Week"),
-            ("top_rated", "All-Time Fan Favorites"),
-            ("action", "Action & Sci-Fi Blockbusters"),
-            ("animation", "Top Animation & Family"),
+            ("trending", "Trending Right Now"),
+            ("watched_weekly", "Most Watched This Week"),
+            ("box_office", "Current Box Office Hits"),
+            ("anticipated", "Most Anticipated"),
+            ("imdb_top", "IMDb: Top Rated"),
+            ("mindfucks", "Best Mindfucks & Thrillers"),
+            ("mcu", "Marvel Cinematic Universe"),
         ]
 
         for i, (lane_id, title) in enumerate(en_configs):
             res = results[i]
             if isinstance(res, Exception) or not res:
                 items = []
+            elif isinstance(res, list) and len(res) > 0 and isinstance(res[0], MovieSummary):
+                items = res
             else:
                 items = [MovieSummary.from_tmdb(m, media_type="movie") for m in res]
             has_more = len(items) >= 20
@@ -105,27 +113,25 @@ async def get_dashboard_lane(
             items=items,
         )
 
-    # English / TMDB fallback
-    if lane_id == "popular":
-        raw_items = await tmdb_client.get_popular_movies(language=safe_lang, page=safe_page)
-    elif lane_id == "trending":
-        raw_items = await tmdb_client.get_trending_movies(time_window="week", page=safe_page)
-    elif lane_id == "top_rated":
-        raw_items = await tmdb_client.discover_movies(
-            language=safe_lang, vote_count_gte=2000, sort_by="vote_average.desc", page=safe_page
-        )
-    elif lane_id == "action":
-        raw_items = await tmdb_client.discover_movies(
-            language=safe_lang, genre="28,878", vote_count_gte=1000, sort_by="popularity.desc", page=safe_page
-        )
-    elif lane_id == "animation":
-        raw_items = await tmdb_client.discover_movies(
-            language=safe_lang, genre="16", vote_count_gte=500, sort_by="popularity.desc", page=safe_page
-        )
+    # Trakt feeds & lists pagination
+    if lane_id == "trending":
+        items = await trakt_client.get_trending(page=safe_page, limit=safe_limit)
+    elif lane_id == "watched_weekly":
+        items = await trakt_client.get_watched(period="weekly", page=safe_page, limit=safe_limit)
+    elif lane_id == "box_office":
+        items = await trakt_client.get_box_office()
+    elif lane_id == "anticipated":
+        items = await trakt_client.get_anticipated(page=safe_page, limit=safe_limit)
+    elif lane_id == "imdb_top":
+        items = await trakt_client.get_list_items("2142753", page=safe_page, limit=safe_limit)
+    elif lane_id == "mindfucks":
+        items = await trakt_client.get_list_items("800238", page=safe_page, limit=safe_limit)
+    elif lane_id == "mcu":
+        items = await trakt_client.get_list_items("1248149", page=safe_page, limit=safe_limit)
     else:
         raw_items = await tmdb_client.discover_movies(language=safe_lang, page=safe_page)
+        items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]
 
-    items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]
     has_more = len(items) >= safe_limit
     return LaneMoviesResponse(
         id=lane_id,
@@ -143,14 +149,12 @@ async def get_filters():
         FilterOption(id=g.get("id"), label=g.get("name", "")) for g in raw_genres if g.get("id")
     ]
 
-    raw_langs = await tmdb_client.get_languages()
-    lang_map = {l.get("iso_639_1"): l.get("english_name", l.get("name", "")) for l in raw_langs if l.get("iso_639_1")}
-    priority_codes = ["ta", "en", "ml", "te", "hi", "kn", "ko", "ja"]
-
-    languages = [FilterOption(id="all", label="All Languages")]
-    for code in priority_codes:
-        if code in lang_map:
-            languages.append(FilterOption(id=code, label=lang_map[code]))
+    languages = [
+        FilterOption(id="all", label="All"),
+        FilterOption(id="ta", label="Tamil"),
+        FilterOption(id="en", label="English"),
+        FilterOption(id="anime", label="Anime (Japanese)"),
+    ]
 
     current_year = datetime.now().year
     years = [
@@ -206,12 +210,24 @@ async def search_or_discover(
     safe_page = page if isinstance(page, int) and page >= 1 else 1
 
     if safe_query:
+        trakt_results = await trakt_client.search_movies(
+            query=safe_query,
+            year=safe_year,
+            language=safe_lang,
+            page=safe_page,
+            limit=20,
+        )
+        if trakt_results:
+            return {"results": trakt_results}
+
+        # Fallback to TMDb search
         results = await tmdb_client.search_movie(
             query=safe_query,
             year=safe_year,
             language=safe_lang,
             page=safe_page,
         )
+        return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in results]}
     else:
         results = await tmdb_client.discover_movies(
             language=safe_lang,
@@ -222,7 +238,37 @@ async def search_or_discover(
             sort_by=safe_sort_by,
             page=safe_page,
         )
-    return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in results]}
+        return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in results]}
+
+
+@router.get("/search/lists")
+async def search_lists_endpoint(
+    query: str | None = Query(None, description="The query to search for curated lists (optional)"),
+    page: int = Query(1, ge=1, description="Page number to fetch"),
+    limit: int = Query(20, ge=1, le=50, description="Items per page"),
+):
+    safe_query = query.strip() if isinstance(query, str) and query.strip() else None
+    safe_page = page if isinstance(page, int) and page >= 1 else 1
+    safe_limit = limit if isinstance(limit, int) and 1 <= limit <= 50 else 20
+
+    if safe_query:
+        lists = await trakt_client.search_lists(query=safe_query, page=safe_page, limit=safe_limit)
+    else:
+        lists = await trakt_client.get_popular_lists(page=safe_page, limit=safe_limit)
+    return {"results": lists}
+
+
+@router.get("/lists/{list_id}/items")
+async def get_list_items_endpoint(
+    list_id: str,
+    page: int = Query(1, ge=1, description="Page number to fetch"),
+    limit: int = Query(20, ge=1, le=50, description="Items per page"),
+):
+    safe_page = page if isinstance(page, int) and page >= 1 else 1
+    safe_limit = limit if isinstance(limit, int) and 1 <= limit <= 50 else 20
+
+    items = await trakt_client.get_list_items(list_id=list_id, page=safe_page, limit=safe_limit)
+    return {"results": items}
 
 
 @router.get("/{tmdb_id}", response_model=MovieDetails)
