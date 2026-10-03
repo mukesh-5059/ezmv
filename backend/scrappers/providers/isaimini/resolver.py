@@ -1,8 +1,10 @@
 import asyncio
 import base64
+import json
 import logging
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs, urlsplit, urlunsplit, quote, unquote, urljoin
 from curl_cffi.requests import AsyncSession
 from curl_cffi import CurlOpt, CurlHttpVersion
@@ -22,16 +24,48 @@ def extract_url_expiry(url: str) -> tuple[int | None, int | None]:
     try:
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
-        if "e" in qs:
-            exp = int(qs["e"][0])
+        qs_lower = {k.lower(): v for k, v in qs.items()}
+
+        # 1. AWS S3 / Cloudflare R2 presigned URLs
+        if "x-amz-expires" in qs_lower:
+            delta = int(qs_lower["x-amz-expires"][0])
+            if "x-amz-date" in qs_lower:
+                dt = datetime.strptime(qs_lower["x-amz-date"][0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+                exp = int(dt.timestamp() + delta)
+            else:
+                exp = now + delta
             ttl = max(30, exp - now - 30) if exp > now else 30
             return exp, ttl
-        if "etag" in qs:
-            exp = int(qs["etag"][0])
-            ttl = max(30, exp - now - 30) if exp > now else 30
-            return exp, ttl
-        if "dl" in qs:
-            dl_raw = qs["dl"][0]
+
+        # 2. Standard timestamp/duration expiration query params
+        for key in ("expires", "exp", "e", "expire", "validuntil", "etag"):
+            if key in qs_lower:
+                val = qs_lower[key][0]
+                if val.isdigit():
+                    exp_val = int(val)
+                    if exp_val > 1000000000:
+                        ttl = max(30, exp_val - now - 30) if exp_val > now else 30
+                        return exp_val, ttl
+                    elif exp_val > 0:
+                        exp = now + exp_val
+                        ttl = max(30, exp_val - 30)
+                        return exp, ttl
+
+        # 3. JWT Tokens in query parameters
+        if "token" in qs_lower or "jwt" in qs_lower:
+            raw_token = (qs_lower.get("token") or qs_lower.get("jwt"))[0]
+            parts = raw_token.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * (-len(parts[1]) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(padded))
+                if "exp" in payload and isinstance(payload["exp"], (int, float)):
+                    exp = int(payload["exp"])
+                    ttl = max(30, exp - now - 30) if exp > now else 30
+                    return exp, ttl
+
+        # 4. Base64-encoded download params
+        if "dl" in qs_lower:
+            dl_raw = qs_lower["dl"][0]
             padded = dl_raw + "=" * (-len(dl_raw) % 4)
             decoded = base64.urlsafe_b64decode(padded).decode("utf-8", errors="ignore")
             params = parse_qs(decoded)
@@ -49,7 +83,7 @@ def attach_stream_metadata(stream: StreamSource) -> StreamSource:
     return replace(
         stream,
         expires_at=exp,
-        ttl=ttl if ttl is not None else 3600,
+        ttl=ttl if ttl is not None else 300,
         priority=priority
     )
 

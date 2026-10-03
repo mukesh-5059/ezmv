@@ -49,10 +49,10 @@ class TMDBClient:
             "accept": "application/json"
         }
         
-        # In-memory L1 cache (1 hour for searches, 24 hours for discover/details)
-        self._search_cache = TTLCache(ttl_seconds=3600)
+        # In-memory L1 cache (1 day for search/discover, 15 days for details)
+        self._search_cache = TTLCache(ttl_seconds=86400)
         self._discover_cache = TTLCache(ttl_seconds=86400)
-        self._details_cache = TTLCache(ttl_seconds=86400)
+        self._details_cache = TTLCache(ttl_seconds=1296000)
 
     async def search_movie(self, query: str, year: int = None, page: int = 1) -> list[dict]:
         cache_key = f"search_movie:{query}_{year}_{page}"
@@ -61,7 +61,7 @@ class TMDBClient:
         if cached_result is not None:
             return cached_result
 
-        # 2. L2 SQLite Disk Cache (30 days)
+        # 2. L2 SQLite Disk Cache (1 day)
         disk_cached = get_tmdb_cache(cache_key)
         if disk_cached is not None:
             self._search_cache.set(cache_key, disk_cached)
@@ -143,7 +143,7 @@ class TMDBClient:
             details = resp.json()
             
             self._details_cache.set(movie_id, details)
-            set_tmdb_cache(cache_key, details)
+            set_tmdb_cache(cache_key, details, ttl_seconds=1296000)
             return details
         except Exception as e:
             logger.error(f"Failed to fetch TMDB movie details for id {movie_id}: {e}")
@@ -163,7 +163,7 @@ class TMDBClient:
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
             resp.raise_for_status()
             details = resp.json()
-            set_tmdb_cache(cache_key, details)
+            set_tmdb_cache(cache_key, details, ttl_seconds=1296000)
             return details
         except Exception as e:
             logger.error(f"Failed to fetch TMDB TV details for id {tv_id}: {e}")
@@ -274,12 +274,12 @@ class TMDBClient:
             movie_results = data.get("movie_results", [])
             if movie_results:
                 res = movie_results[0]
-                set_tmdb_cache(cache_key, res)
+                set_tmdb_cache(cache_key, res, ttl_seconds=1296000)
                 return res
             tv_results = data.get("tv_results", [])
             if tv_results:
                 res = tv_results[0]
-                set_tmdb_cache(cache_key, res)
+                set_tmdb_cache(cache_key, res, ttl_seconds=1296000)
                 return res
             return None
         except Exception as e:

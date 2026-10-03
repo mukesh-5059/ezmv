@@ -32,6 +32,7 @@ def init_cache_db():
         conn.execute("""
         CREATE TABLE IF NOT EXISTS stream_cache (
             tmdb_id INTEGER NOT NULL,
+            scraper_id TEXT NOT NULL,
             provider TEXT NOT NULL,
             quality TEXT NOT NULL,
             url TEXT NOT NULL,
@@ -40,9 +41,9 @@ def init_cache_db():
             created_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL,
             ttl INTEGER NOT NULL,
-            season INTEGER,
-            episode INTEGER,
-            PRIMARY KEY (tmdb_id, provider, quality, season, episode)
+            season INTEGER NOT NULL DEFAULT 0,
+            episode INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (tmdb_id, scraper_id, quality, season, episode)
         );
         """)
         conn.execute("""
@@ -88,7 +89,7 @@ def get_tmdb_cache(key: str) -> dict | list | None:
     return None
 
 
-def set_tmdb_cache(key: str, data: dict | list, ttl_seconds: int = 2592000):  # 30 days default
+def set_tmdb_cache(key: str, data: dict | list, ttl_seconds: int = 86400):  # 1 day default
     now = int(time.time())
     expires_at = now + ttl_seconds
     try:
@@ -113,22 +114,25 @@ def get_cached_streams(
     tmdb_id: int,
     season: int | None = None,
     episode: int | None = None,
-    provider: str | None = None,
+    scraper_id: str | None = None,
 ) -> list[dict]:
     now = int(time.time())
+    safe_season = season if season is not None else 0
+    safe_episode = episode if episode is not None else 0
     try:
         with get_cache_connection() as conn:
             query = """
-            SELECT tmdb_id, provider, quality, url, headers_json, priority, created_at, expires_at, ttl
+            SELECT tmdb_id, scraper_id, provider, quality, url, headers_json, priority, created_at, expires_at, ttl, season, episode
             FROM stream_cache
             WHERE tmdb_id = ?
-              AND (season IS ? OR season = ?)
-              AND (episode IS ? OR episode = ?)
+              AND season = ?
+              AND episode = ?
+              AND expires_at > ?
             """
-            params: list = [tmdb_id, season, season, episode, episode]
-            if provider:
-                query += " AND provider = ?"
-                params.append(provider)
+            params: list = [tmdb_id, safe_season, safe_episode, now]
+            if scraper_id:
+                query += " AND (scraper_id = ? OR LOWER(provider) LIKE ?)"
+                params.extend([scraper_id.lower(), f"%{scraper_id.lower()}%"])
 
             query += " ORDER BY priority ASC, created_at DESC;"
             rows = conn.execute(query, params).fetchall()
@@ -139,6 +143,7 @@ def get_cached_streams(
                 remaining_ttl = max(0, row["expires_at"] - now)
                 results.append({
                     "url": row["url"],
+                    "scraper_id": row["scraper_id"],
                     "provider": row["provider"],
                     "quality": row["quality"],
                     "headers": headers,
@@ -161,19 +166,24 @@ def save_cached_streams(
     episode: int | None = None,
 ):
     now = int(time.time())
+    safe_season = season if season is not None else 0
+    safe_episode = episode if episode is not None else 0
     try:
         with get_cache_connection() as conn:
             for s in streams:
-                ttl = s.get("ttl") or 86400  # Default 24 hours if unspecified
+                ttl = s.get("ttl") or 86400
                 expires_at = s.get("expires_at") or (now + ttl)
                 headers_json = json.dumps(s.get("headers", {}))
+                raw_prov = s.get("provider", "direct")
+                scraper_id = (s.get("scraper_id") or raw_prov.split(" ")[0]).lower().strip("()")
                 conn.execute(
                     """
                     INSERT INTO stream_cache (
-                        tmdb_id, provider, quality, url, headers_json, priority, created_at, expires_at, ttl, season, episode
+                        tmdb_id, scraper_id, provider, quality, url, headers_json, priority, created_at, expires_at, ttl, season, episode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(tmdb_id, provider, quality, season, episode) DO UPDATE SET
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tmdb_id, scraper_id, quality, season, episode) DO UPDATE SET
+                        provider = excluded.provider,
                         url = excluded.url,
                         headers_json = excluded.headers_json,
                         priority = excluded.priority,
@@ -183,7 +193,8 @@ def save_cached_streams(
                     """,
                     (
                         tmdb_id,
-                        s.get("provider", "Direct"),
+                        scraper_id,
+                        raw_prov,
                         s.get("quality", "HD"),
                         s.get("url", ""),
                         headers_json,
@@ -191,8 +202,8 @@ def save_cached_streams(
                         now,
                         expires_at,
                         ttl,
-                        season,
-                        episode,
+                        safe_season,
+                        safe_episode,
                     ),
                 )
             conn.commit()
@@ -202,32 +213,35 @@ def save_cached_streams(
 
 def delete_cached_streams(
     tmdb_id: int,
-    provider: str | None = None,
+    scraper_id: str | None = None,
     season: int | None = None,
     episode: int | None = None,
 ):
+    safe_season = season if season is not None else 0
+    safe_episode = episode if episode is not None else 0
     try:
         with get_cache_connection() as conn:
-            if provider:
+            if scraper_id:
+                clean_scraper = scraper_id.lower().split(" ")[0].strip("()")
                 conn.execute(
                     """
                     DELETE FROM stream_cache
                     WHERE tmdb_id = ?
-                      AND provider = ?
-                      AND (season IS ? OR season = ?)
-                      AND (episode IS ? OR episode = ?);
+                      AND (scraper_id = ? OR LOWER(provider) LIKE ?)
+                      AND season = ?
+                      AND episode = ?;
                     """,
-                    (tmdb_id, provider, season, season, episode, episode),
+                    (tmdb_id, clean_scraper, f"%{clean_scraper}%", safe_season, safe_episode),
                 )
             else:
                 conn.execute(
                     """
                     DELETE FROM stream_cache
                     WHERE tmdb_id = ?
-                      AND (season IS ? OR season = ?)
-                      AND (episode IS ? OR episode = ?);
+                      AND season = ?
+                      AND episode = ?;
                     """,
-                    (tmdb_id, season, season, episode, episode),
+                    (tmdb_id, safe_season, safe_episode),
                 )
             conn.commit()
     except Exception as e:

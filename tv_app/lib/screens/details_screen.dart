@@ -82,17 +82,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  Future<void> _fetchStreams({bool bypassCache = false, String? provider}) async {
+  Future<void> _fetchStreams({bool bypassCache = false}) async {
     _cacheTimer?.cancel();
     setState(() {
       _isLoadingStreams = true;
       _cacheExpiresIn = 0;
-      _statusMessage = provider != null ? 'Refreshing $provider...' : 'Connecting to scrapers...';
+      _statusMessage = 'Connecting to scrapers...';
     });
 
     final response = await ApiClient.getStreamLinksWithProgress(
       widget.movie.tmdbId,
-      provider: provider,
       bypassCache: bypassCache,
       onProgress: (msg) {
         if (!mounted) return;
@@ -106,13 +105,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
     setState(() {
       final List streamList = response['streams'] ?? [];
-      final newStreams = List<Map<String, dynamic>>.from(streamList);
-      if (provider != null && _streams.isNotEmpty) {
-        final filtered = _streams.where((s) => (s['provider']?.toString().toLowerCase() != provider.toLowerCase())).toList();
-        _streams = [...newStreams, ...filtered];
-      } else {
-        _streams = newStreams;
-      }
+      _streams = List<Map<String, dynamic>>.from(streamList);
       _streams.sort((a, b) => ((a['priority'] as num?) ?? 100).compareTo((b['priority'] as num?) ?? 100));
       _cacheExpiresIn = response['cache_expires_in'] ?? 0;
       _isLoadingStreams = false;
@@ -150,22 +143,34 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Future<void> _handlePlayOrResume({int initialSeconds = 0}) async {
     if (_isLoadingStreams) return;
 
-    if (_streams.isEmpty) {
-      await _fetchStreams(bypassCache: true);
-    } else {
-      final topStream = _streams.first;
-      final num? expiresAt = topStream['expires_at'] as num?;
-      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final bool isExpired = expiresAt != null && expiresAt > 0 && expiresAt <= nowSec;
-
-      if (isExpired) {
-        final String provider = topStream['provider']?.toString() ?? '';
-        await _fetchStreams(bypassCache: true, provider: provider);
-      }
-    }
+    await _fetchStreams(bypassCache: false);
 
     if (mounted && _streams.isNotEmpty) {
       _startPlayback(_streams.first, initialSeconds: initialSeconds);
+    }
+  }
+
+  Future<void> _handleStreamSelected(Map<String, dynamic> stream) async {
+    if (_isLoadingStreams) return;
+
+    final targetUrl = stream['url'];
+    final targetQuality = stream['quality']?.toString();
+    final targetProvider = stream['provider']?.toString();
+
+    await _fetchStreams(bypassCache: false);
+
+    if (mounted && _streams.isNotEmpty) {
+      final matching = _streams.firstWhere(
+        (s) => s['url'] == targetUrl,
+        orElse: () => _streams.firstWhere(
+          (s) => s['quality']?.toString() == targetQuality && s['provider']?.toString() == targetProvider,
+          orElse: () => _streams.firstWhere(
+            (s) => s['quality']?.toString() == targetQuality,
+            orElse: () => _streams.first,
+          ),
+        ),
+      );
+      _startPlayback(matching, initialSeconds: _savedProgressSeconds > 15 ? _savedProgressSeconds : 0);
     }
   }
 
@@ -197,17 +202,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
     ).then((_) {
       _loadProgress();
     });
-  }
-
-  Future<void> _refreshAndPlayProvider(String provider) async {
-    await _fetchStreams(bypassCache: true, provider: provider);
-    if (!mounted || _streams.isEmpty) return;
-
-    final matching = _streams.firstWhere(
-      (s) => s['provider']?.toString().toLowerCase() == provider.toLowerCase(),
-      orElse: () => _streams.first,
-    );
-    _startPlayback(matching, initialSeconds: _savedProgressSeconds > 15 ? _savedProgressSeconds : 0);
   }
 
   @override
@@ -399,8 +393,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               cacheExpiresIn: _cacheExpiresIn,
                               onRetry: () => _fetchStreams(bypassCache: false),
                               onForceRescrape: () => _fetchStreams(bypassCache: true),
-                              onRescrapeProvider: (provider) => _refreshAndPlayProvider(provider),
-                              onStreamSelected: (stream) => _startPlayback(stream, initialSeconds: _savedProgressSeconds > 15 ? _savedProgressSeconds : 0),
+                              onStreamSelected: (stream) => _handleStreamSelected(stream),
                               firstStreamFocusNode: _firstStreamFocusNode,
                               retryFocusNode: _retryFocusNode,
                             ),

@@ -9,7 +9,6 @@ class StreamSelector extends StatelessWidget {
   final int cacheExpiresIn;
   final VoidCallback onRetry;
   final VoidCallback onForceRescrape;
-  final void Function(String provider) onRescrapeProvider;
   final void Function(Map<String, dynamic> stream) onStreamSelected;
   final FocusNode firstStreamFocusNode;
   final FocusNode retryFocusNode;
@@ -22,7 +21,6 @@ class StreamSelector extends StatelessWidget {
     required this.cacheExpiresIn,
     required this.onRetry,
     required this.onForceRescrape,
-    required this.onRescrapeProvider,
     required this.onStreamSelected,
     required this.firstStreamFocusNode,
     required this.retryFocusNode,
@@ -162,7 +160,6 @@ class StreamSelector extends StatelessWidget {
                   stream: stream,
                   focusNode: index == 0 ? firstStreamFocusNode : null,
                   onSelect: () => onStreamSelected(stream),
-                  onRescrape: (provider) => onRescrapeProvider(provider),
                 );
               },
             ),
@@ -176,14 +173,12 @@ class _StreamItemButton extends StatefulWidget {
   final Map<String, dynamic> stream;
   final FocusNode? focusNode;
   final VoidCallback onSelect;
-  final void Function(String provider) onRescrape;
 
   const _StreamItemButton({
     super.key,
     required this.stream,
     this.focusNode,
     required this.onSelect,
-    required this.onRescrape,
   });
 
   @override
@@ -227,22 +222,14 @@ class _StreamItemButtonState extends State<_StreamItemButton> {
                   event.logicalKey == LogicalKeyboardKey.enter ||
                   event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                   event.logicalKey == LogicalKeyboardKey.space)) {
-            if (isExpired) {
-              widget.onRescrape(provider);
-            } else {
-              widget.onSelect();
-            }
+            widget.onSelect();
             return KeyEventResult.handled;
           }
           return KeyEventResult.ignored;
         },
         child: GestureDetector(
           onTap: () {
-            if (isExpired) {
-              widget.onRescrape(provider);
-            } else {
-              widget.onSelect();
-            }
+            widget.onSelect();
           },
           child: AnimatedScale(
             scale: _isFocused ? 1.05 : 1.0,
