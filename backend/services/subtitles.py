@@ -1,7 +1,7 @@
 import logging
-import asyncio
 from backend.session import get_session
-from backend.services.tmdb import tmdb_client, TTLCache
+from backend.services.tmdb import tmdb_client
+from backend.services.cache_db import get_tmdb_cache, set_tmdb_cache
 from backend.models import SubtitleTrack, SubtitleResponse
 
 logger = logging.getLogger(__name__)
@@ -45,11 +45,9 @@ LANG_MAP = {
     "ar": ("Arabic", "ar"),
 }
 
+
 class SubtitlesService:
     BASE_URL = "https://opensubtitles-v3.strem.io/subtitles"
-
-    def __init__(self):
-        self._cache = TTLCache(ttl_seconds=86400)
 
     async def _get_imdb_id(self, tmdb_id: int) -> str | None:
         details = await tmdb_client.get_movie_details(tmdb_id)
@@ -61,24 +59,25 @@ class SubtitlesService:
     async def get_subtitles(
         self,
         tmdb_id: int,
-        language: str | None = None
+        language: str | None = None,
     ) -> SubtitleResponse:
-        cache_key = f"{tmdb_id}_movie"
-        cached = self._cache.get(cache_key)
+        cache_key = f"subtitles:{tmdb_id}"
+        cached = get_tmdb_cache(cache_key)
         if cached is not None:
+            cached_response = SubtitleResponse.model_validate(cached)
             if language:
                 lang_lower = language.lower()
                 filtered = [
-                    s for s in cached.subtitles
+                    s for s in cached_response.subtitles
                     if s.code.lower() == lang_lower or s.language.lower() == lang_lower
                 ]
                 return SubtitleResponse(
-                    tmdb_id=cached.tmdb_id,
-                    imdb_id=cached.imdb_id,
+                    tmdb_id=cached_response.tmdb_id,
+                    imdb_id=cached_response.imdb_id,
                     media_type="movie",
-                    subtitles=filtered
+                    subtitles=filtered,
                 )
-            return cached
+            return cached_response
 
         imdb_id = await self._get_imdb_id(tmdb_id)
         if not imdb_id:
@@ -87,7 +86,7 @@ class SubtitlesService:
                 tmdb_id=tmdb_id,
                 imdb_id=None,
                 media_type="movie",
-                subtitles=[]
+                subtitles=[],
             )
 
         url = f"{self.BASE_URL}/movie/{imdb_id}.json"
@@ -112,7 +111,7 @@ class SubtitlesService:
                             code=lang_code,
                             url=sub_url,
                             format="vtt",
-                            release=sub.get("movieReleaseName") or sub.get("subtitleFileName")
+                            release=sub.get("movieReleaseName") or sub.get("subtitleFileName"),
                         )
                     )
         except Exception as e:
@@ -125,9 +124,9 @@ class SubtitlesService:
             tmdb_id=tmdb_id,
             imdb_id=imdb_id,
             media_type="movie",
-            subtitles=raw_tracks
+            subtitles=raw_tracks,
         )
-        self._cache.set(cache_key, full_response)
+        set_tmdb_cache(cache_key, full_response.model_dump(), ttl_seconds=86400)
 
         if language:
             lang_lower = language.lower()
@@ -139,9 +138,10 @@ class SubtitlesService:
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
                 media_type="movie",
-                subtitles=filtered_tracks
+                subtitles=filtered_tracks,
             )
 
         return full_response
+
 
 subtitles_service = SubtitlesService()

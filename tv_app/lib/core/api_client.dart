@@ -6,6 +6,7 @@ import '../models/movie.model.dart';
 import '../models/movie_details.model.dart';
 import '../models/subtitle.model.dart';
 import '../models/dashboard_lane.model.dart';
+import '../models/filter.model.dart';
 
 class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
@@ -86,10 +87,55 @@ class ApiClient {
     _currentBaseUrl = formattedUrl;
   }
 
-  static Future<List<Movie>> searchMovies(String query, {int page = 1}) async {
-    final url = Uri.parse('$_currentBaseUrl/movies/search?query=${Uri.encodeComponent(query)}&media_type=movie&page=$page');
+  static Future<FiltersData?> getFilters() async {
+    final url = Uri.parse('$_currentBaseUrl/movies/filters');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 3));
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return FiltersData.fromJson(data);
+      }
+    } catch (e) {
+      print('Get filters failed: $e');
+    }
+    return null;
+  }
+
+  static Future<List<Movie>> searchMovies({
+    String? query,
+    String? language,
+    int? year,
+    int? yearMin,
+    int? yearMax,
+    dynamic genreId,
+    String? sortBy,
+    int page = 1,
+  }) async {
+    var queryParams = 'page=$page';
+    if (query != null && query.trim().isNotEmpty) {
+      queryParams += '&query=${Uri.encodeComponent(query.trim())}';
+    }
+    if (language != null && language != 'all') {
+      queryParams += '&language=$language';
+    }
+    if (year != null) {
+      queryParams += '&year=$year';
+    }
+    if (yearMin != null) {
+      queryParams += '&year_min=$yearMin';
+    }
+    if (yearMax != null) {
+      queryParams += '&year_max=$yearMax';
+    }
+    if (genreId != null && genreId.toString() != 'all' && genreId.toString() != '0') {
+      queryParams += '&genre=$genreId';
+    }
+    if (sortBy != null && sortBy.isNotEmpty) {
+      queryParams += '&sort_by=$sortBy';
+    }
+    final url = Uri.parse('$_currentBaseUrl/movies/search?$queryParams');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -133,17 +179,37 @@ class ApiClient {
     return null;
   }
 
-  static Future<List<Movie>> discoverMovies({required String language, int? year, int? genreId, int page = 1}) async {
-    var queryParams = 'language=$language&page=$page';
+  static Future<List<Movie>> discoverMovies({
+    String? language,
+    int? year,
+    int? yearMin,
+    int? yearMax,
+    dynamic genreId,
+    String? sortBy,
+    int page = 1,
+  }) async {
+    var queryParams = 'page=$page';
+    if (language != null && language != 'all') {
+      queryParams += '&language=$language';
+    }
     if (year != null) {
       queryParams += '&year=$year';
     }
-    if (genreId != null) {
+    if (yearMin != null) {
+      queryParams += '&year_min=$yearMin';
+    }
+    if (yearMax != null) {
+      queryParams += '&year_max=$yearMax';
+    }
+    if (genreId != null && genreId.toString() != 'all' && genreId.toString() != '0') {
       queryParams += '&genre=$genreId';
+    }
+    if (sortBy != null && sortBy.isNotEmpty) {
+      queryParams += '&sort_by=$sortBy';
     }
     final url = Uri.parse('$_currentBaseUrl/movies/discover?$queryParams');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 3));
+      final response = await http.get(url).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];

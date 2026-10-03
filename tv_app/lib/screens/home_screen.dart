@@ -9,6 +9,7 @@ import '../widgets/movie_lane.dart';
 import '../widgets/search_dialog.dart';
 import '../widgets/settings_dialog.dart';
 import 'details_screen.dart';
+import 'search_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -275,7 +276,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     List<Movie> newMovies = [];
     if (_activeSearchText != null) {
-      newMovies = await ApiClient.searchMovies(_activeSearchText!, page: nextPage);
+      newMovies = await ApiClient.searchMovies(query: _activeSearchText!, page: nextPage);
     } else {
       final lang = _isTamilSelected ? 'ta' : 'en';
       newMovies = await ApiClient.discoverMovies(
@@ -306,7 +307,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _searchPage = 1;
     });
 
-    final results = await ApiClient.searchMovies(query, page: 1);
+    final results = await ApiClient.searchMovies(query: query, page: 1);
     if (mounted) {
       setState(() {
         _searchResults = results;
@@ -518,11 +519,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.search,
                         label: 'Search Movies',
                         focusNode: _searchFocusNode,
-                        onTap: () => SearchDialog.show(
-                          context: context,
-                          onSearch: _performSearch,
-                          onDiscover: _performDiscover,
-                        ),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const SearchScreen()),
+                          );
+                        },
                       ),
                       _buildTopBarAction(
                         icon: Icons.refresh,

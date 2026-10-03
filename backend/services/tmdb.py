@@ -1,44 +1,11 @@
 import logging
-import time
+from datetime import date
 from backend.config import settings
 from backend.session import get_session
 from backend.services.cache_db import get_tmdb_cache, set_tmdb_cache
 
 logger = logging.getLogger(__name__)
 
-class TTLCache:
-    """
-    A lightweight, in-memory key-value cache with TTL expiration.
-    """
-    def __init__(self, ttl_seconds: int):
-        self.ttl = ttl_seconds
-        self.cache = {}
-
-    def get(self, key):
-        if key in self.cache:
-            expire_time, val = self.cache[key]
-            if time.time() < expire_time:
-                return val
-            else:
-                del self.cache[key]
-        return None
-
-    def get_remaining_ttl(self, key) -> int:
-        if key in self.cache:
-            expire_time, _ = self.cache[key]
-            remaining = int(expire_time - time.time())
-            if remaining > 0:
-                return remaining
-            else:
-                del self.cache[key]
-        return 0
-
-    def set(self, key, val, ttl: int | None = None):
-        duration = ttl if ttl is not None else self.ttl
-        self.cache[key] = (time.time() + duration, val)
-
-    def clear(self):
-        self.cache.clear()
 
 class TMDBClient:
     BASE_URL = "https://api.themoviedb.org/3"
@@ -46,67 +13,111 @@ class TMDBClient:
     def __init__(self):
         self.headers = {
             "Authorization": f"Bearer {settings.ReadAccessToken}",
-            "accept": "application/json"
+            "accept": "application/json",
         }
-        
-        # In-memory L1 cache (1 day for search/discover, 15 days for details)
-        self._search_cache = TTLCache(ttl_seconds=86400)
-        self._discover_cache = TTLCache(ttl_seconds=86400)
-        self._details_cache = TTLCache(ttl_seconds=1296000)
 
-    async def search_movie(self, query: str, year: int = None, page: int = 1) -> list[dict]:
-        cache_key = f"search_movie:{query}_{year}_{page}"
-        # 1. L1 Memory Cache
-        cached_result = self._search_cache.get(cache_key)
-        if cached_result is not None:
-            return cached_result
+    async def get_genres(self, language: str = "en") -> list[dict]:
+        cache_key = f"tmdb_genres:{language}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
 
-        # 2. L2 SQLite Disk Cache (1 day)
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            self._search_cache.set(cache_key, disk_cached)
-            return disk_cached
+        url = f"{self.BASE_URL}/genre/movie/list"
+        params = {"language": language}
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            genres = resp.json().get("genres", [])
+            set_tmdb_cache(cache_key, genres, ttl_seconds=2592000)
+            return genres
+        except Exception as e:
+            logger.error(f"Failed to fetch TMDB genres: {e}")
+            return []
+
+    async def get_languages(self) -> list[dict]:
+        cache_key = "tmdb_languages"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        url = f"{self.BASE_URL}/configuration/languages"
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, impersonate="chrome")
+            resp.raise_for_status()
+            languages = resp.json()
+            if isinstance(languages, list):
+                set_tmdb_cache(cache_key, languages, ttl_seconds=2592000)
+                return languages
+            return []
+        except Exception as e:
+            logger.error(f"Failed to fetch TMDB languages: {e}")
+            return []
+
+    async def search_movie(
+        self,
+        query: str,
+        year: int | None = None,
+        year_min: int | None = None,
+        year_max: int | None = None,
+        genre: int | str | None = None,
+        language: str | None = None,
+        sort_by: str | None = None,
+        page: int = 1,
+    ) -> list[dict]:
+        clean_q = query.strip() if query else ""
+        if not clean_q:
+            return await self.discover_movies(
+                language=language,
+                year=year,
+                year_min=year_min,
+                year_max=year_max,
+                genre=genre,
+                sort_by=sort_by,
+                page=page,
+            )
+
+        cache_key = f"search_movie:{clean_q}_{year}_{language}_{page}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
 
         url = f"{self.BASE_URL}/search/movie"
         params = {
-            "query": query,
+            "query": clean_q,
             "page": str(page),
-            "include_adult": "false"
+            "include_adult": "false",
         }
         if year:
-            params["year"] = str(year)
+            params["primary_release_year"] = str(year)
+        if language and language != "all":
+            params["language"] = language
 
         try:
-            from datetime import date
             client = get_session()
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
             resp.raise_for_status()
             results = resp.json().get("results", [])
-            
-            # Filter out unreleased movies
+
             today_str = date.today().isoformat()
-            filtered_results = [
+            filtered = [
                 m for m in results
                 if m.get("release_date") and m.get("release_date") <= today_str
             ]
-            
-            self._search_cache.set(cache_key, filtered_results)
-            set_tmdb_cache(cache_key, filtered_results)
-            return filtered_results
+
+            if len(clean_q) >= 2 and len(filtered) > 0:
+                set_tmdb_cache(cache_key, filtered, ttl_seconds=86400)
+            return filtered
         except Exception as e:
             logger.error(f"TMDB movie search failed for '{query}': {e}")
             return []
 
     async def get_movie_details(self, movie_id: int) -> dict | None:
         cache_key = f"movie_details:{movie_id}"
-        cached_result = self._details_cache.get(movie_id)
-        if cached_result is not None:
-            return cached_result
-
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            self._details_cache.set(movie_id, disk_cached)
-            return disk_cached
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
 
         url = f"{self.BASE_URL}/movie/{movie_id}"
         params = {"append_to_response": "external_ids,credits"}
@@ -116,8 +127,7 @@ class TMDBClient:
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
             resp.raise_for_status()
             details = resp.json()
-            
-            self._details_cache.set(movie_id, details)
+
             set_tmdb_cache(cache_key, details, ttl_seconds=1296000)
             return details
         except Exception as e:
@@ -129,14 +139,9 @@ class TMDBClient:
 
     async def get_trending_movies(self, time_window: str = "week", page: int = 1) -> list[dict]:
         cache_key = f"trending:{time_window}_{page}"
-        cached_result = self._discover_cache.get(cache_key)
-        if cached_result is not None:
-            return cached_result
-
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            self._discover_cache.set(cache_key, disk_cached)
-            return disk_cached
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
 
         url = f"{self.BASE_URL}/trending/movie/{time_window}"
         params = {"page": str(page)}
@@ -147,8 +152,7 @@ class TMDBClient:
             resp.raise_for_status()
             results = resp.json().get("results", [])
 
-            self._discover_cache.set(cache_key, results)
-            set_tmdb_cache(cache_key, results)
+            set_tmdb_cache(cache_key, results, ttl_seconds=86400)
             return results
         except Exception as e:
             logger.error(f"TMDB trending failed for window '{time_window}': {e}")
@@ -156,68 +160,73 @@ class TMDBClient:
 
     async def discover_movies(
         self,
-        language: str = "en-US",
+        language: str | None = None,
         year: int | None = None,
+        year_min: int | None = None,
+        year_max: int | None = None,
         genre: int | str | None = None,
         page: int = 1,
         sort_by: str | None = None,
         vote_count_gte: int | None = None,
     ) -> list[dict]:
-        cache_key = f"discover:{language}_{year}_{genre}_{sort_by}_{vote_count_gte}_{page}"
-        cached_result = self._discover_cache.get(cache_key)
-        if cached_result is not None:
-            return cached_result
-
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            self._discover_cache.set(cache_key, disk_cached)
-            return disk_cached
+        cache_key = f"discover:{language}_{year}_{year_min}_{year_max}_{genre}_{sort_by}_{vote_count_gte}_{page}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
 
         url = f"{self.BASE_URL}/discover/movie"
-        lang_code = language.split("-")[0] if "-" in language else language
-        
-        from datetime import date
         today_str = date.today().isoformat()
-        
+
         params = {
-            "with_original_language": lang_code,
             "page": str(page),
             "primary_release_date.lte": today_str,
-            "include_adult": "false"
+            "include_adult": "false",
         }
-        
-        if genre:
+
+        if language and language != "all":
+            lang_code = language.split("-")[0] if "-" in language else language
+            params["with_original_language"] = lang_code
+
+        if genre and str(genre).lower() != "all" and str(genre) != "0":
             params["with_genres"] = str(genre)
 
-        if vote_count_gte:
-            params["vote_count.gte"] = str(vote_count_gte)
-            
+        if year:
+            params["primary_release_year"] = str(year)
+        else:
+            if year_min:
+                params["primary_release_date.gte"] = f"{year_min}-01-01"
+            if year_max:
+                params["primary_release_date.lte"] = min(today_str, f"{year_max}-12-31")
+
         if sort_by:
             params["sort_by"] = sort_by
-        elif year:
-            params["primary_release_year"] = str(year)
-            params["sort_by"] = "popularity.desc"
         else:
-            params["sort_by"] = "primary_release_date.desc"
+            params["sort_by"] = "popularity.desc"
+
+        if vote_count_gte is not None:
+            params["vote_count.gte"] = str(vote_count_gte)
+        elif params["sort_by"] == "vote_average.desc":
+            params["vote_count.gte"] = "100"
+        elif params["sort_by"] == "popularity.desc":
+            params["vote_count.gte"] = "20"
 
         try:
             client = get_session()
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
             resp.raise_for_status()
             results = resp.json().get("results", [])
-            
-            self._discover_cache.set(cache_key, results)
-            set_tmdb_cache(cache_key, results)
+
+            set_tmdb_cache(cache_key, results, ttl_seconds=86400)
             return results
         except Exception as e:
-            logger.error(f"TMDB discover failed for lang '{lang_code}', year '{year}', genre '{genre}': {e}")
+            logger.error(f"TMDB discover failed for lang '{language}', genre '{genre}': {e}")
             return []
 
     async def find_movie_by_imdb_id(self, imdb_id: str) -> dict | None:
         cache_key = f"find_imdb:{imdb_id}"
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            return disk_cached
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
 
         url = f"{self.BASE_URL}/find/{imdb_id}"
         params = {"external_source": "imdb_id"}
@@ -240,5 +249,6 @@ class TMDBClient:
         except Exception as e:
             logger.error(f"Failed to find TMDB item for IMDb ID '{imdb_id}': {e}")
             return None
+
 
 tmdb_client = TMDBClient()

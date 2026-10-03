@@ -177,3 +177,22 @@ class LaneMoviesResponse(BaseModel):
     has_more: bool = False
     next_page: int | None = None
     items: list[MovieSummary] = Field(default_factory=list)
+
+
+class FilterOption(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int | str | None = None
+    label: str
+    year_min: int | None = None
+    year_max: int | None = None
+
+
+class FiltersResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    languages: list[FilterOption]
+    genres: list[FilterOption]
+    years: list[FilterOption]
+    sort_options: list[FilterOption]
+

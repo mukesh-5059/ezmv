@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from typing import AsyncGenerator
-from backend.services.tmdb import tmdb_client, TTLCache
+from backend.services.tmdb import tmdb_client
 from backend.services.catalog import catalog_service
 from backend.services.cache_db import (
     get_cached_streams,
