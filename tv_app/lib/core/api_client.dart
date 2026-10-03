@@ -5,6 +5,7 @@ import 'discovery_service.dart';
 import '../models/movie.model.dart';
 import '../models/movie_details.model.dart';
 import '../models/subtitle.model.dart';
+import '../models/dashboard_lane.model.dart';
 
 class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
@@ -98,6 +99,38 @@ class ApiClient {
       print('Search request failed: $e');
     }
     return [];
+  }
+
+  static Future<List<DashboardLane>> getDashboard({required String language}) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/dashboard?language=$language');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List lanes = data['lanes'] ?? [];
+        return lanes.map((item) => DashboardLane.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Get dashboard failed: $e');
+    }
+    return [];
+  }
+
+  static Future<Map<String, dynamic>?> getDashboardLane({
+    required String laneId,
+    required String language,
+    required int page,
+  }) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/dashboard/lane?lane_id=$laneId&language=$language&page=$page');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+    } catch (e) {
+      print('Get dashboard lane failed: $e');
+    }
+    return null;
   }
 
   static Future<List<Movie>> getPopularMovies({required String language, int page = 1}) async {

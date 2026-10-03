@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
+import '../models/dashboard_lane.model.dart';
 import '../core/api_client.dart';
 import '../core/local_storage.dart';
 import '../theme.dart';
@@ -18,14 +19,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Movie> _history = [];
-
-  List<Movie> _topTamil = [];
-  List<Movie> _latestTamil = [];
-  List<Movie> _comedyTamil = [];
-
-  List<Movie> _topEnglish = [];
-  List<Movie> _latestEnglish = [];
-  List<Movie> _comedyEnglish = [];
+  List<DashboardLane> _lanes = [];
 
   List<Movie> _searchResults = [];
 
@@ -36,14 +30,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _searchQuery = '';
   int _searchPage = 1;
-
-  int _topTamilPage = 1;
-  int _latestTamilPage = 1;
-  int _comedyTamilPage = 1;
-
-  int _topEnglishPage = 1;
-  int _latestEnglishPage = 1;
-  int _comedyEnglishPage = 1;
 
   String? _activeSearchText;
   int? _activeSearchYear;
@@ -60,16 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<String, int> _rowLastFocusedIndex = {
     'search': 0,
     'history': 0,
-    'top': 0,
-    'latest': 0,
-    'comedy': 0,
   };
   final Map<String, List<FocusNode>> _rowFocusNodes = {
     'search': [],
     'history': [],
-    'top': [],
-    'latest': [],
-    'comedy': [],
   };
 
   FocusNode _getFocusNode(String rowKey, int index) {
@@ -84,9 +64,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final keys = <String>[];
     if (_searchResults.isNotEmpty) keys.add('search');
     if (_history.isNotEmpty) keys.add('history');
-    keys.add('latest');
-    keys.add('top');
-    keys.add('comedy');
+    for (final lane in _lanes) {
+      keys.add(lane.id);
+    }
     return keys;
   }
 
@@ -98,16 +78,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (rowKey == 'history') {
       return _history.length;
     }
-    final isTamil = _isTamilSelected;
-    final list = rowKey == 'top'
-        ? (isTamil ? _topTamil : _topEnglish)
-        : rowKey == 'latest'
-            ? (isTamil ? _latestTamil : _latestEnglish)
-            : rowKey == 'comedy'
-                ? (isTamil ? _comedyTamil : _comedyEnglish)
-                : const <Movie>[];
-    final hasLoadMore = list.isNotEmpty;
-    return list.length + (hasLoadMore ? 1 : 0);
+    final lane = _lanes.cast<DashboardLane?>().firstWhere(
+      (l) => l?.id == rowKey,
+      orElse: () => null,
+    );
+    if (lane != null) {
+      return lane.items.length + (lane.hasMore ? 1 : 0);
+    }
+    return 0;
   }
 
   KeyEventResult _handleRowKeyNavigation(
@@ -210,13 +188,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ]);
 
       if (mounted) {
-        final initialList = _isTamilSelected ? _latestTamil : _latestEnglish;
+        Movie? initialMovie;
+        if (_lanes.isNotEmpty && _lanes.first.items.isNotEmpty) {
+          initialMovie = _lanes.first.items.first;
+        } else if (_history.isNotEmpty) {
+          initialMovie = _history.first;
+        }
+
         setState(() {
-          _focusedMovie = initialList.isNotEmpty
-              ? initialList.first
-              : _history.isNotEmpty
-                  ? _history.first
-                  : null;
+          _focusedMovie = initialMovie;
           _isLoading = false;
         });
 
@@ -241,32 +221,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchHomeMovies() async {
-    _topTamilPage = 1;
-    _latestTamilPage = 1;
-    _comedyTamilPage = 1;
-    _topEnglishPage = 1;
-    _latestEnglishPage = 1;
-    _comedyEnglishPage = 1;
-
     try {
-      final results = await Future.wait([
-        ApiClient.discoverMovies(language: 'ta', page: 1),
-        ApiClient.getPopularMovies(language: 'ta', page: 1),
-        ApiClient.discoverMovies(language: 'ta', genreId: 35, page: 1),
-        ApiClient.discoverMovies(language: 'en', page: 1),
-        ApiClient.getPopularMovies(language: 'en', page: 1),
-        ApiClient.discoverMovies(language: 'en', genreId: 35, page: 1),
-      ]);
-
+      final lanes = await ApiClient.getDashboard(language: _isTamilSelected ? 'ta' : 'en');
       if (mounted) {
         setState(() {
-          _latestTamil = results[0];
-          _topTamil = results[1];
-          _comedyTamil = results[2];
-
-          _latestEnglish = results[3];
-          _topEnglish = results[4];
-          _comedyEnglish = results[5];
+          _lanes = lanes;
         });
       }
     } catch (e) {
@@ -281,86 +240,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _loadMoreTopTamil() async {
-    if (_isLoadingMore) return;
+  Future<void> _loadMoreLane(DashboardLane lane) async {
+    if (_isLoadingMore || !lane.hasMore || lane.nextPage == null) return;
     _isLoadingMore = true;
-    final nextPage = _topTamilPage + 1;
-    final newMovies = await ApiClient.getPopularMovies(language: 'ta', page: nextPage);
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _topTamilPage = nextPage;
-        _topTamil.addAll(newMovies);
-      });
-    }
-    _isLoadingMore = false;
-  }
-
-  Future<void> _loadMoreLatestTamil() async {
-    if (_isLoadingMore) return;
-    _isLoadingMore = true;
-    final nextPage = _latestTamilPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'ta', page: nextPage);
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _latestTamilPage = nextPage;
-        _latestTamil.addAll(newMovies);
-      });
-    }
-    _isLoadingMore = false;
-  }
-
-  Future<void> _loadMoreComedyTamil() async {
-    if (_isLoadingMore) return;
-    _isLoadingMore = true;
-    final nextPage = _comedyTamilPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'ta', genreId: 35, page: nextPage);
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _comedyTamilPage = nextPage;
-        _comedyTamil.addAll(newMovies);
-      });
-    }
-    _isLoadingMore = false;
-  }
-
-  Future<void> _loadMoreTopEnglish() async {
-    if (_isLoadingMore) return;
-    _isLoadingMore = true;
-    final nextPage = _topEnglishPage + 1;
-    final newMovies = await ApiClient.getPopularMovies(language: 'en', page: nextPage);
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _topEnglishPage = nextPage;
-        _topEnglish.addAll(newMovies);
-      });
-    }
-    _isLoadingMore = false;
-  }
-
-  Future<void> _loadMoreLatestEnglish() async {
-    if (_isLoadingMore) return;
-    _isLoadingMore = true;
-    final nextPage = _latestEnglishPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'en', page: nextPage);
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _latestEnglishPage = nextPage;
-        _latestEnglish.addAll(newMovies);
-      });
-    }
-    _isLoadingMore = false;
-  }
-
-  Future<void> _loadMoreComedyEnglish() async {
-    if (_isLoadingMore) return;
-    _isLoadingMore = true;
-    final nextPage = _comedyEnglishPage + 1;
-    final newMovies = await ApiClient.discoverMovies(language: 'en', genreId: 35, page: nextPage);
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _comedyEnglishPage = nextPage;
-        _comedyEnglish.addAll(newMovies);
-      });
+    final lang = _isTamilSelected ? 'ta' : 'en';
+    final res = await ApiClient.getDashboardLane(
+      laneId: lane.id,
+      language: lang,
+      page: lane.nextPage!,
+    );
+    if (mounted && res != null) {
+      final rawItems = res['items'] as List? ?? [];
+      final newMovies = rawItems.map((e) => Movie.fromJson(e)).toList();
+      if (newMovies.isNotEmpty) {
+        setState(() {
+          lane.items.addAll(newMovies);
+          lane.hasMore = res['has_more'] ?? false;
+          lane.nextPage = res['next_page'];
+        });
+      } else {
+        setState(() {
+          lane.hasMore = false;
+          lane.nextPage = null;
+        });
+      }
     }
     _isLoadingMore = false;
   }
@@ -465,9 +368,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _searchResults.clear();
       _searchPage = 1;
 
-      final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
-      if (currentList.isNotEmpty) {
-        _focusedMovie = currentList.first;
+      if (_lanes.isNotEmpty && _lanes.first.items.isNotEmpty) {
+        _focusedMovie = _lanes.first.items.first;
       } else if (_history.isNotEmpty) {
         _focusedMovie = _history.first;
       }
@@ -601,26 +503,15 @@ class _HomeScreenState extends State<HomeScreen> {
                           setState(() {
                             _isTamilSelected = !_isTamilSelected;
 
-                            _rowLastFocusedIndex['top'] = 0;
-                            _rowLastFocusedIndex['latest'] = 0;
-                            _rowLastFocusedIndex['comedy'] = 0;
-
-                            for (final node in _rowFocusNodes['top'] ?? <FocusNode>[]) { node.dispose(); }
-                            for (final node in _rowFocusNodes['latest'] ?? <FocusNode>[]) { node.dispose(); }
-                            for (final node in _rowFocusNodes['comedy'] ?? <FocusNode>[]) { node.dispose(); }
-                            _rowFocusNodes['top'] = [];
-                            _rowFocusNodes['latest'] = [];
-                            _rowFocusNodes['comedy'] = [];
-
-                            final currentList = _isTamilSelected ? _latestTamil : _latestEnglish;
-                            if (currentList.isNotEmpty) {
-                              _focusedMovie = currentList.first;
-                            } else if (_history.isNotEmpty) {
-                              _focusedMovie = _history.first;
-                            } else {
-                              _focusedMovie = null;
+                            for (final nodes in _rowFocusNodes.values) {
+                              for (final node in nodes) {
+                                node.dispose();
+                              }
                             }
+                            _rowFocusNodes.clear();
+                            _rowLastFocusedIndex.clear();
                           });
+                          _loadAllData();
                         },
                       ),
                       _buildTopBarAction(
@@ -693,38 +584,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onKeyNav: _handleRowKeyNavigation,
                                 onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
                               ),
-                            MovieLane(
-                              rowKey: 'latest',
-                              title: _isTamilSelected ? 'Latest Tamil Releases' : 'Latest Releases',
-                              movies: _isTamilSelected ? _latestTamil : _latestEnglish,
-                              onMovieTap: _openMovieDetails,
-                              onMovieFocused: (m) => setState(() => _focusedMovie = m),
-                              onLoadMore: _isTamilSelected ? _loadMoreLatestTamil : _loadMoreLatestEnglish,
-                              getFocusNode: _getFocusNode,
-                              onKeyNav: _handleRowKeyNavigation,
-                              onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
-                            ),
-                            MovieLane(
-                              rowKey: 'top',
-                              title: _isTamilSelected ? 'Popular Tamil Movies' : 'Popular Movies',
-                              movies: _isTamilSelected ? _topTamil : _topEnglish,
-                              onMovieTap: _openMovieDetails,
-                              onMovieFocused: (m) => setState(() => _focusedMovie = m),
-                              onLoadMore: _isTamilSelected ? _loadMoreTopTamil : _loadMoreTopEnglish,
-                              getFocusNode: _getFocusNode,
-                              onKeyNav: _handleRowKeyNavigation,
-                              onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
-                            ),
-                            MovieLane(
-                              rowKey: 'comedy',
-                              title: _isTamilSelected ? 'Tamil Comedy Hits' : 'Comedy Hits',
-                              movies: _isTamilSelected ? _comedyTamil : _comedyEnglish,
-                              onMovieTap: _openMovieDetails,
-                              onMovieFocused: (m) => setState(() => _focusedMovie = m),
-                              onLoadMore: _isTamilSelected ? _loadMoreComedyTamil : _loadMoreComedyEnglish,
-                              getFocusNode: _getFocusNode,
-                              onKeyNav: _handleRowKeyNavigation,
-                              onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                            ..._lanes.map(
+                              (lane) => MovieLane(
+                                key: ValueKey('${lane.id}_${_isTamilSelected ? 'ta' : 'en'}'),
+                                rowKey: lane.id,
+                                title: lane.title,
+                                movies: lane.items,
+                                onMovieTap: _openMovieDetails,
+                                onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                                onLoadMore: lane.hasMore ? () => _loadMoreLane(lane) : null,
+                                getFocusNode: _getFocusNode,
+                                onKeyNav: _handleRowKeyNavigation,
+                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                              ),
                             ),
                           ],
                         ),

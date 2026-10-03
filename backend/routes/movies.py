@@ -1,9 +1,136 @@
+import asyncio
 from fastapi import APIRouter, Query, HTTPException
-from backend.models import MovieSummary, MovieDetails
+from backend.models import (
+    MovieSummary,
+    MovieDetails,
+    DashboardLane,
+    DashboardResponse,
+    LaneMoviesResponse,
+)
 from backend.services.tmdb import tmdb_client
 from backend.services.catalog import catalog_service
 
 router = APIRouter()
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(
+    language: str = Query("ta", description="Language code: ta or en"),
+):
+    safe_lang = language.strip().lower() if isinstance(language, str) else "ta"
+    lanes: list[DashboardLane] = []
+
+    if safe_lang.startswith("ta"):
+        tamil_configs = [
+            ("trending", "New & Trending Tamil"),
+            ("box_office", "Record-Breaking Box Office"),
+            ("top_rated", "All-Time Most Watched"),
+            ("comedy", "Popular Tamil Comedy"),
+        ]
+        for lane_id, title in tamil_configs:
+            raw_items = catalog_service.get_lane_movies(lane_id, limit=20, offset=0)
+            items = [MovieSummary.from_catalog(r) for r in raw_items]
+            has_more = len(items) == 20
+            lanes.append(
+                DashboardLane(
+                    id=lane_id,
+                    title=title,
+                    items=items,
+                    has_more=has_more,
+                    next_page=2 if has_more else None,
+                )
+            )
+    else:
+        results = await asyncio.gather(
+            tmdb_client.get_popular_movies(language=safe_lang, page=1),
+            tmdb_client.get_trending_movies(time_window="week", page=1),
+            tmdb_client.discover_movies(language=safe_lang, vote_count_gte=2000, sort_by="vote_average.desc", page=1),
+            tmdb_client.discover_movies(language=safe_lang, genre="28,878", vote_count_gte=1000, sort_by="popularity.desc", page=1),
+            tmdb_client.discover_movies(language=safe_lang, genre="16", vote_count_gte=500, sort_by="popularity.desc", page=1),
+            return_exceptions=True,
+        )
+
+        en_configs = [
+            ("popular", "Popular Movies"),
+            ("trending", "Trending This Week"),
+            ("top_rated", "All-Time Fan Favorites"),
+            ("action", "Action & Sci-Fi Blockbusters"),
+            ("animation", "Top Animation & Family"),
+        ]
+
+        for i, (lane_id, title) in enumerate(en_configs):
+            res = results[i]
+            if isinstance(res, Exception) or not res:
+                items = []
+            else:
+                items = [MovieSummary.from_tmdb(m, media_type="movie") for m in res]
+            has_more = len(items) >= 20
+            lanes.append(
+                DashboardLane(
+                    id=lane_id,
+                    title=title,
+                    items=items,
+                    has_more=has_more,
+                    next_page=2 if has_more else None,
+                )
+            )
+
+    return DashboardResponse(language=safe_lang, lanes=lanes)
+
+
+@router.get("/dashboard/lane", response_model=LaneMoviesResponse)
+async def get_dashboard_lane(
+    lane_id: str = Query(..., description="The ID of the lane to fetch more items for"),
+    language: str = Query("ta", description="Language code: ta or en"),
+    page: int = Query(1, ge=1, description="Page number to fetch"),
+    limit: int = Query(20, ge=1, le=50, description="Items per page"),
+):
+    safe_lang = language.strip().lower() if isinstance(language, str) else "ta"
+    safe_page = page if isinstance(page, int) and page >= 1 else 1
+    safe_limit = limit if isinstance(limit, int) and 1 <= limit <= 50 else 20
+    offset = (safe_page - 1) * safe_limit
+
+    if safe_lang.startswith("ta") and lane_id in ["trending", "box_office", "top_rated", "comedy"]:
+        raw_items = catalog_service.get_lane_movies(lane_id, limit=safe_limit, offset=offset)
+        items = [MovieSummary.from_catalog(r) for r in raw_items]
+        has_more = len(items) == safe_limit
+        return LaneMoviesResponse(
+            id=lane_id,
+            page=safe_page,
+            has_more=has_more,
+            next_page=(safe_page + 1) if has_more else None,
+            items=items,
+        )
+
+    # English / TMDB fallback
+    if lane_id == "popular":
+        raw_items = await tmdb_client.get_popular_movies(language=safe_lang, page=safe_page)
+    elif lane_id == "trending":
+        raw_items = await tmdb_client.get_trending_movies(time_window="week", page=safe_page)
+    elif lane_id == "top_rated":
+        raw_items = await tmdb_client.discover_movies(
+            language=safe_lang, vote_count_gte=2000, sort_by="vote_average.desc", page=safe_page
+        )
+    elif lane_id == "action":
+        raw_items = await tmdb_client.discover_movies(
+            language=safe_lang, genre="28,878", vote_count_gte=1000, sort_by="popularity.desc", page=safe_page
+        )
+    elif lane_id == "animation":
+        raw_items = await tmdb_client.discover_movies(
+            language=safe_lang, genre="16", vote_count_gte=500, sort_by="popularity.desc", page=safe_page
+        )
+    else:
+        raw_items = await tmdb_client.discover_movies(language=safe_lang, page=safe_page)
+
+    items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]
+    has_more = len(items) >= safe_limit
+    return LaneMoviesResponse(
+        id=lane_id,
+        page=safe_page,
+        has_more=has_more,
+        next_page=(safe_page + 1) if has_more else None,
+        items=items,
+    )
 
 
 @router.get("/search")

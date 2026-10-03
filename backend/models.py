@@ -151,3 +151,29 @@ class SubtitleResponse(BaseModel):
     episode: int | None = None
     subtitles: list[SubtitleTrack] = Field(default_factory=list)
 
+
+class DashboardLane(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str
+    items: list[MovieSummary] = Field(default_factory=list)
+    has_more: bool = False
+    next_page: int | None = None
+
+
+class DashboardResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    language: str
+    lanes: list[DashboardLane] = Field(default_factory=list)
+
+
+class LaneMoviesResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    page: int
+    has_more: bool = False
+    next_page: int | None = None
+    items: list[MovieSummary] = Field(default_factory=list)

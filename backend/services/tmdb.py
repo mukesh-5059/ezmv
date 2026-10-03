@@ -172,8 +172,43 @@ class TMDBClient:
     async def get_popular_movies(self, language: str = "en-US", page: int = 1) -> list[dict]:
         return await self.discover_movies(language=language, page=page, sort_by="popularity.desc")
 
-    async def discover_movies(self, language: str = "en-US", year: int | None = None, genre: int | None = None, page: int = 1, sort_by: str | None = None) -> list[dict]:
-        cache_key = f"discover:{language}_{year}_{genre}_{sort_by}_{page}"
+    async def get_trending_movies(self, time_window: str = "week", page: int = 1) -> list[dict]:
+        cache_key = f"trending:{time_window}_{page}"
+        cached_result = self._discover_cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
+        disk_cached = get_tmdb_cache(cache_key)
+        if disk_cached is not None:
+            self._discover_cache.set(cache_key, disk_cached)
+            return disk_cached
+
+        url = f"{self.BASE_URL}/trending/movie/{time_window}"
+        params = {"page": str(page)}
+
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+
+            self._discover_cache.set(cache_key, results)
+            set_tmdb_cache(cache_key, results)
+            return results
+        except Exception as e:
+            logger.error(f"TMDB trending failed for window '{time_window}': {e}")
+            return []
+
+    async def discover_movies(
+        self,
+        language: str = "en-US",
+        year: int | None = None,
+        genre: int | str | None = None,
+        page: int = 1,
+        sort_by: str | None = None,
+        vote_count_gte: int | None = None,
+    ) -> list[dict]:
+        cache_key = f"discover:{language}_{year}_{genre}_{sort_by}_{vote_count_gte}_{page}"
         cached_result = self._discover_cache.get(cache_key)
         if cached_result is not None:
             return cached_result
@@ -198,6 +233,9 @@ class TMDBClient:
         
         if genre:
             params["with_genres"] = str(genre)
+
+        if vote_count_gte:
+            params["vote_count.gte"] = str(vote_count_gte)
             
         if sort_by:
             params["sort_by"] = sort_by
