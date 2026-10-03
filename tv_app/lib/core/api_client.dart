@@ -93,7 +93,7 @@ class ApiClient {
   static Future<FiltersData?> getFilters() async {
     final url = Uri.parse('$_currentBaseUrl/movies/filters');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      final response = await http.get(url).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return FiltersData.fromJson(data);
@@ -111,7 +111,7 @@ class ApiClient {
     }
     final url = Uri.parse('$_currentBaseUrl/movies/search/lists?$queryParams');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      final response = await http.get(url).timeout(const Duration(seconds: 25));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -126,7 +126,7 @@ class ApiClient {
   static Future<List<Movie>> getListItems({required String listId, int page = 1, int limit = 20}) async {
     final url = Uri.parse('$_currentBaseUrl/movies/lists/$listId/items?page=$page&limit=$limit');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      final response = await http.get(url).timeout(const Duration(seconds: 30));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -148,7 +148,7 @@ class ApiClient {
     }
     final url = Uri.parse('$_currentBaseUrl/movies/search?$queryParams');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      final response = await http.get(url).timeout(const Duration(seconds: 25));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -163,7 +163,7 @@ class ApiClient {
   static Future<List<DashboardLane>> getDashboard({required String language}) async {
     final url = Uri.parse('$_currentBaseUrl/movies/dashboard?language=$language');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List lanes = data['lanes'] ?? [];
@@ -182,7 +182,7 @@ class ApiClient {
   }) async {
     final url = Uri.parse('$_currentBaseUrl/movies/dashboard/lane?lane_id=$laneId&language=$language&page=$page');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         return json.decode(response.body);
       }
@@ -222,7 +222,7 @@ class ApiClient {
     }
     final url = Uri.parse('$_currentBaseUrl/movies/discover?$queryParams');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List results = data['results'] ?? [];
@@ -238,7 +238,7 @@ class ApiClient {
     final cleanType = mediaType.toLowerCase() == 'tv' ? 'tv' : 'movie';
     final url = Uri.parse('$_currentBaseUrl/movies/$cleanType/$tmdbId');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return MovieDetails.fromJson(Map<String, dynamic>.from(data));
@@ -252,7 +252,7 @@ class ApiClient {
   static Future<TvSeason?> getTvSeason(int tmdbId, int seasonNumber) async {
     final url = Uri.parse('$_currentBaseUrl/movies/tv/$tmdbId/season/$seasonNumber');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return TvSeason.fromJson(Map<String, dynamic>.from(data));
@@ -265,14 +265,19 @@ class ApiClient {
 
   static Future<List<SubtitleTrackInfo>> getSubtitles(
     int tmdbId, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
     String? language,
   }) async {
-    var query = 'tmdb_id=$tmdbId';
+    var query = 'tmdb_id=$tmdbId&media_type=$mediaType';
+    if (season != null) query += '&season=$season';
+    if (episode != null) query += '&episode=$episode';
     if (language != null) query += '&language=$language';
 
     final url = Uri.parse('$_currentBaseUrl/subtitles/?$query');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final subtitleResponse = SubtitleResponse.fromJson(Map<String, dynamic>.from(data));
@@ -301,7 +306,7 @@ class ApiClient {
     try {
       final request = http.Request('GET', url);
       request.headers['Accept'] = 'text/event-stream';
-      final response = await client.send(request).timeout(const Duration(seconds: 30));
+      final response = await client.send(request).timeout(const Duration(seconds: 45));
 
       Map<String, dynamic> finalResult = {};
       await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {

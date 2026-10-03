@@ -30,6 +30,9 @@ class PlayerScreen extends StatefulWidget {
   final Map<String, String>? headers;
   final String movieTitle;
   final int tmdbId;
+  final String mediaType;
+  final int? season;
+  final int? episode;
   final String provider;
   final String quality;
   final int initialPositionSeconds;
@@ -40,6 +43,9 @@ class PlayerScreen extends StatefulWidget {
     this.headers,
     required this.movieTitle,
     required this.tmdbId,
+    this.mediaType = 'movie',
+    this.season,
+    this.episode,
     this.provider = 'Direct',
     this.quality = 'HD',
     this.initialPositionSeconds = 0,
@@ -197,6 +203,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
+    _loadInitialSubtitleSettings();
     _loadSubtitlesAsync();
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
 
@@ -205,24 +212,81 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
+  Future<void> _loadInitialSubtitleSettings() async {
+    final savedFontSize = await LocalStorage.getSubtitleFontSize();
+    final savedDelay = await LocalStorage.getSubtitleDelay(
+      widget.tmdbId,
+      mediaType: widget.mediaType,
+      season: widget.season,
+      episode: widget.episode,
+    );
+    if (mounted) {
+      setState(() {
+        _subtitleFontSize = savedFontSize;
+        _subtitleDelaySeconds = savedDelay;
+      });
+      if (savedDelay != 0.0) {
+        try {
+          (_player.platform as dynamic)?.setProperty('sub-delay', savedDelay.toStringAsFixed(3));
+        } catch (_) {}
+      }
+    }
+  }
+
   Future<void> _loadSubtitlesAsync() async {
     if (!mounted) return;
     setState(() => _isLoadingSubtitles = true);
     try {
-      final tracks = await ApiClient.getSubtitles(widget.tmdbId);
+      final tracks = await ApiClient.getSubtitles(
+        widget.tmdbId,
+        mediaType: widget.mediaType,
+        season: widget.season,
+        episode: widget.episode,
+      );
+      if (!mounted) return;
+
+      final savedChoice = await LocalStorage.getSubtitleChoice(
+        widget.tmdbId,
+        mediaType: widget.mediaType,
+        season: widget.season,
+        episode: widget.episode,
+      );
+
+      SubtitleTrackInfo? trackToSelect;
+      if (savedChoice == 'none') {
+        trackToSelect = null;
+      } else if (savedChoice != null && savedChoice.isNotEmpty) {
+        trackToSelect = tracks.cast<SubtitleTrackInfo?>().firstWhere(
+              (t) => t?.url == savedChoice,
+              orElse: () => null,
+            );
+      }
+
       if (mounted) {
         setState(() {
           _subtitles = tracks;
           _isLoadingSubtitles = false;
         });
+        if (trackToSelect != null) {
+          await _selectSubtitle(trackToSelect, persistChoice: false);
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _isLoadingSubtitles = false);
     }
   }
 
-  Future<void> _selectSubtitle(SubtitleTrackInfo? track) async {
+  Future<void> _selectSubtitle(SubtitleTrackInfo? track, {bool persistChoice = true}) async {
     setState(() => _selectedSubtitle = track);
+    if (persistChoice) {
+      LocalStorage.saveSubtitleChoice(
+        widget.tmdbId,
+        track?.url,
+        mediaType: widget.mediaType,
+        season: widget.season,
+        episode: widget.episode,
+      );
+    }
     if (track != null) {
       try {
         final uri = Uri.parse(track.url);
@@ -250,6 +314,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _updateSubtitleDelay(double newDelay) {
     setState(() => _subtitleDelaySeconds = newDelay);
+    LocalStorage.saveSubtitleDelay(
+      widget.tmdbId,
+      newDelay,
+      mediaType: widget.mediaType,
+      season: widget.season,
+      episode: widget.episode,
+    );
     try {
       (_player.platform as dynamic)?.setProperty('sub-delay', newDelay.toStringAsFixed(3));
       final sign = newDelay > 0 ? '+' : '';
@@ -259,7 +330,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _showSubtitleDialog() async {
     _hideOsdControls();
-    final selected = await SubtitlePickerDialog.show(
+    final result = await SubtitlePickerDialog.show(
       context: context,
       subtitles: _subtitles,
       selectedSubtitle: _selectedSubtitle,
@@ -269,8 +340,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onFontSizeChanged: _updateSubtitleFontSize,
       onDelayChanged: _updateSubtitleDelay,
     );
-    if (mounted && selected != _selectedSubtitle) {
-      await _selectSubtitle(selected);
+    if (result != null && mounted) {
+      if (result.isOff) {
+        await _selectSubtitle(null);
+      } else if (result.track != null) {
+        await _selectSubtitle(result.track);
+      }
     }
   }
 
@@ -279,9 +354,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final dur = _player.state.duration;
     if (dur.inSeconds > 30) {
       if (pos.inSeconds >= (dur.inSeconds * 0.95)) {
-        LocalStorage.clearProgress(widget.tmdbId);
+        LocalStorage.clearProgress(
+          widget.tmdbId,
+          mediaType: widget.mediaType,
+          season: widget.season,
+          episode: widget.episode,
+        );
       } else if (pos.inSeconds > 5) {
-        LocalStorage.saveProgress(widget.tmdbId, pos.inSeconds);
+        LocalStorage.saveProgress(
+          widget.tmdbId,
+          pos.inSeconds,
+          mediaType: widget.mediaType,
+          season: widget.season,
+          episode: widget.episode,
+          totalDurationSeconds: dur.inSeconds,
+        );
       }
     }
   }

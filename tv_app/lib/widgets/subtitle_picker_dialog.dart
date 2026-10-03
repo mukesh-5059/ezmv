@@ -4,6 +4,16 @@ import 'package:flutter/services.dart';
 import '../models/subtitle.model.dart';
 import '../theme.dart';
 
+class SubtitlePickerResult {
+  final bool isOff;
+  final SubtitleTrackInfo? track;
+
+  const SubtitlePickerResult._({this.isOff = false, this.track});
+
+  factory SubtitlePickerResult.off() => const SubtitlePickerResult._(isOff: true);
+  factory SubtitlePickerResult.selected(SubtitleTrackInfo track) => SubtitlePickerResult._(track: track);
+}
+
 class SubtitlePickerDialog extends StatefulWidget {
   final List<SubtitleTrackInfo> subtitles;
   final SubtitleTrackInfo? selectedSubtitle;
@@ -24,7 +34,7 @@ class SubtitlePickerDialog extends StatefulWidget {
     this.onDelayChanged,
   });
 
-  static Future<SubtitleTrackInfo?> show({
+  static Future<SubtitlePickerResult?> show({
     required BuildContext context,
     required List<SubtitleTrackInfo> subtitles,
     SubtitleTrackInfo? selectedSubtitle,
@@ -34,7 +44,7 @@ class SubtitlePickerDialog extends StatefulWidget {
     ValueChanged<double>? onFontSizeChanged,
     ValueChanged<double>? onDelayChanged,
   }) {
-    return showGeneralDialog<SubtitleTrackInfo?>(
+    return showGeneralDialog<SubtitlePickerResult?>(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Dismiss Subtitles',
@@ -278,7 +288,7 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
                                       label: 'Off (Disabled)',
                                       isSelected: isOffSelected,
                                       autofocus: isOffSelected,
-                                      onSelected: () => Navigator.pop(context, null),
+                                      onSelected: () => Navigator.pop(context, SubtitlePickerResult.off()),
                                     ),
                                     const Padding(
                                       padding: EdgeInsets.symmetric(vertical: 8.0),
@@ -290,7 +300,7 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
                                         label: sub.label,
                                         isSelected: isSelected,
                                         autofocus: isSelected,
-                                        onSelected: () => Navigator.pop(context, sub),
+                                        onSelected: () => Navigator.pop(context, SubtitlePickerResult.selected(sub)),
                                       );
                                     }),
                                   ],

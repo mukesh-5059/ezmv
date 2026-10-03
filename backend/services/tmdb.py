@@ -29,7 +29,7 @@ class TMDBClient:
         params = {"language": language}
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             genres = resp.json().get("genres", [])
             set_tmdb_cache(cache_key, genres, ttl_seconds=2592000)
@@ -47,7 +47,7 @@ class TMDBClient:
         url = f"{self.BASE_URL}/configuration/languages"
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             languages = resp.json()
             if isinstance(languages, list):
@@ -101,7 +101,7 @@ class TMDBClient:
 
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             results = resp.json().get("results", [])
 
@@ -134,7 +134,7 @@ class TMDBClient:
 
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             details = resp.json()
 
@@ -155,7 +155,7 @@ class TMDBClient:
 
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             details = resp.json()
 
@@ -175,7 +175,7 @@ class TMDBClient:
 
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             details = resp.json()
 
@@ -199,7 +199,7 @@ class TMDBClient:
 
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             results = resp.json().get("results", [])
 
@@ -274,7 +274,7 @@ class TMDBClient:
 
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             results = resp.json().get("results", [])
 
@@ -294,7 +294,7 @@ class TMDBClient:
         params = {"external_source": "imdb_id"}
         try:
             client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             data = resp.json()
             movie_results = data.get("movie_results", [])

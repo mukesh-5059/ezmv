@@ -146,7 +146,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _displayMovies = listMovies;
         _isLoadingListMovies = false;
-        _hasMore = listMovies.length >= 20;
+        _hasMore = listMovies.isNotEmpty && (list.itemCount == 0 || listMovies.length < list.itemCount);
       });
     }
   }
@@ -179,7 +179,9 @@ class _SearchScreenState extends State<SearchScreen> {
           final uniqueNew = newItems.where((m) => !existingIds.contains(m.tmdbId)).toList();
           _displayMovies.addAll(uniqueNew);
           _page = nextPage;
-          _hasMore = newItems.length >= 20;
+          _hasMore = _selectedList != null
+              ? (_displayMovies.length < _selectedList!.itemCount && newItems.isNotEmpty)
+              : newItems.length >= 20;
         } else {
           _hasMore = false;
         }
@@ -692,7 +694,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildMoviesPane() {
     final query = _searchController.text.trim();
     final headerTitle = _selectedList != null
-        ? 'List: ${_selectedList!.name} (${_displayMovies.length} movies)'
+        ? 'List: ${_selectedList!.name} (${_selectedList!.itemCount > 0 ? '${_displayMovies.length}/${_selectedList!.itemCount}' : '${_displayMovies.length}'} items)'
         : (query.isNotEmpty
             ? 'Direct Search: "$query" (${_displayMovies.length} movies)'
             : 'Popular / Trending Movies (${_displayMovies.length} movies)');

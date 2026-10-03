@@ -26,20 +26,24 @@ class TraktClient:
         }
 
     async def _enrich_tmdb_movies(self, raw_items: list[dict]) -> list[MovieSummary]:
+        seen_keys = set()
         tasks = []
         item_types = []
+
         for item in raw_items:
-            item_type = item.get("type")
-            if item_type == "show" or ("show" in item and "movie" not in item):
+            item_type = item.get("type", "")
+            if item_type in ("show", "season", "episode") or ("show" in item and "movie" not in item):
                 show_data = item.get("show", item)
                 tmdb_id = show_data.get("ids", {}).get("tmdb")
-                if tmdb_id:
+                if tmdb_id and ("tv", tmdb_id) not in seen_keys:
+                    seen_keys.add(("tv", tmdb_id))
                     tasks.append(tmdb_client.get_tv_details(tmdb_id))
                     item_types.append("tv")
             else:
                 movie_data = item.get("movie", item)
                 tmdb_id = movie_data.get("ids", {}).get("tmdb")
-                if tmdb_id:
+                if tmdb_id and ("movie", tmdb_id) not in seen_keys:
+                    seen_keys.add(("movie", tmdb_id))
                     tasks.append(tmdb_client.get_movie_details(tmdb_id))
                     item_types.append("movie")
 
@@ -67,7 +71,7 @@ class TraktClient:
         params = {"page": str(page), "limit": str(limit), "extended": "full"}
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -92,7 +96,7 @@ class TraktClient:
         params = {"page": str(page), "limit": str(limit), "extended": "full"}
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -116,7 +120,7 @@ class TraktClient:
         url = f"{self.BASE_URL}/movies/boxoffice"
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params={"extended": "full"})
+                resp = await session.get(url, headers=self.headers, params={"extended": "full"}, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -141,7 +145,7 @@ class TraktClient:
         params = {"page": str(page), "limit": str(limit), "extended": "full"}
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -166,7 +170,7 @@ class TraktClient:
         params = {"page": str(page), "limit": str(limit), "extended": "full"}
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -211,7 +215,7 @@ class TraktClient:
 
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -237,7 +241,7 @@ class TraktClient:
         params = {"page": str(page), "limit": str(limit)}
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 
@@ -280,7 +284,7 @@ class TraktClient:
         params = {"query": clean_q, "page": str(page), "limit": str(limit)}
         try:
             async with AsyncSession(impersonate="chrome") as session:
-                resp = await session.get(url, headers=self.headers, params=params)
+                resp = await session.get(url, headers=self.headers, params=params, timeout=25.0)
                 resp.raise_for_status()
                 raw_items = resp.json()
 

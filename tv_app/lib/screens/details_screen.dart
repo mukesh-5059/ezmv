@@ -48,6 +48,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
   int _selectedSeasonNumber = 1;
   TvSeason? _currentSeasonData;
   bool _isLoadingSeason = false;
+  Map<String, dynamic>? _tvLastWatched;
+  Map<int, int> _episodeProgress = {};
 
   bool get _isTv => widget.movie.isTv || (_details?.isTv ?? false);
 
@@ -78,9 +80,33 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   Future<void> _loadProgress() async {
     final pos = await LocalStorage.getProgress(widget.movie.tmdbId);
+    final tvLast = await LocalStorage.getTvLastWatched(widget.movie.tmdbId);
     if (mounted) {
       setState(() {
         _savedProgressSeconds = pos;
+        _tvLastWatched = tvLast;
+      });
+      _loadCurrentSeasonProgress();
+    }
+  }
+
+  Future<void> _loadCurrentSeasonProgress() async {
+    if (_currentSeasonData == null) return;
+    final Map<int, int> progressMap = {};
+    for (final ep in _currentSeasonData!.episodes) {
+      final p = await LocalStorage.getProgress(
+        widget.movie.tmdbId,
+        mediaType: 'tv',
+        season: _selectedSeasonNumber,
+        episode: ep.episodeNumber,
+      );
+      if (p > 0) {
+        progressMap[ep.episodeNumber] = p;
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _episodeProgress = progressMap;
       });
     }
   }
@@ -119,27 +145,112 @@ class _DetailsScreenState extends State<DetailsScreen> {
         _currentSeasonData = seasonData;
         _isLoadingSeason = false;
       });
+      _loadCurrentSeasonProgress();
     }
   }
 
-  void _openEpisodeStreams(TvEpisode episode) {
-    showDialog(
+  Future<void> _openEpisodeStreams(TvEpisode episode) async {
+    final stream = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierColor: Colors.black87,
       builder: (ctx) => EpisodeStreamDialog(
         movie: widget.movie,
         seasonNumber: _selectedSeasonNumber,
         episode: episode,
-        onStreamSelected: (stream) {
-          final title = '${widget.movie.title} - S${_selectedSeasonNumber.toString().padLeft(2, '0')}E${episode.episodeNumber.toString().padLeft(2, '0')}: ${episode.name}';
-          _startPlayback(
-            stream,
-            overrideTitle: title,
-            initialSeconds: 0,
-          );
-        },
       ),
     );
+    if (stream != null && mounted) {
+      final title =
+          '${widget.movie.title} - S${_selectedSeasonNumber.toString().padLeft(2, '0')}E${episode.episodeNumber.toString().padLeft(2, '0')}: ${episode.name}';
+      final resumeSeconds = await LocalStorage.getProgress(
+        widget.movie.tmdbId,
+        mediaType: 'tv',
+        season: _selectedSeasonNumber,
+        episode: episode.episodeNumber,
+      );
+      if (mounted) {
+        _startPlayback(
+          stream,
+          overrideTitle: title,
+          initialSeconds: resumeSeconds > 5 ? resumeSeconds : 0,
+          mediaType: 'tv',
+          season: _selectedSeasonNumber,
+          episode: episode.episodeNumber,
+        );
+      }
+    }
+  }
+
+  Future<void> _handleTvResume() async {
+    if (_tvLastWatched == null) return;
+    final season = _tvLastWatched!['season'] as int? ?? 1;
+    final epNum = _tvLastWatched!['episode'] as int? ?? 1;
+
+    if (_selectedSeasonNumber != season || _currentSeasonData == null) {
+      await _fetchSeasonEpisodes(season);
+    }
+
+    TvEpisode? targetEpisode;
+    if (_currentSeasonData != null) {
+      targetEpisode = _currentSeasonData!.episodes.cast<TvEpisode?>().firstWhere(
+            (e) => e?.episodeNumber == epNum,
+            orElse: () => null,
+          );
+    }
+
+    final ep = targetEpisode ??
+        TvEpisode(
+          id: 0,
+          name: 'Episode $epNum',
+          overview: '',
+          episodeNumber: epNum,
+          seasonNumber: season,
+          stillPath: '',
+          airDate: '',
+          voteAverage: 0.0,
+          runtime: 0,
+        );
+
+    if (mounted) {
+      await _openEpisodeStreams(ep);
+    }
+  }
+
+  Future<void> _handleTvStartFirstEpisode() async {
+    int targetSeason = 1;
+    if (_details?.seasons.isNotEmpty == true) {
+      final firstSeason = _details!.seasons.firstWhere(
+        (s) => s.seasonNumber > 0,
+        orElse: () => _details!.seasons.first,
+      );
+      targetSeason = firstSeason.seasonNumber;
+    }
+
+    if (_selectedSeasonNumber != targetSeason || _currentSeasonData == null) {
+      await _fetchSeasonEpisodes(targetSeason);
+    }
+
+    TvEpisode? firstEp;
+    if (_currentSeasonData != null && _currentSeasonData!.episodes.isNotEmpty) {
+      firstEp = _currentSeasonData!.episodes.first;
+    }
+
+    final ep = firstEp ??
+        TvEpisode(
+          id: 0,
+          name: 'Episode 1',
+          overview: '',
+          episodeNumber: 1,
+          seasonNumber: targetSeason,
+          stillPath: '',
+          airDate: '',
+          voteAverage: 0.0,
+          runtime: 0,
+        );
+
+    if (mounted) {
+      await _openEpisodeStreams(ep);
+    }
   }
 
   Future<void> _fetchStreams({bool bypassCache = false}) async {
@@ -238,7 +349,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  void _startPlayback(Map<String, dynamic> stream, {int initialSeconds = 0, String? overrideTitle}) {
+  void _startPlayback(
+    Map<String, dynamic> stream, {
+    int initialSeconds = 0,
+    String? overrideTitle,
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) {
     LocalStorage.addToHistory(widget.movie);
 
     final rawHeaders = stream['headers'];
@@ -258,6 +376,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
           headers: headers,
           movieTitle: overrideTitle ?? widget.movie.title,
           tmdbId: widget.movie.tmdbId,
+          mediaType: mediaType,
+          season: season,
+          episode: episode,
           provider: provider,
           quality: quality,
           initialPositionSeconds: initialSeconds,
@@ -414,7 +535,39 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
                             ),
                             const SizedBox(height: 24),
-                            if (!_isTv) ...[
+                            if (_isTv) ...[
+                              Row(
+                                children: [
+                                  if (_tvLastWatched != null && (_tvLastWatched!['position'] as int? ?? 0) > 15) ...[
+                                    _buildActionButton(
+                                      icon: Icons.play_arrow_rounded,
+                                      label:
+                                          'Resume S${_tvLastWatched!['season']}E${_tvLastWatched!['episode']} (${_formatTime(_tvLastWatched!['position'] as int)})',
+                                      focusNode: _playResumeFocusNode,
+                                      isPrimary: true,
+                                      onPressed: _handleTvResume,
+                                    ),
+                                    const SizedBox(width: 14),
+                                    _buildActionButton(
+                                      icon: Icons.replay_rounded,
+                                      label: 'Play S1:E1',
+                                      focusNode: _startOverFocusNode,
+                                      isPrimary: false,
+                                      onPressed: _handleTvStartFirstEpisode,
+                                    ),
+                                  ] else ...[
+                                    _buildActionButton(
+                                      icon: Icons.play_arrow_rounded,
+                                      label: 'Play S1:E1',
+                                      focusNode: _playResumeFocusNode,
+                                      isPrimary: true,
+                                      onPressed: _handleTvStartFirstEpisode,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                            ] else ...[
                               // Primary In-Line Play / Resume Action Row (Movie Only)
                               if (_streams.isNotEmpty) ...[
                                 Row(
@@ -619,6 +772,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
   }
 
   Widget _buildEpisodeTile(TvEpisode episode) {
+    final progressSecs = _episodeProgress[episode.episodeNumber] ?? 0;
+
     return Focus(
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
@@ -683,7 +838,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                   ),
                           ),
                           Positioned(
-                            bottom: 4,
+                            bottom: progressSecs > 15 ? 8 : 4,
                             left: 4,
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -701,6 +856,24 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               ),
                             ),
                           ),
+                          if (progressSecs > 15)
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              child: Container(
+                                height: 3,
+                                color: Colors.white24,
+                                alignment: Alignment.centerLeft,
+                                child: FractionallySizedBox(
+                                  widthFactor: ((episode.runtime != null && episode.runtime! > 0)
+                                          ? (progressSecs / (episode.runtime! * 60))
+                                          : 0.5)
+                                      .clamp(0.0, 1.0),
+                                  child: Container(color: TVTheme.accent),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -742,9 +915,29 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                     const SizedBox(width: 2),
                                     Text(
                                       episode.voteAverage.toStringAsFixed(1),
-                                      style: const TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(
+                                          color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
                                     ),
                                   ],
+                                ),
+                              ],
+                              if (progressSecs > 15) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: TVTheme.accent.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: TVTheme.accent.withOpacity(0.6), width: 0.8),
+                                  ),
+                                  child: Text(
+                                    'Resume ${_formatTime(progressSecs)}',
+                                    style: const TextStyle(
+                                      color: TVTheme.accent,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ],

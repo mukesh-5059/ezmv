@@ -11,14 +11,14 @@ class EpisodeStreamDialog extends StatefulWidget {
   final Movie movie;
   final int seasonNumber;
   final TvEpisode episode;
-  final void Function(Map<String, dynamic> stream) onStreamSelected;
+  final void Function(Map<String, dynamic> stream)? onStreamSelected;
 
   const EpisodeStreamDialog({
     super.key,
     required this.movie,
     required this.seasonNumber,
     required this.episode,
-    required this.onStreamSelected,
+    this.onStreamSelected,
   });
 
   @override
@@ -234,8 +234,8 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
                 onRetry: () => _fetchStreams(bypassCache: false),
                 onForceRescrape: () => _fetchStreams(bypassCache: true),
                 onStreamSelected: (stream) {
-                  Navigator.of(context).pop();
-                  widget.onStreamSelected(stream);
+                  Navigator.of(context).pop(stream);
+                  widget.onStreamSelected?.call(stream);
                 },
                 firstStreamFocusNode: _firstStreamFocusNode,
                 retryFocusNode: _retryFocusNode,

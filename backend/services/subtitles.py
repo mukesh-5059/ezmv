@@ -49,8 +49,12 @@ LANG_MAP = {
 class SubtitlesService:
     BASE_URL = "https://opensubtitles-v3.strem.io/subtitles"
 
-    async def _get_imdb_id(self, tmdb_id: int) -> str | None:
-        details = await tmdb_client.get_movie_details(tmdb_id)
+    async def _get_imdb_id(self, tmdb_id: int, media_type: str = "movie") -> str | None:
+        if media_type == "tv":
+            details = await tmdb_client.get_tv_details(tmdb_id)
+        else:
+            details = await tmdb_client.get_movie_details(tmdb_id)
+
         if details:
             ext = details.get("external_ids") or {}
             return details.get("imdb_id") or ext.get("imdb_id")
@@ -59,37 +63,48 @@ class SubtitlesService:
     async def get_subtitles(
         self,
         tmdb_id: int,
+        media_type: str = "movie",
+        season: int | None = None,
+        episode: int | None = None,
         language: str | None = None,
     ) -> SubtitleResponse:
-        cache_key = f"subtitles:{tmdb_id}"
+        clean_type = media_type.strip().lower() if isinstance(media_type, str) else "movie"
+        s_num = season if (isinstance(season, int) and clean_type == "tv") else 0
+        e_num = episode if (isinstance(episode, int) and clean_type == "tv") else 0
+        safe_lang = language.strip().lower() if isinstance(language, str) and language.strip() else None
+        cache_key = f"subtitles:{tmdb_id}:{clean_type}:{s_num or 0}:{e_num or 0}"
+
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
             cached_response = SubtitleResponse.model_validate(cached)
-            if language:
-                lang_lower = language.lower()
+            if safe_lang:
                 filtered = [
                     s for s in cached_response.subtitles
-                    if s.code.lower() == lang_lower or s.language.lower() == lang_lower
+                    if s.code.lower() == safe_lang or s.language.lower() == safe_lang
                 ]
                 return SubtitleResponse(
                     tmdb_id=cached_response.tmdb_id,
                     imdb_id=cached_response.imdb_id,
-                    media_type="movie",
+                    media_type=clean_type,
                     subtitles=filtered,
                 )
             return cached_response
 
-        imdb_id = await self._get_imdb_id(tmdb_id)
+        imdb_id = await self._get_imdb_id(tmdb_id, clean_type)
         if not imdb_id:
-            logger.warning(f"[Subtitles] No IMDb ID found for TMDb {tmdb_id}")
+            logger.warning(f"[Subtitles] No IMDb ID found for TMDb {tmdb_id} ({clean_type})")
             return SubtitleResponse(
                 tmdb_id=tmdb_id,
                 imdb_id=None,
-                media_type="movie",
+                media_type=clean_type,
                 subtitles=[],
             )
 
-        url = f"{self.BASE_URL}/movie/{imdb_id}.json"
+        if clean_type == "tv" and s_num and e_num:
+            url = f"{self.BASE_URL}/series/{imdb_id}:{s_num}:{e_num}.json"
+        else:
+            url = f"{self.BASE_URL}/movie/{imdb_id}.json"
+
         raw_tracks: list[SubtitleTrack] = []
 
         try:
@@ -115,7 +130,7 @@ class SubtitlesService:
                         )
                     )
         except Exception as e:
-            logger.warning(f"[Subtitles] Failed fetching subtitles for {imdb_id}: {e}")
+            logger.warning(f"[Subtitles] Failed fetching subtitles for {imdb_id} ({clean_type}): {e}")
 
         # Sort: English subtitles first, then others by language name
         raw_tracks.sort(key=lambda x: (0 if x.code == "en" else 1, x.language))
@@ -123,21 +138,20 @@ class SubtitlesService:
         full_response = SubtitleResponse(
             tmdb_id=tmdb_id,
             imdb_id=imdb_id,
-            media_type="movie",
+            media_type=clean_type,
             subtitles=raw_tracks,
         )
         set_tmdb_cache(cache_key, full_response.model_dump(), ttl_seconds=86400)
 
-        if language:
-            lang_lower = language.lower()
+        if safe_lang:
             filtered_tracks = [
                 s for s in raw_tracks
-                if s.code.lower() == lang_lower or s.language.lower() == lang_lower
+                if s.code.lower() == safe_lang or s.language.lower() == safe_lang
             ]
             return SubtitleResponse(
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
-                media_type="movie",
+                media_type=clean_type,
                 subtitles=filtered_tracks,
             )
 
