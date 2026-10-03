@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date
 from backend.config import settings
@@ -311,6 +312,135 @@ class TMDBClient:
         except Exception as e:
             logger.error(f"Failed to find TMDB item for IMDb ID '{imdb_id}': {e}")
             return None
+
+    async def get_person_details(self, person_id: int) -> dict | None:
+        cache_key = f"person_details:{person_id}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        url = f"{self.BASE_URL}/person/{person_id}"
+        params = {"append_to_response": "combined_credits,external_ids"}
+        try:
+            client = get_session()
+            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
+            resp.raise_for_status()
+            data = resp.json()
+            set_tmdb_cache(cache_key, data, ttl_seconds=604800)
+            return data
+        except Exception as e:
+            logger.error(f"Failed to fetch TMDB person details for id {person_id}: {e}")
+            return None
+
+    async def get_person_filmography(self, person_id: int) -> dict | None:
+        data = await self.get_person_details(person_id)
+        if not data:
+            return None
+
+        combined_credits = data.get("combined_credits", {})
+        cast_items = combined_credits.get("cast", [])
+
+        seen_ids = set()
+        valid_items = []
+        today_str = date.today().isoformat()
+
+        for item in cast_items:
+            m_id = item.get("id")
+            media_type = item.get("media_type") or "movie"
+            if not m_id or (m_id, media_type) in seen_ids:
+                continue
+            seen_ids.add((m_id, media_type))
+            if not item.get("poster_path"):
+                continue
+            valid_items.append(item)
+
+        def get_popularity_score(x):
+            pop = float(x.get("popularity") or 0.0)
+            votes = int(x.get("vote_count") or 0)
+            avg = float(x.get("vote_average") or 0.0)
+            order = int(x.get("order") if x.get("order") is not None else 10)
+            billing_multiplier = 1.3 if order < 4 else 1.0
+            return ((pop * 2.5) + (votes * (avg / 5.0))) * billing_multiplier
+
+        popular_sorted = sorted(valid_items, key=get_popularity_score, reverse=True)
+
+        def get_date(x):
+            return x.get("release_date") or x.get("first_air_date") or ""
+
+        recent_items = [
+            x for x in valid_items
+            if get_date(x) and get_date(x) <= today_str
+        ]
+        recent_sorted = sorted(recent_items, key=get_date, reverse=True)
+
+        return {
+            "id": data.get("id", person_id),
+            "name": data.get("name", ""),
+            "biography": data.get("biography", ""),
+            "profile_path": data.get("profile_path"),
+            "known_for_department": data.get("known_for_department"),
+            "birthday": data.get("birthday"),
+            "place_of_birth": data.get("place_of_birth"),
+            "popular": popular_sorted[:30],
+            "recent": recent_sorted[:30],
+        }
+
+    async def get_curated_actors(self, language: str = "ta") -> list[dict]:
+        cache_key = f"curated_actors:{language}"
+        cached = get_tmdb_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        curated_ids = [
+            (91555, "Rajinikanth"),
+            (93193, "Kamal Haasan"),
+            (91547, "Vijay"),
+            (148360, "Ajith Kumar"),
+            (85720, "Suriya"),
+            (93191, "Vikram"),
+            (550165, "Dhanush"),
+            (1123766, "Vijay Sethupathi"),
+            (587982, "Sivakarthikeyan"),
+            (123066, "Karthi"),
+            (222760, "Silambarasan"),
+            (1072750, "Fahadh Faasil"),
+            (559892, "Vishal"),
+            (292250, "S. J. Suryah"),
+            (91548, "Nayanthara"),
+            (116925, "Trisha Krishnan"),
+            (225312, "Samantha Ruth Prabhu"),
+            (1295762, "Keerthy Suresh"),
+            (91549, "Vadivelu"),
+            (85523, "Vivek"),
+            (141076, "Santhanam"),
+            (1540764, "Yogi Babu"),
+            (544897, "Soori"),
+        ]
+
+        async def fetch_actor_info(p_id: int, fallback_name: str):
+            details = await self.get_person_details(p_id)
+            if details:
+                return {
+                    "id": details.get("id", p_id),
+                    "name": details.get("name") or fallback_name,
+                    "profile_path": details.get("profile_path"),
+                    "known_for_department": details.get("known_for_department", "Acting"),
+                }
+            return {
+                "id": p_id,
+                "name": fallback_name,
+                "profile_path": None,
+                "known_for_department": "Acting",
+            }
+
+        actors = await asyncio.gather(
+            *[fetch_actor_info(p_id, name) for p_id, name in curated_ids],
+            return_exceptions=False,
+        )
+
+        valid_actors = [a for a in actors if isinstance(a, dict)]
+        set_tmdb_cache(cache_key, valid_actors, ttl_seconds=604800)
+        return valid_actors
 
 
 tmdb_client = TMDBClient()

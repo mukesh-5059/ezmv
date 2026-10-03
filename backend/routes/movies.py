@@ -12,6 +12,8 @@ from backend.models import (
     TraktListSummary,
     TvSeason,
     TvEpisode,
+    ActorSummary,
+    PersonDetailsResponse,
 )
 from backend.services.tmdb import tmdb_client
 from backend.services.catalog import catalog_service
@@ -307,6 +309,53 @@ async def get_tv_season_endpoint(
         episode_count=len(episodes),
         air_date=details.get("air_date"),
         episodes=episodes,
+    )
+
+
+@router.get("/actors/curated", response_model=list[ActorSummary])
+async def get_curated_actors(
+    language: str = Query("ta", description="Language code: ta or en"),
+):
+    safe_lang = language.strip().lower() if isinstance(language, str) else "ta"
+    raw_actors = await tmdb_client.get_curated_actors(language=safe_lang)
+    return [
+        ActorSummary(
+            id=a.get("id", 0),
+            name=a.get("name", ""),
+            profile_path=a.get("profile_path"),
+            known_for_department=a.get("known_for_department", "Acting"),
+        )
+        for a in raw_actors
+    ]
+
+
+@router.get("/person/{person_id}", response_model=PersonDetailsResponse)
+async def get_person_filmography(
+    person_id: int,
+):
+    data = await tmdb_client.get_person_filmography(person_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Person not found on TMDB.")
+
+    popular_items = [
+        MovieSummary.from_tmdb(m, media_type=m.get("media_type", "movie"))
+        for m in data.get("popular", [])
+    ]
+    recent_items = [
+        MovieSummary.from_tmdb(m, media_type=m.get("media_type", "movie"))
+        for m in data.get("recent", [])
+    ]
+
+    return PersonDetailsResponse(
+        id=data.get("id", person_id),
+        name=data.get("name", ""),
+        biography=data.get("biography", ""),
+        profile_path=data.get("profile_path"),
+        known_for_department=data.get("known_for_department", "Acting"),
+        birthday=data.get("birthday"),
+        place_of_birth=data.get("place_of_birth"),
+        popular=popular_items,
+        recent=recent_items,
     )
 
 

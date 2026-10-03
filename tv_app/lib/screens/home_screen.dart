@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/movie.model.dart';
 import '../models/dashboard_lane.model.dart';
+import '../models/actor.model.dart';
 import '../core/api_client.dart';
 import '../core/local_storage.dart';
 import '../theme.dart';
 import '../widgets/movie_lane.dart';
-import '../widgets/search_dialog.dart';
+import '../widgets/actor_lane.dart';
 import '../widgets/settings_dialog.dart';
 import 'details_screen.dart';
 import 'search_screen.dart';
+import 'actor_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +23,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<Movie> _history = [];
   List<DashboardLane> _lanes = [];
+  List<Actor> _tamilActors = [];
 
   List<Movie> _searchResults = [];
 
@@ -47,10 +50,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<String, int> _rowLastFocusedIndex = {
     'search': 0,
     'history': 0,
+    'tamil_actors': 0,
   };
   final Map<String, List<FocusNode>> _rowFocusNodes = {
     'search': [],
     'history': [],
+    'tamil_actors': [],
   };
 
   FocusNode _getFocusNode(String rowKey, int index) {
@@ -65,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final keys = <String>[];
     if (_searchResults.isNotEmpty) keys.add('search');
     if (_history.isNotEmpty) keys.add('history');
+    if (_isTamilSelected && _tamilActors.isNotEmpty) keys.add('tamil_actors');
     for (final lane in _lanes) {
       keys.add(lane.id);
     }
@@ -78,6 +84,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (rowKey == 'history') {
       return _history.length;
+    }
+    if (rowKey == 'tamil_actors') {
+      return _tamilActors.length;
     }
     final lane = _lanes.cast<DashboardLane?>().firstWhere(
       (l) => l?.id == rowKey,
@@ -223,15 +232,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchHomeMovies() async {
     try {
-      final lanes = await ApiClient.getDashboard(language: _isTamilSelected ? 'ta' : 'en');
+      final lang = _isTamilSelected ? 'ta' : 'en';
+      final results = await Future.wait([
+        ApiClient.getDashboard(language: lang),
+        if (_isTamilSelected)
+          ApiClient.getCuratedActors(language: 'ta')
+        else
+          Future.value(<Actor>[]),
+      ]);
       if (mounted) {
         setState(() {
-          _lanes = lanes;
+          _lanes = results[0] as List<DashboardLane>;
+          _tamilActors = results[1] as List<Actor>;
         });
       }
     } catch (e) {
       print('Fetch home movies failed: $e');
     }
+  }
+
+  void _openActorScreen(Actor actor) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ActorScreen(
+          actorId: actor.id,
+          initialActorName: actor.name,
+          initialProfilePath: actor.profilePath,
+        ),
+      ),
+    );
   }
 
   Future<void> _loadHistory() async {
@@ -294,70 +323,6 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
     _isLoadingMore = false;
-  }
-
-  Future<void> _performSearch(String query) async {
-    if (query.trim().isEmpty) return;
-    setState(() {
-      _isLoading = true;
-      _searchQuery = query.trim();
-      _activeSearchText = query.trim();
-      _activeSearchYear = null;
-      _activeSearchGenreId = null;
-      _searchPage = 1;
-    });
-
-    final results = await ApiClient.searchMovies(query: query, page: 1);
-    if (mounted) {
-      setState(() {
-        _searchResults = results;
-        _isLoading = false;
-        if (results.isNotEmpty) {
-          _focusedMovie = results.first;
-        }
-      });
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_searchResults.isNotEmpty) {
-          _getFocusNode('search', 0).requestFocus();
-        }
-      });
-    }
-  }
-
-  Future<void> _performDiscover(String label, {int? year, int? genreId}) async {
-    setState(() {
-      _isLoading = true;
-      _searchQuery = label;
-      _activeSearchText = null;
-      _activeSearchYear = year;
-      _activeSearchGenreId = genreId;
-      _searchPage = 1;
-    });
-
-    final lang = _isTamilSelected ? 'ta' : 'en';
-    final results = await ApiClient.discoverMovies(
-      language: lang,
-      year: year,
-      genreId: genreId,
-      page: 1,
-    );
-
-    if (mounted) {
-      setState(() {
-        _searchResults = results;
-        _isLoading = false;
-        if (results.isNotEmpty) {
-          _focusedMovie = results.first;
-        }
-      });
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_searchResults.isNotEmpty) {
-          _getFocusNode('search', 0).requestFocus();
-        }
-      });
-    }
   }
 
   void _clearSearch() {
@@ -581,6 +546,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 movies: _history,
                                 onMovieTap: _openMovieDetails,
                                 onMovieFocused: (m) => setState(() => _focusedMovie = m),
+                                getFocusNode: _getFocusNode,
+                                onKeyNav: _handleRowKeyNavigation,
+                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
+                              ),
+                            if (_isTamilSelected && _tamilActors.isNotEmpty)
+                              ActorLane(
+                                key: const ValueKey('tamil_actors_lane'),
+                                rowKey: 'tamil_actors',
+                                title: 'Featured Tamil Stars',
+                                actors: _tamilActors,
+                                onActorTap: _openActorScreen,
                                 getFocusNode: _getFocusNode,
                                 onKeyNav: _handleRowKeyNavigation,
                                 onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,

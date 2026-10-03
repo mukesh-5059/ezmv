@@ -259,3 +259,28 @@ class TraktListSummary(BaseModel):
     slug: str = ""
 
 
+class ActorSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    profile_path: str | None = None
+    character: str | None = None
+    known_for_department: str | None = None
+
+
+class PersonDetailsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    biography: str = ""
+    profile_path: str | None = None
+    known_for_department: str | None = None
+    birthday: str | None = None
+    place_of_birth: str | None = None
+    popular: list[MovieSummary] = Field(default_factory=list)
+    recent: list[MovieSummary] = Field(default_factory=list)
+
+
+

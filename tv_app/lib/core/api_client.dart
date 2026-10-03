@@ -10,6 +10,7 @@ import '../models/filter.model.dart';
 
 import '../models/trakt_list.model.dart';
 import '../models/tv_season.model.dart';
+import '../models/actor.model.dart';
 
 class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
@@ -287,6 +288,34 @@ class ApiClient {
       print('Get subtitles failed: $e');
     }
     return [];
+  }
+
+  static Future<List<Actor>> getCuratedActors({String language = 'ta'}) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/actors/curated?language=$language');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 25));
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        return data.map((item) => Actor.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Get curated actors failed: $e');
+    }
+    return [];
+  }
+
+  static Future<ActorFilmography?> getActorFilmography(int personId) async {
+    final url = Uri.parse('$_currentBaseUrl/movies/person/$personId');
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 25));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return ActorFilmography.fromJson(data);
+      }
+    } catch (e) {
+      print('Get actor filmography failed: $e');
+    }
+    return null;
   }
 
   static Future<Map<String, dynamic>> getStreamLinksWithProgress(
