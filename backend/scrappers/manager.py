@@ -95,42 +95,16 @@ class ScraperManager:
                 c.get("iso_3166_1") for c in prod_countries if isinstance(c, dict) and c.get("iso_3166_1")
             ]
             return title, year, imdb_id, original_language, origin_countries
-        else:
-            details = await tmdb_client.get_tv_details(tmdb_id)
-            if not details:
-                return None, 0, None, None, []
-            title = details.get("name")
-            first_air_date = details.get("first_air_date") or ""
-            year = int(first_air_date.split("-")[0]) if first_air_date else 0
-            external_ids = details.get("external_ids") or {}
-            imdb_id = external_ids.get("imdb_id")
-            original_language = details.get("original_language")
-            prod_countries = details.get("production_countries") or []
-            origin_countries = details.get("origin_country") or [
-                c.get("iso_3166_1") for c in prod_countries if isinstance(c, dict) and c.get("iso_3166_1")
-            ]
-            return title, year, imdb_id, original_language, origin_countries
+        return None, 0, None, None, []
 
     def _are_all_scrapers_cached(
         self,
         tmdb_id: int,
-        season: int | None = None,
-        episode: int | None = None,
-        provider: str | None = None,
     ) -> bool:
-        target_scrapers = [
-            s for s in self.scrapers
-            if not provider or s.name.lower() == provider.lower()
-        ]
-        if not target_scrapers:
-            target_scrapers = self.scrapers
-
-        for s in target_scrapers:
+        for s in self.scrapers:
             cached = get_cached_streams(
                 tmdb_id=tmdb_id,
                 scraper_id=s.name,
-                season=season,
-                episode=episode,
             )
             if not cached:
                 return False
@@ -139,50 +113,33 @@ class ScraperManager:
     async def get_streams(
         self,
         media: MediaItem,
-        provider: str | None = None,
         bypass_cache: bool = False,
         on_progress=None,
     ) -> list[dict]:
         now = int(time.time())
 
-        # Determine target scrapers
-        target_scrapers = [
-            s for s in self.scrapers
-            if not provider or s.name.lower() == provider.lower()
-        ]
-        if not target_scrapers:
-            target_scrapers = self.scrapers
-
-        # If bypass_cache is requested, purge target provider (or all) from persistent disk cache
+        # If bypass_cache is requested, purge all providers from persistent disk cache
         if bypass_cache and media.tmdb_id:
             delete_cached_streams(
                 tmdb_id=media.tmdb_id,
-                scraper_id=provider,
-                season=media.season,
-                episode=media.episode,
             )
 
         scrapers_to_run: list[BaseScraper] = []
         if not bypass_cache and media.tmdb_id:
-            for s in target_scrapers:
+            for s in self.scrapers:
                 cached_for_s = get_cached_streams(
                     tmdb_id=media.tmdb_id,
                     scraper_id=s.name,
-                    season=media.season,
-                    episode=media.episode,
                 )
                 if not cached_for_s:
                     scrapers_to_run.append(s)
         else:
-            scrapers_to_run = target_scrapers
+            scrapers_to_run = self.scrapers
 
-        # If all target scrapers have valid unexpired streams in cache, return all cached streams!
+        # If all scrapers have valid unexpired streams in cache, return all cached streams!
         if not scrapers_to_run and media.tmdb_id:
             all_cached = get_cached_streams(
                 tmdb_id=media.tmdb_id,
-                scraper_id=provider,
-                season=media.season,
-                episode=media.episode,
             )
             if all_cached:
                 logger.info(f"Serving {len(all_cached)} cached streams for TMDB {media.tmdb_id}")
@@ -251,7 +208,6 @@ class ScraperManager:
         # Return all currently valid streams from DB (cached untouched + freshly scraped)
         all_valid_streams = get_cached_streams(
             tmdb_id=media.tmdb_id,
-            scraper_id=provider,
             season=media.season,
             episode=media.episode,
         ) if media.tmdb_id else []
@@ -264,15 +220,11 @@ class ScraperManager:
         cache_key: str,
         broadcaster: StreamBroadcaster,
         tmdb_id: int,
-        media_type: str,
-        season: int | None,
-        episode: int | None,
-        provider: str | None,
         bypass_cache: bool,
     ) -> StreamResponse | None:
         try:
             title, year, imdb_id, original_language, origin_countries = await self._get_media_info(
-                tmdb_id, media_type
+                tmdb_id, "movie"
             )
             if not title:
                 broadcaster.finish(error="Media not found on TMDB.")
@@ -286,18 +238,15 @@ class ScraperManager:
             media = MediaItem(
                 title=title,
                 year=year,
-                media_type=media_type,
+                media_type="movie",
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
-                season=season,
-                episode=episode,
                 original_language=original_language,
                 origin_countries=origin_countries,
             )
 
             links = await self.get_streams(
                 media=media,
-                provider=provider,
                 bypass_cache=bypass_cache,
                 on_progress=on_progress,
             )
@@ -307,11 +256,9 @@ class ScraperManager:
             resp = StreamResponse(
                 title=title or "",
                 year=year,
-                media_type=media_type,
+                media_type="movie",
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
-                season=season,
-                episode=episode,
                 cache_expires_in=min_remaining,
                 streams=links,
             )
@@ -325,88 +272,26 @@ class ScraperManager:
             self._in_flight.pop(cache_key, None)
             self._broadcasters.pop(cache_key, None)
 
-    async def resolve_streams(
-        self,
-        tmdb_id: int,
-        media_type: str = "movie",
-        season: int | None = None,
-        episode: int | None = None,
-        provider: str | None = None,
-        bypass_cache: bool = False,
-    ) -> StreamResponse | None:
-        cache_key = f"{tmdb_id}_{season}_{episode}_{provider or 'all'}"
-
-        if not bypass_cache and self._are_all_scrapers_cached(tmdb_id, season, episode, provider):
-            disk_streams = get_cached_streams(
-                tmdb_id=tmdb_id,
-                season=season,
-                episode=episode,
-                scraper_id=provider,
-            )
-            if disk_streams:
-                title, year, imdb_id, _, _ = await self._get_media_info(tmdb_id, media_type)
-                min_remaining = min([s.get("remaining_ttl", 3600) for s in disk_streams]) if disk_streams else 0
-                return StreamResponse(
-                    title=title or "",
-                    year=year,
-                    media_type=media_type,
-                    tmdb_id=tmdb_id,
-                    imdb_id=imdb_id,
-                    season=season,
-                    episode=episode,
-                    cache_expires_in=min_remaining,
-                    streams=disk_streams,
-                )
-
-        if cache_key in self._in_flight:
-            return await self._in_flight[cache_key]
-
-        broadcaster = StreamBroadcaster()
-        self._broadcasters[cache_key] = broadcaster
-        task = asyncio.create_task(
-            self._execute_resolve_task(
-                cache_key=cache_key,
-                broadcaster=broadcaster,
-                tmdb_id=tmdb_id,
-                media_type=media_type,
-                season=season,
-                episode=episode,
-                provider=provider,
-                bypass_cache=bypass_cache,
-            )
-        )
-        self._in_flight[cache_key] = task
-        return await task
-
     async def stream_events(
         self,
         tmdb_id: int,
-        media_type: str = "movie",
-        season: int | None = None,
-        episode: int | None = None,
-        provider: str | None = None,
         bypass_cache: bool = False,
     ) -> AsyncGenerator[str, None]:
-        cache_key = f"{tmdb_id}_{season}_{episode}_{provider or 'all'}"
+        cache_key = f"{tmdb_id}"
 
-        if not bypass_cache and self._are_all_scrapers_cached(tmdb_id, season, episode, provider):
+        if not bypass_cache and self._are_all_scrapers_cached(tmdb_id):
             disk_streams = get_cached_streams(
                 tmdb_id=tmdb_id,
-                season=season,
-                episode=episode,
-                scraper_id=provider,
             )
             if disk_streams:
-                title, year, imdb_id, _, _ = await self._get_media_info(tmdb_id, media_type)
+                title, year, imdb_id, _, _ = await self._get_media_info(tmdb_id, "movie")
                 min_remaining = min([s.get("remaining_ttl", 3600) for s in disk_streams]) if disk_streams else 0
                 resp = StreamResponse(
                     title=title or "",
                     year=year,
-                    media_type=media_type,
+                    media_type="movie",
                     tmdb_id=tmdb_id,
                     imdb_id=imdb_id,
-                    season=season,
-                    episode=episode,
                     cache_expires_in=min_remaining,
                     streams=disk_streams,
                 )
@@ -422,10 +307,6 @@ class ScraperManager:
                     cache_key=cache_key,
                     broadcaster=broadcaster,
                     tmdb_id=tmdb_id,
-                    media_type=media_type,
-                    season=season,
-                    episode=episode,
-                    provider=provider,
                     bypass_cache=bypass_cache,
                 )
             )

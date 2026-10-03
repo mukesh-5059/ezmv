@@ -136,7 +136,7 @@ class _SearchDialogState extends State<SearchDialog> {
                     ),
                     onSubmitted: (val) {
                       Future.delayed(const Duration(milliseconds: 150), () {
-                        if (_searchButtonFocusNode.canRequestFocus) {
+                        if (mounted && _searchButtonFocusNode.canRequestFocus) {
                           _searchButtonFocusNode.requestFocus();
                         }
                       });

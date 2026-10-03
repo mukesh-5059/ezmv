@@ -187,7 +187,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               'Resumed from ${formatDuration(widget.initialPositionSeconds)}',
             );
           }
-        });
+        }).catchError((_) {});
       }
     } catch (e) {
       if (mounted) {

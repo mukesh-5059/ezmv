@@ -152,23 +152,6 @@ class CatalogService:
             row = conn.execute("SELECT * FROM movies WHERE tmdb_id = ?;", (tmdb_id,)).fetchone()
             return dict(row) if row else None
 
-    def get_category_movies(self, category: str, page: int = 1, limit: int = 20) -> list[MovieSummary]:
-        offset = (page - 1) * limit
-        lane_id = "trending"
-        default_genre = None
-        if category in ["box_office", "box_office_hit"]:
-            lane_id = "box_office"
-        elif category in ["popular", "top_rated"]:
-            lane_id = "top_rated"
-        elif category in ["comedy", "latest_comedy"]:
-            lane_id = "comedy"
-            default_genre = 35
-        elif category in ["latest", "trending"]:
-            lane_id = "trending"
-
-        movies = self.get_lane_movies(lane_id, limit=limit, offset=offset)
-        return [MovieSummary.from_catalog(m, default_genre=default_genre) for m in movies]
-
     def get_tamil_category_movies(
         self,
         category: str | None = None,
@@ -177,14 +160,22 @@ class CatalogService:
         page: int = 1,
         limit: int = 20
     ) -> list[MovieSummary] | None:
+        lane_id = None
+        default_genre = None
         if category in ["box_office", "box_office_hit"]:
-            return self.get_category_movies("box_office", page=page, limit=limit)
-        if category in ["popular", "top_rated"]:
-            return self.get_category_movies("popular", page=page, limit=limit)
-        if (category in ["comedy", "latest_comedy"] or genre == 35) and year is None:
-            return self.get_category_movies("comedy", page=page, limit=limit)
-        if category in ["latest", "trending"] or (category is None and genre is None and year is None):
-            return self.get_category_movies("latest", page=page, limit=limit)
+            lane_id = "box_office"
+        elif category in ["popular", "top_rated"]:
+            lane_id = "top_rated"
+        elif (category in ["comedy", "latest_comedy"] or genre == 35) and year is None:
+            lane_id = "comedy"
+            default_genre = 35
+        elif category in ["latest", "trending"] or (category is None and genre is None and year is None):
+            lane_id = "trending"
+
+        if lane_id:
+            offset = (page - 1) * limit
+            movies = self.get_lane_movies(lane_id, limit=limit, offset=offset)
+            return [MovieSummary.from_catalog(m, default_genre=default_genre) for m in movies]
         return None
 
     async def search_catalog_with_fallback(

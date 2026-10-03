@@ -134,31 +134,13 @@ async def get_dashboard_lane(
 
 
 @router.get("/search")
-async def search_movies_or_tv(
-    query: str = Query(..., description="The title of the movie or show to search for"),
-    media_type: str = Query("movie", enum=["movie", "tv"], description="Media type: movie or tv"),
-    year: int | None = Query(None, description="Year of release (or first air date for TV)"),
+async def search_movies(
+    query: str = Query(..., description="The title of the movie to search for"),
+    year: int | None = Query(None, description="Year of release"),
     page: int = Query(1, ge=1, description="Page number to fetch"),
 ):
-    if media_type == "movie":
-        results = await catalog_service.search_catalog_with_fallback(query=query, year=year, page=page)
-    else:
-        raw_tv = await tmdb_client.search_tv(query=query, year=year)
-        results = [MovieSummary.from_tmdb(item, media_type="tv") for item in raw_tv]
+    results = await catalog_service.search_catalog_with_fallback(query=query, year=year, page=page)
     return {"results": results}
-
-
-@router.get("/popular")
-async def get_popular(
-    language: str = Query("en-US", description="ISO-639-1 language code to query (e.g. en-US, ta-IN)"),
-    page: int = Query(1, ge=1, description="Page number to fetch"),
-):
-    safe_page = page if isinstance(page, int) else 1
-    if isinstance(language, str) and language.lower().startswith("ta"):
-        return {"results": catalog_service.get_category_movies("popular", page=safe_page)}
-    
-    raw_popular = await tmdb_client.get_popular_movies(language=language, page=safe_page)
-    return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in raw_popular]}
 
 
 @router.get("/discover")
@@ -187,16 +169,14 @@ async def discover(
     return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in raw_discovered]}
 
 
+@router.get("/{tmdb_id}", response_model=MovieDetails)
 @router.get("/{media_type}/{tmdb_id}", response_model=MovieDetails)
 async def get_details(
-    media_type: str,
     tmdb_id: int,
+    media_type: str = "movie",
 ):
-    if media_type not in ["movie", "tv"]:
-        raise HTTPException(status_code=400, detail="Invalid media type. Must be 'movie' or 'tv'.")
-
-    details = await (tmdb_client.get_movie_details(tmdb_id) if media_type == "movie" else tmdb_client.get_tv_details(tmdb_id))
+    details = await tmdb_client.get_movie_details(tmdb_id)
     if not details:
-        raise HTTPException(status_code=404, detail="Media not found on TMDB.")
+        raise HTTPException(status_code=404, detail="Movie not found on TMDB.")
 
-    return MovieDetails.from_tmdb(details, media_type=media_type)
+    return MovieDetails.from_tmdb(details, media_type="movie")

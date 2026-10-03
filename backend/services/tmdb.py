@@ -97,31 +97,6 @@ class TMDBClient:
             logger.error(f"TMDB movie search failed for '{query}': {e}")
             return []
 
-    async def search_tv(self, query: str, year: int = None) -> list[dict]:
-        cache_key = f"search_tv:{query}_{year}"
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            return disk_cached
-
-        url = f"{self.BASE_URL}/search/tv"
-        params = {
-            "query": query,
-            "include_adult": "false"
-        }
-        if year:
-            params["first_air_date_year"] = str(year)
-
-        try:
-            client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-            resp.raise_for_status()
-            results = resp.json().get("results", [])
-            set_tmdb_cache(cache_key, results)
-            return results
-        except Exception as e:
-            logger.error(f"TMDB TV search failed for '{query}': {e}")
-            return []
-
     async def get_movie_details(self, movie_id: int) -> dict | None:
         cache_key = f"movie_details:{movie_id}"
         cached_result = self._details_cache.get(movie_id)
@@ -147,26 +122,6 @@ class TMDBClient:
             return details
         except Exception as e:
             logger.error(f"Failed to fetch TMDB movie details for id {movie_id}: {e}")
-            return None
-
-    async def get_tv_details(self, tv_id: int) -> dict | None:
-        cache_key = f"tv_details:{tv_id}"
-        disk_cached = get_tmdb_cache(cache_key)
-        if disk_cached is not None:
-            return disk_cached
-
-        url = f"{self.BASE_URL}/tv/{tv_id}"
-        params = {"append_to_response": "external_ids,credits"}
-
-        try:
-            client = get_session()
-            resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome")
-            resp.raise_for_status()
-            details = resp.json()
-            set_tmdb_cache(cache_key, details, ttl_seconds=1296000)
-            return details
-        except Exception as e:
-            logger.error(f"Failed to fetch TMDB TV details for id {tv_id}: {e}")
             return None
 
     async def get_popular_movies(self, language: str = "en-US", page: int = 1) -> list[dict]:

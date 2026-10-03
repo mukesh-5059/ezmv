@@ -143,7 +143,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Future<void> _handlePlayOrResume({int initialSeconds = 0}) async {
     if (_isLoadingStreams) return;
 
-    await _fetchStreams(bypassCache: false);
+    if (_streams.isEmpty) {
+      await _fetchStreams(bypassCache: false);
+    }
 
     if (mounted && _streams.isNotEmpty) {
       _startPlayback(_streams.first, initialSeconds: initialSeconds);
@@ -157,7 +159,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final targetQuality = stream['quality']?.toString();
     final targetProvider = stream['provider']?.toString();
 
-    await _fetchStreams(bypassCache: false);
+    if (_streams.isEmpty) {
+      await _fetchStreams(bypassCache: false);
+    }
 
     if (mounted && _streams.isNotEmpty) {
       final matching = _streams.firstWhere(

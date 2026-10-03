@@ -51,28 +51,19 @@ class SubtitlesService:
     def __init__(self):
         self._cache = TTLCache(ttl_seconds=86400)
 
-    async def _get_imdb_id(self, tmdb_id: int, media_type: str = "movie") -> str | None:
-        if media_type == "tv":
-            details = await tmdb_client.get_tv_details(tmdb_id)
-            if details:
-                ext = details.get("external_ids") or {}
-                return details.get("imdb_id") or ext.get("imdb_id")
-        else:
-            details = await tmdb_client.get_movie_details(tmdb_id)
-            if details:
-                ext = details.get("external_ids") or {}
-                return details.get("imdb_id") or ext.get("imdb_id")
+    async def _get_imdb_id(self, tmdb_id: int) -> str | None:
+        details = await tmdb_client.get_movie_details(tmdb_id)
+        if details:
+            ext = details.get("external_ids") or {}
+            return details.get("imdb_id") or ext.get("imdb_id")
         return None
 
     async def get_subtitles(
         self,
         tmdb_id: int,
-        media_type: str = "movie",
-        season: int | None = None,
-        episode: int | None = None,
         language: str | None = None
     ) -> SubtitleResponse:
-        cache_key = f"{tmdb_id}_{media_type}_{season}_{episode}"
+        cache_key = f"{tmdb_id}_movie"
         cached = self._cache.get(cache_key)
         if cached is not None:
             if language:
@@ -84,33 +75,22 @@ class SubtitlesService:
                 return SubtitleResponse(
                     tmdb_id=cached.tmdb_id,
                     imdb_id=cached.imdb_id,
-                    media_type=cached.media_type,
-                    season=cached.season,
-                    episode=cached.episode,
+                    media_type="movie",
                     subtitles=filtered
                 )
             return cached
 
-        imdb_id = await self._get_imdb_id(tmdb_id, media_type)
+        imdb_id = await self._get_imdb_id(tmdb_id)
         if not imdb_id:
-            logger.warning(f"[Subtitles] No IMDb ID found for TMDb {tmdb_id} ({media_type})")
+            logger.warning(f"[Subtitles] No IMDb ID found for TMDb {tmdb_id}")
             return SubtitleResponse(
                 tmdb_id=tmdb_id,
                 imdb_id=None,
-                media_type=media_type,
-                season=season,
-                episode=episode,
+                media_type="movie",
                 subtitles=[]
             )
 
-        if media_type == "tv":
-            s = season if season is not None and season > 0 else 1
-            e = episode if episode is not None and episode > 0 else 1
-            query_path = f"series/{imdb_id}:{s}:{e}.json"
-        else:
-            query_path = f"movie/{imdb_id}.json"
-
-        url = f"{self.BASE_URL}/{query_path}"
+        url = f"{self.BASE_URL}/movie/{imdb_id}.json"
         raw_tracks: list[SubtitleTrack] = []
 
         try:
@@ -144,9 +124,7 @@ class SubtitlesService:
         full_response = SubtitleResponse(
             tmdb_id=tmdb_id,
             imdb_id=imdb_id,
-            media_type=media_type,
-            season=season,
-            episode=episode,
+            media_type="movie",
             subtitles=raw_tracks
         )
         self._cache.set(cache_key, full_response)
@@ -160,9 +138,7 @@ class SubtitlesService:
             return SubtitleResponse(
                 tmdb_id=tmdb_id,
                 imdb_id=imdb_id,
-                media_type=media_type,
-                season=season,
-                episode=episode,
+                media_type="movie",
                 subtitles=filtered_tracks
             )
 

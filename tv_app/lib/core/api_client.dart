@@ -133,21 +133,6 @@ class ApiClient {
     return null;
   }
 
-  static Future<List<Movie>> getPopularMovies({required String language, int page = 1}) async {
-    final url = Uri.parse('$_currentBaseUrl/movies/popular?language=$language&page=$page');
-    try {
-      final response = await http.get(url).timeout(const Duration(seconds: 3));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List results = data['results'] ?? [];
-        return results.map((item) => Movie.fromJson(item)).toList();
-      }
-    } catch (e) {
-      print('Get popular movies failed: $e');
-    }
-    return [];
-  }
-
   static Future<List<Movie>> discoverMovies({required String language, int? year, int? genreId, int page = 1}) async {
     var queryParams = 'language=$language&page=$page';
     if (year != null) {
@@ -186,14 +171,9 @@ class ApiClient {
 
   static Future<List<SubtitleTrackInfo>> getSubtitles(
     int tmdbId, {
-    String mediaType = 'movie',
-    int? season,
-    int? episode,
     String? language,
   }) async {
-    var query = 'tmdb_id=$tmdbId&media_type=$mediaType';
-    if (season != null) query += '&season=$season';
-    if (episode != null) query += '&episode=$episode';
+    var query = 'tmdb_id=$tmdbId';
     if (language != null) query += '&language=$language';
 
     final url = Uri.parse('$_currentBaseUrl/subtitles/?$query');
@@ -210,40 +190,13 @@ class ApiClient {
     return [];
   }
 
-  static Future<Map<String, dynamic>> getStreamLinks(
-    int tmdbId, {
-    String? provider,
-    bool bypassCache = false,
-  }) async {
-    var query = 'tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache';
-    if (provider != null && provider.isNotEmpty) {
-      query += '&provider=${Uri.encodeComponent(provider)}';
-    }
-    final url = Uri.parse('$_currentBaseUrl/streams/?$query');
-    try {
-      final response = await http.get(url).timeout(const Duration(seconds: 30));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return data as Map<String, dynamic>;
-      }
-    } catch (e) {
-      print('Get streams failed: $e');
-    }
-    return {};
-  }
-
   static Future<Map<String, dynamic>> getStreamLinksWithProgress(
     int tmdbId, {
-    String? provider,
     bool bypassCache = false,
     void Function(String message)? onProgress,
   }) async {
     final client = http.Client();
-    var query = 'tmdb_id=$tmdbId&media_type=movie&bypass_cache=$bypassCache&format=sse';
-    if (provider != null && provider.isNotEmpty) {
-      query += '&provider=${Uri.encodeComponent(provider)}';
-    }
-    final url = Uri.parse('$_currentBaseUrl/streams/?$query');
+    final url = Uri.parse('$_currentBaseUrl/streams/?tmdb_id=$tmdbId&bypass_cache=$bypassCache');
     try {
       final request = http.Request('GET', url);
       request.headers['Accept'] = 'text/event-stream';

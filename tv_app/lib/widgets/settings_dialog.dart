@@ -126,7 +126,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
             ),
             onSubmitted: (val) {
               Future.delayed(const Duration(milliseconds: 150), () {
-                if (_saveFocusNode.canRequestFocus) {
+                if (mounted && _saveFocusNode.canRequestFocus) {
                   _saveFocusNode.requestFocus();
                 }
               });
