@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import logging
 from datetime import datetime
@@ -246,13 +247,7 @@ class TraktClient:
         cache_key = f"trakt:lists:popular:{page}_{limit}"
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
-            return [
-                TraktListSummary(**item)
-                for item in cached
-                if not is_nsfw_text(item.get("name", ""))
-                and not is_nsfw_text(item.get("description", ""))
-                and not is_nsfw_text(item.get("slug", ""))
-            ]
+            return [TraktListSummary(**item) for item in cached]
 
         if not self.client_id:
             return []
@@ -303,13 +298,7 @@ class TraktClient:
         cache_key = f"trakt:lists:search:{clean_q}_{page}_{limit}"
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
-            return [
-                TraktListSummary(**item)
-                for item in cached
-                if not is_nsfw_text(item.get("name", ""))
-                and not is_nsfw_text(item.get("description", ""))
-                and not is_nsfw_text(item.get("slug", ""))
-            ]
+            return [TraktListSummary(**item) for item in cached]
 
         if not self.client_id:
             return []

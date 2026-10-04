@@ -1,18 +1,15 @@
 from contextlib import asynccontextmanager
 import logging
-from fastapi import FastAPI
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from backend.logger import setup_logging, http_log
 from backend.session import init_session, close_session
 from backend.services.cache_db import init_cache_db, purge_expired_cache
 from backend.routes import movies, streams, subtitles
 
-# Setup basic logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+# Initialize custom clean, colored logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -35,6 +32,21 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Custom Request Duration Logger Middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+
+    path = request.url.path
+    if not path.startswith("/docs") and not path.startswith("/openapi") and path != "/favicon.ico":
+        if request.url.query:
+            path = f"{path}?{request.url.query}"
+        logger.info(http_log(request.method, path, response.status_code, duration_ms))
+
+    return response
 
 # Enable CORS for local app development
 app.add_middleware(

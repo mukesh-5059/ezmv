@@ -13,6 +13,13 @@ from backend.services.cache_db import (
 from backend.models import StreamResponse
 from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
 from backend.scrappers.providers import IsaiminiScraper, VidSrcScraper
+from backend.logger import (
+    scraper_start_tag,
+    scraper_exec_tag,
+    scraper_error_tag,
+    scraper_done_tag,
+    scraper_cache_tag,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,33 +172,31 @@ class ScraperManager:
                 episode=media.episode,
             )
             if all_cached:
-                logger.info(f"Serving {len(all_cached)} cached streams for TMDB {media.tmdb_id}")
+                logger.info(scraper_cache_tag(media.title, len(all_cached)))
                 return all_cached
-                return all_cached
 
-        logger.info(
-            f"Orchestrating scrapers for: {media.title} ({media.year}) | TMDb: {media.tmdb_id} | Running: {[s.name for s in scrapers_to_run]}"
-        )
+        logger.info(scraper_start_tag(media.title, media.year, media.tmdb_id, [s.name for s in scrapers_to_run]))
 
-        tasks = [
-            scraper.scrape(media, on_progress=on_progress)
-            for scraper in scrapers_to_run
-        ]
+        async def _timed_scrape(scraper: BaseScraper):
+            t0 = time.time()
+            try:
+                sources = await scraper.scrape(media, on_progress=on_progress)
+                elapsed = time.time() - t0
+                return scraper.name, sources, elapsed, None
+            except Exception as e:
+                elapsed = time.time() - t0
+                return scraper.name, None, elapsed, e
 
-        try:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            logger.error(f"Error gathering scraping tasks: {e}")
-            results = []
+        tasks = [_timed_scrape(s) for s in scrapers_to_run]
+        results = await asyncio.gather(*tasks)
 
-        for i, res in enumerate(results):
-            scraper_name = scrapers_to_run[i].name
-            if isinstance(res, Exception):
-                logger.error(f"Scraper '{scraper_name}' raised an exception: {res}")
+        for scraper_name, res, elapsed, err in results:
+            if err:
+                logger.error(scraper_error_tag(scraper_name, str(err), elapsed))
                 continue
 
             if res:
-                logger.info(f"Scraper '{scraper_name}' returned {len(res)} stream sources.")
+                logger.info(scraper_exec_tag(scraper_name, len(res), elapsed))
                 seen_urls = set()
                 new_streams: list[dict] = []
                 for item in res:
@@ -227,7 +232,7 @@ class ScraperManager:
                         episode=media.episode,
                     )
             else:
-                logger.info(f"Scraper '{scraper_name}' returned no sources.")
+                logger.info(scraper_exec_tag(scraper_name, 0, elapsed))
 
         # Return all currently valid streams from DB (cached untouched + freshly scraped)
         all_valid_streams = get_cached_streams(
@@ -237,6 +242,7 @@ class ScraperManager:
         ) if media.tmdb_id else []
 
         all_valid_streams.sort(key=lambda x: x.get("priority", 100))
+        logger.info(scraper_done_tag(media.title, len(all_valid_streams)))
         return all_valid_streams
 
     async def _execute_resolve_task(
