@@ -549,84 +549,98 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _buildDirectMoviesTile() {
     final isSelected = _selectedList == null;
-    return FocusableActionDetector(
-      actions: {
-        ActivateIntent: CallbackAction<ActivateIntent>(
-          onInvoke: (_) {
-            _selectList(null);
-            return null;
+    return Builder(
+      builder: (tileContext) {
+        return FocusableActionDetector(
+          onFocusChange: (focused) {
+            if (focused) {
+              Scrollable.ensureVisible(
+                tileContext,
+                alignment: 0.5,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+              );
+            }
           },
-        ),
-      },
-      child: Builder(
-        builder: (context) {
-          final isFocused = Focus.of(context).hasFocus;
-          return InkWell(
-            onTap: () => _selectList(null),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isFocused
-                    ? TVTheme.accent.withValues(alpha: 0.2)
-                    : (isSelected
-                        ? TVTheme.accent.withValues(alpha: 0.25)
-                        : TVTheme.surfaceElevated),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isFocused
-                      ? TVTheme.accent
-                      : (isSelected ? TVTheme.accent : Colors.transparent),
-                  width: 2,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: isSelected ? TVTheme.accent : TVTheme.surface,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.movie,
-                      color: isSelected ? Colors.black : TVTheme.accent,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Direct Movie Results',
-                          style: TextStyle(
-                            color: TVTheme.textPrimary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${_directMovies.length} movies found',
-                          style: const TextStyle(
-                            color: TVTheme.textSecondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (isSelected)
-                    const Icon(Icons.check_circle, color: TVTheme.accent, size: 18),
-                ],
-              ),
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                _selectList(null);
+                return null;
+              },
             ),
-          );
-        },
-      ),
+          },
+          child: Builder(
+            builder: (context) {
+              final isFocused = Focus.of(context).hasFocus;
+              return InkWell(
+                onTap: () => _selectList(null),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isFocused
+                        ? TVTheme.surfaceElevated
+                        : (isSelected
+                            ? const Color(0xFF26181B)
+                            : TVTheme.surface),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isFocused
+                          ? Colors.white
+                          : (isSelected ? TVTheme.accent : Colors.transparent),
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: isSelected ? TVTheme.accent : TVTheme.surfaceElevated,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.movie,
+                          color: isSelected ? Colors.white : TVTheme.accent,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Direct Movie Results',
+                              style: TextStyle(
+                                color: TVTheme.textPrimary,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${_directMovies.length} movies found',
+                              style: const TextStyle(
+                                color: TVTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (isSelected)
+                        const Icon(Icons.check_circle, color: TVTheme.accent, size: 18),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -634,111 +648,125 @@ class _SearchScreenState extends State<SearchScreen> {
     final isSelected = _selectedList?.id == list.id;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: FocusableActionDetector(
-        actions: {
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              _selectList(list);
-              return null;
+      child: Builder(
+        builder: (tileContext) {
+          return FocusableActionDetector(
+            onFocusChange: (focused) {
+              if (focused) {
+                Scrollable.ensureVisible(
+                  tileContext,
+                  alignment: 0.5,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeInOut,
+                );
+              }
             },
-          ),
-        },
-        child: Builder(
-          builder: (context) {
-            final isFocused = Focus.of(context).hasFocus;
-            return InkWell(
-              onTap: () => _selectList(list),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isFocused
-                      ? TVTheme.accent.withValues(alpha: 0.2)
-                      : (isSelected
-                          ? TVTheme.accent.withValues(alpha: 0.25)
-                          : TVTheme.surfaceElevated.withValues(alpha: 0.6)),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isFocused
-                        ? TVTheme.accent
-                        : (isSelected ? TVTheme.accent : Colors.transparent),
-                    width: 2,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            list.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isFocused ? TVTheme.accent : TVTheme.textPrimary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        if (isSelected)
-                          const Icon(Icons.check_circle, color: TVTheme.accent, size: 16),
-                      ],
+            actions: {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (_) {
+                  _selectList(list);
+                  return null;
+                },
+              ),
+            },
+            child: Builder(
+              builder: (context) {
+                final isFocused = Focus.of(context).hasFocus;
+                return InkWell(
+                  onTap: () => _selectList(list),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isFocused
+                          ? TVTheme.surfaceElevated
+                          : (isSelected
+                              ? const Color(0xFF26181B)
+                              : TVTheme.surface),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isFocused
+                            ? Colors.white
+                            : (isSelected ? TVTheme.accent : Colors.transparent),
+                        width: 2,
+                      ),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (list.userName.isNotEmpty) ...[
-                          Text(
-                            'by ${list.userName}',
-                            style: const TextStyle(
-                              color: TVTheme.textSecondary,
-                              fontSize: 11,
-                            ),
-                          ),
-                          const Spacer(),
-                        ],
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: TVTheme.surface,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            '${list.itemCount} items',
-                            style: const TextStyle(
-                              color: TVTheme.textSecondary,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        if (list.likes > 0) ...[
-                          const SizedBox(width: 6),
-                          Row(
-                            children: [
-                              const Icon(Icons.thumb_up, color: TVTheme.accent, size: 10),
-                              const SizedBox(width: 3),
-                              Text(
-                                '${list.likes}',
-                                style: const TextStyle(
-                                  color: TVTheme.accent,
-                                  fontSize: 10,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                list.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isFocused ? Colors.white : (isSelected ? TVTheme.accent : TVTheme.textPrimary),
+                                  fontSize: 13,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
+                            ),
+                            if (isSelected)
+                              const Icon(Icons.check_circle, color: TVTheme.accent, size: 16),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            if (list.userName.isNotEmpty) ...[
+                              Text(
+                                'by ${list.userName}',
+                                style: const TextStyle(
+                                  color: TVTheme.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const Spacer(),
                             ],
-                          ),
-                        ],
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: TVTheme.surfaceElevated,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '${list.itemCount} items',
+                                style: const TextStyle(
+                                  color: TVTheme.textSecondary,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (list.likes > 0) ...[
+                              const SizedBox(width: 6),
+                              Row(
+                                children: [
+                                  const Icon(Icons.thumb_up, color: TVTheme.accent, size: 10),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '${list.likes}',
+                                    style: const TextStyle(
+                                      color: TVTheme.accent,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
+                  ),
+                );
+              },
+            ),
+          );
+        },
       ),
     );
   }
@@ -852,6 +880,11 @@ class _SearchScreenState extends State<SearchScreen> {
                                 final movie = _displayMovies[index];
                                 return MovieCard(
                                   movie: movie,
+                                  onFocusChanged: (focused) {
+                                    if (focused && index >= _displayMovies.length - 8 && !_isLoadingMore && _hasMore) {
+                                      _fetchNextPage();
+                                    }
+                                  },
                                   onTap: () {
                                     Navigator.push(
                                       context,
@@ -867,11 +900,40 @@ class _SearchScreenState extends State<SearchScreen> {
                           ),
                         ),
                         if (_isLoadingMore)
-                          const SliverToBoxAdapter(
+                          SliverToBoxAdapter(
                             child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
+                              padding: const EdgeInsets.symmetric(vertical: 28),
                               child: Center(
-                                child: CircularProgressIndicator(color: TVTheme.accent),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: TVTheme.surfaceElevated,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.white12),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.2,
+                                          color: TVTheme.accent,
+                                        ),
+                                      ),
+                                      SizedBox(width: 12),
+                                      Text(
+                                        'Loading more movies...',
+                                        style: TextStyle(
+                                          color: TVTheme.textPrimary,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           )

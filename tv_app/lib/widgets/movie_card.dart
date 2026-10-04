@@ -87,6 +87,14 @@ class _MovieCardState extends State<MovieCard> {
         setState(() {
           _isFocused = focused;
         });
+        if (focused) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+          );
+        }
         if (widget.onFocusChanged != null) {
           widget.onFocusChanged!(focused);
         }
