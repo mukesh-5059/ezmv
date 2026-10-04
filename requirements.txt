@@ -8,3 +8,4 @@ pydantic-settings>=2.0.0
 curl_cffi>=0.5.10
 playwright>=1.40.0
 python-dotenv>=1.0.0
+better-profanity>=0.7.0

@@ -1001,6 +1001,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   }) {
     return Focus(
       focusNode: focusNode,
+      autofocus: isPrimary,
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
             (event.logicalKey == LogicalKeyboardKey.select ||

@@ -312,6 +312,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         child: TextField(
                           controller: _searchController,
                           focusNode: _textFieldFocusNode,
+                          autofocus: false,
                           textInputAction: TextInputAction.search,
                           style: const TextStyle(
                             color: TVTheme.textPrimary,
@@ -338,6 +339,7 @@ class _SearchScreenState extends State<SearchScreen> {
                         ),
                       FocusableActionDetector(
                         focusNode: _submitSearchFocusNode,
+                        autofocus: true,
                         onShowFocusHighlight: (v) => setState(() {}),
                         actions: {
                           ActivateIntent: CallbackAction<ActivateIntent>(

@@ -4,11 +4,19 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from curl_cffi.requests import AsyncSession
+from better_profanity import profanity
+
 from backend.models import MovieSummary, TraktListSummary
 from backend.services.tmdb import tmdb_client, get_tmdb_cache, set_tmdb_cache
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+def is_nsfw_text(text: str) -> bool:
+    if not text:
+        return False
+    return profanity.contains_profanity(text)
 
 
 class TraktClient:
@@ -54,6 +62,12 @@ class TraktClient:
         summaries = []
         for res, m_type in zip(results, item_types):
             if isinstance(res, dict) and res.get("id"):
+                if res.get("adult") is True:
+                    continue
+                title = res.get("title") or res.get("name") or ""
+                overview = res.get("overview") or ""
+                if is_nsfw_text(title) or is_nsfw_text(overview):
+                    continue
                 summaries.append(MovieSummary.from_tmdb(res, media_type=m_type))
         return summaries
 
@@ -232,7 +246,13 @@ class TraktClient:
         cache_key = f"trakt:lists:popular:{page}_{limit}"
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
-            return [TraktListSummary(**item) for item in cached]
+            return [
+                TraktListSummary(**item)
+                for item in cached
+                if not is_nsfw_text(item.get("name", ""))
+                and not is_nsfw_text(item.get("description", ""))
+                and not is_nsfw_text(item.get("slug", ""))
+            ]
 
         if not self.client_id:
             return []
@@ -248,16 +268,21 @@ class TraktClient:
             lists = []
             for entry in raw_items:
                 l = entry.get("list", {})
-                if l.get("name") and l.get("ids", {}).get("trakt"):
+                name = l.get("name") or ""
+                desc = l.get("description") or ""
+                slug = l.get("ids", {}).get("slug") or ""
+                if is_nsfw_text(name) or is_nsfw_text(desc) or is_nsfw_text(slug):
+                    continue
+                if name and l.get("ids", {}).get("trakt"):
                     lists.append(
                         TraktListSummary(
                             id=str(l["ids"]["trakt"]),
-                            name=l.get("name", ""),
-                            description=l.get("description") or "",
+                            name=name,
+                            description=desc,
                             item_count=l.get("item_count") or 0,
                             likes=l.get("likes") or 0,
                             user_name=l.get("user", {}).get("username") or "",
-                            slug=l.get("ids", {}).get("slug") or "",
+                            slug=slug,
                         )
                     )
             if lists:
@@ -272,10 +297,19 @@ class TraktClient:
         if not clean_q:
             return await self.get_popular_lists(page=page, limit=limit)
 
+        if is_nsfw_text(clean_q):
+            return []
+
         cache_key = f"trakt:lists:search:{clean_q}_{page}_{limit}"
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
-            return [TraktListSummary(**item) for item in cached]
+            return [
+                TraktListSummary(**item)
+                for item in cached
+                if not is_nsfw_text(item.get("name", ""))
+                and not is_nsfw_text(item.get("description", ""))
+                and not is_nsfw_text(item.get("slug", ""))
+            ]
 
         if not self.client_id:
             return []
@@ -291,16 +325,21 @@ class TraktClient:
             lists = []
             for entry in raw_items:
                 l = entry.get("list", {})
-                if l.get("name") and l.get("ids", {}).get("trakt"):
+                name = l.get("name") or ""
+                desc = l.get("description") or ""
+                slug = l.get("ids", {}).get("slug") or ""
+                if is_nsfw_text(name) or is_nsfw_text(desc) or is_nsfw_text(slug):
+                    continue
+                if name and l.get("ids", {}).get("trakt"):
                     lists.append(
                         TraktListSummary(
                             id=str(l["ids"]["trakt"]),
-                            name=l.get("name", ""),
-                            description=l.get("description") or "",
+                            name=name,
+                            description=desc,
                             item_count=l.get("item_count") or 0,
                             likes=l.get("likes") or 0,
                             user_name=l.get("user", {}).get("username") or "",
-                            slug=l.get("ids", {}).get("slug") or "",
+                            slug=slug,
                         )
                     )
             lists.sort(key=lambda x: x.likes, reverse=True)
