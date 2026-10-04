@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../core/api_client.dart';
+import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 
 class SettingsDialog extends StatefulWidget {

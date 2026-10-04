@@ -352,6 +352,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
+  shared_core:
+    dependency: "direct main"
+    description:
+      path: "../shared_core"
+      relative: true
+    source: path
+    version: "1.0.0"
   shared_preferences:
     dependency: "direct main"
     description:

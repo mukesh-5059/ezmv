@@ -1,10 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../core/api_client.dart';
-import '../core/search_history.dart';
-import '../models/movie.model.dart';
-import '../models/trakt_list.model.dart';
+import 'package:shared_core/shared_core.dart';
 import '../widgets/movie_card.dart';
 import '../theme.dart';
 import 'details_screen.dart';

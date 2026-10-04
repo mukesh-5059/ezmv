@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'core/api_client.dart';
+import 'package:shared_core/shared_core.dart';
 import 'screens/home_screen.dart';
 import 'theme.dart';
 

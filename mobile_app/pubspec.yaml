@@ -1,0 +1,29 @@
+name: mobile_app
+description: "A dark-themed, touch-optimized Android phone & tablet streaming app for EzMV."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_core:
+    path: ../shared_core
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
+  media_kit: ^1.1.10
+  media_kit_video: ^1.2.4
+  media_kit_libs_android_video: ^1.3.8
+  intl: ^0.18.1
+  wakelock_plus: ^1.6.1
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  shared_core:
+    path: ../shared_core
   http: ^1.1.0
   shared_preferences: ^2.2.0
   media_kit: ^1.1.10

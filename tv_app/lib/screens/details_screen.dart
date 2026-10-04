@@ -1,12 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/movie.model.dart';
-import '../models/movie_details.model.dart';
-import '../models/tv_season.model.dart';
-import '../models/tv_episode.model.dart';
-import '../core/api_client.dart';
-import '../core/local_storage.dart';
+import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import '../widgets/cast_carousel.dart';
 import '../widgets/stream_selector.dart';

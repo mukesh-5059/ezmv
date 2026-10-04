@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/movie.model.dart';
+import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import 'movie_card.dart';
 

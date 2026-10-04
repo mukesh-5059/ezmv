@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../core/api_client.dart';
-import '../models/actor.model.dart';
-import '../models/movie.model.dart';
+import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import '../widgets/movie_lane.dart';
 import 'details_screen.dart';
