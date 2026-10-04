@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
 class TVTheme {
-  static const Color background = Color(0xFF0C0D14);
-  static const Color surface = Color(0xFF161824);
-  static const Color surfaceElevated = Color(0xFF222638);
+  static const Color background = Color(0xFF07080B);
+  static const Color surface = Color(0xFF131418);
+  static const Color surfaceElevated = Color(0xFF1C1D24);
   static const Color accent = Color(0xFFE50914);
   static const Color accentGlow = Color(0xFFFF3B30);
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFFC0C5D8);
-  static const Color textMuted = Color(0xFF888E9E);
+  static const Color textSecondary = Color(0xFF9E9EA7);
+  static const Color textMuted = Color(0xFF6E717E);
 
   static ThemeData get darkTheme {
     return ThemeData(
@@ -40,30 +40,36 @@ class TVTheme {
     );
   }
 
-  // Cinematic TV Card Focus Decoration
-  static BoxDecoration focusDecoration(bool hasFocus, {double radius = 10}) {
+  // Cinematic TV Card Focus Decoration with White border, subtle soft halo & deep OLED drop shadow
+  static BoxDecoration focusDecoration(
+    bool hasFocus, {
+    double radius = 10,
+    Color? borderColor,
+    double borderWidth = 3.0,
+  }) {
+    final border = borderColor ?? Colors.white;
     return BoxDecoration(
       borderRadius: BorderRadius.circular(radius),
       border: Border.all(
-        color: hasFocus ? Colors.white : Colors.transparent,
-        width: hasFocus ? 2.5 : 0,
+        color: hasFocus ? border : Colors.transparent,
+        width: hasFocus ? borderWidth : 0,
       ),
       boxShadow: hasFocus
           ? [
               BoxShadow(
-                color: Colors.white.withValues(alpha: 0.35),
-                blurRadius: 18,
-                spreadRadius: 2,
+                color: Colors.white.withValues(alpha: 0.15),
+                blurRadius: 10,
+                spreadRadius: 1,
               ),
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.6),
-                blurRadius: 10,
+                color: Colors.black.withValues(alpha: 0.85),
+                blurRadius: 16,
                 offset: const Offset(0, 8),
               ),
             ]
           : [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.4),
+                color: Colors.black.withValues(alpha: 0.5),
                 blurRadius: 6,
                 offset: const Offset(0, 4),
               ),

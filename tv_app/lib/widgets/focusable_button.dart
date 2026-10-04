@@ -58,15 +58,20 @@ class _FocusableButtonState extends State<FocusableButton> {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _isFocused ? borderColor : Colors.transparent,
-              width: 2,
+              width: 3.0,
             ),
             boxShadow: _isFocused
                 ? [
                     BoxShadow(
-                      color: widget.color.withOpacity(0.4),
-                      blurRadius: 12,
-                      spreadRadius: 2,
-                    )
+                      color: Colors.black.withValues(alpha: 0.6),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                    BoxShadow(
+                      color: widget.color.withValues(alpha: 0.22),
+                      blurRadius: 8,
+                      spreadRadius: 0,
+                    ),
                   ]
                 : [],
           ),

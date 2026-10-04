@@ -457,37 +457,39 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
             ),
-          // Horizontal Gradient Scrim
+          // Horizontal Gradient Scrim (OLED black on left transitioning smoothly into backdrop image)
           Positioned.fill(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
                     TVTheme.background,
-                    Color(0xF0121212),
-                    Color(0x99121212),
-                    Color(0x33121212),
+                    TVTheme.background.withValues(alpha: 0.95),
+                    TVTheme.background.withValues(alpha: 0.60),
+                    TVTheme.background.withValues(alpha: 0.15),
+                    Colors.transparent,
                   ],
-                  stops: [0.0, 0.45, 0.75, 1.0],
+                  stops: const [0.0, 0.35, 0.60, 0.85, 1.0],
                 ),
               ),
             ),
           ),
-          // Vertical Gradient Scrim
+          // Vertical Gradient Scrim (Top header fade, clear backdrop window, fading to solid black bottom)
           Positioned.fill(
             child: Container(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
+                    TVTheme.background.withValues(alpha: 0.35),
                     Colors.transparent,
-                    Color(0x66121212),
+                    TVTheme.background.withValues(alpha: 0.70),
                     TVTheme.background,
                   ],
-                  stops: [0.0, 0.65, 1.0],
+                  stops: const [0.0, 0.22, 0.65, 1.0],
                 ),
               ),
             ),
@@ -814,15 +816,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: focused ? Colors.white : (isSelected ? TVTheme.accent : Colors.white12),
-                    width: focused ? 2.0 : 1.0,
+                    width: focused ? 3.0 : 1.0,
                   ),
                   boxShadow: focused
                       ? [
                           BoxShadow(
-                            color: (isSelected ? TVTheme.accent : Colors.white).withOpacity(0.35),
-                            blurRadius: 12,
-                            spreadRadius: 1,
-                          )
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                          BoxShadow(
+                            color: (isSelected ? TVTheme.accent : Colors.white).withValues(alpha: 0.2),
+                            blurRadius: 8,
+                            spreadRadius: 0,
+                          ),
                         ]
                       : [],
                 ),
@@ -884,15 +891,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: focused ? TVTheme.accent : Colors.white12,
-                    width: focused ? 2.0 : 1.0,
+                    width: focused ? 3.0 : 1.0,
                   ),
                   boxShadow: focused
                       ? [
                           BoxShadow(
-                            color: TVTheme.accent.withValues(alpha: 0.3),
-                            blurRadius: 14,
-                            spreadRadius: 1,
-                          )
+                            color: Colors.black.withValues(alpha: 0.6),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                          BoxShadow(
+                            color: TVTheme.accent.withValues(alpha: 0.25),
+                            blurRadius: 8,
+                            spreadRadius: 0,
+                          ),
                         ]
                       : [],
                 ),
@@ -1105,18 +1117,23 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: focused ? Colors.white : Colors.transparent,
-                    width: 2.0,
+                    width: 3.0,
                   ),
                   boxShadow: focused
                       ? [
                           BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                          BoxShadow(
                             color: (!isEnabled
-                                    ? Colors.white38
+                                    ? Colors.white
                                     : (isPrimary ? TVTheme.accent : Colors.white))
-                                .withValues(alpha: 0.45),
-                            blurRadius: 18,
-                            spreadRadius: 2,
-                          )
+                                .withValues(alpha: 0.22),
+                            blurRadius: 8,
+                            spreadRadius: 0,
+                          ),
                         ]
                       : [],
                 ),

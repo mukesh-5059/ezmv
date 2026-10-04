@@ -580,16 +580,16 @@ class _SearchScreenState extends State<SearchScreen> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: isFocused
-                        ? TVTheme.surfaceElevated
+                        ? TVTheme.accent.withValues(alpha: 0.2)
                         : (isSelected
-                            ? const Color(0xFF26181B)
-                            : TVTheme.surface),
+                            ? TVTheme.accent.withValues(alpha: 0.25)
+                            : TVTheme.surfaceElevated),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: isFocused
-                          ? Colors.white
+                          ? TVTheme.accent
                           : (isSelected ? TVTheme.accent : Colors.transparent),
-                      width: 2,
+                      width: isFocused ? 3.0 : 2.0,
                     ),
                   ),
                   child: Row(
@@ -598,12 +598,12 @@ class _SearchScreenState extends State<SearchScreen> {
                         width: 36,
                         height: 36,
                         decoration: BoxDecoration(
-                          color: isSelected ? TVTheme.accent : TVTheme.surfaceElevated,
+                          color: isSelected ? TVTheme.accent : TVTheme.surface,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Icon(
                           Icons.movie,
-                          color: isSelected ? Colors.white : TVTheme.accent,
+                          color: isSelected ? Colors.black : TVTheme.accent,
                           size: 20,
                         ),
                       ),
@@ -679,16 +679,16 @@ class _SearchScreenState extends State<SearchScreen> {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: isFocused
-                          ? TVTheme.surfaceElevated
+                          ? TVTheme.accent.withValues(alpha: 0.2)
                           : (isSelected
-                              ? const Color(0xFF26181B)
-                              : TVTheme.surface),
+                              ? TVTheme.accent.withValues(alpha: 0.25)
+                              : TVTheme.surfaceElevated.withValues(alpha: 0.6)),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: isFocused
-                            ? Colors.white
+                            ? TVTheme.accent
                             : (isSelected ? TVTheme.accent : Colors.transparent),
-                        width: 2,
+                        width: isFocused ? 3.0 : 2.0,
                       ),
                     ),
                     child: Column(
@@ -702,7 +702,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  color: isFocused ? Colors.white : (isSelected ? TVTheme.accent : TVTheme.textPrimary),
+                                  color: isFocused ? TVTheme.accent : TVTheme.textPrimary,
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
                                 ),

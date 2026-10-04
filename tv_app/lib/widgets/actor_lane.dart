@@ -47,7 +47,7 @@ class ActorLane extends StatelessWidget {
               ),
             ),
             SizedBox(
-              height: 145,
+              height: 180,
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -143,31 +143,31 @@ class _ActorCardItemState extends State<_ActorCardItem> {
             duration: const Duration(milliseconds: 150),
             curve: Curves.easeOutCubic,
             child: SizedBox(
-              width: 96,
+              width: 110,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
-                    width: 78,
-                    height: 78,
+                    width: 92,
+                    height: 92,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: _isFocused ? TVTheme.accent : Colors.white24,
-                        width: _isFocused ? 2.5 : 1.0,
+                        width: _isFocused ? 3.0 : 1.0,
                       ),
                       boxShadow: _isFocused
                           ? [
                               BoxShadow(
-                                color: TVTheme.accent.withValues(alpha: 0.5),
-                                blurRadius: 16,
-                                spreadRadius: 2,
+                                color: TVTheme.accent.withValues(alpha: 0.25),
+                                blurRadius: 10,
+                                spreadRadius: 1,
                               ),
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.7),
-                                blurRadius: 8,
-                                offset: const Offset(0, 4),
+                                color: Colors.black.withValues(alpha: 0.8),
+                                blurRadius: 14,
+                                offset: const Offset(0, 6),
                               ),
                             ]
                           : [
@@ -188,13 +188,13 @@ class _ActorCardItemState extends State<_ActorCardItem> {
                                 errorBuilder: (_, __, ___) => const Icon(
                                   Icons.person,
                                   color: Colors.white54,
-                                  size: 38,
+                                  size: 44,
                                 ),
                               )
                             : const Icon(
                                 Icons.person,
                                 color: Colors.white54,
-                                size: 38,
+                                size: 44,
                               ),
                       ),
                     ),
@@ -204,7 +204,7 @@ class _ActorCardItemState extends State<_ActorCardItem> {
                     actor.name,
                     style: TextStyle(
                       color: _isFocused ? Colors.white : Colors.white70,
-                      fontSize: 13,
+                      fontSize: 14,
                       fontWeight: _isFocused ? FontWeight.bold : FontWeight.w500,
                     ),
                     maxLines: 1,

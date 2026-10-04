@@ -26,7 +26,7 @@ class CastCarousel extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         SizedBox(
-          height: 145,
+          height: 180,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
@@ -102,29 +102,40 @@ class _CastCardState extends State<_CastCard> {
             scale: _isFocused ? 1.08 : 1.0,
             duration: const Duration(milliseconds: 140),
             child: SizedBox(
-              width: 88,
+              width: 110,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 140),
-                    width: 72,
-                    height: 72,
+                    width: 92,
+                    height: 92,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: _isFocused ? TVTheme.accent : Colors.transparent,
-                        width: 2.5,
+                        width: 3.0,
                       ),
                       boxShadow: _isFocused
                           ? [
                               BoxShadow(
-                                color: TVTheme.accent.withValues(alpha: 0.5),
+                                color: TVTheme.accent.withValues(alpha: 0.25),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.8),
                                 blurRadius: 14,
-                                spreadRadius: 2,
+                                offset: const Offset(0, 6),
                               ),
                             ]
-                          : [],
+                          : [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.4),
+                                blurRadius: 6,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                     ),
                     child: ClipOval(
                       child: Container(
@@ -136,13 +147,13 @@ class _CastCardState extends State<_CastCard> {
                                 errorBuilder: (_, __, ___) => const Icon(
                                   Icons.person,
                                   color: Colors.white54,
-                                  size: 36,
+                                  size: 44,
                                 ),
                               )
                             : const Icon(
                                 Icons.person,
                                 color: Colors.white54,
-                                size: 36,
+                                size: 44,
                               ),
                       ),
                     ),
@@ -152,7 +163,7 @@ class _CastCardState extends State<_CastCard> {
                     member.name,
                     style: TextStyle(
                       color: _isFocused ? Colors.white : Colors.white70,
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: _isFocused ? FontWeight.bold : FontWeight.w600,
                     ),
                     maxLines: 1,
@@ -164,7 +175,7 @@ class _CastCardState extends State<_CastCard> {
                     member.character,
                     style: const TextStyle(
                       color: TVTheme.textSecondary,
-                      fontSize: 10,
+                      fontSize: 11,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
