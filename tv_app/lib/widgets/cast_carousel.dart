@@ -73,7 +73,17 @@ class _CastCardState extends State<_CastCard> {
     return Padding(
       padding: const EdgeInsets.only(right: 16.0),
       child: Focus(
-        onFocusChange: (focused) => setState(() => _isFocused = focused),
+        onFocusChange: (focused) {
+          setState(() => _isFocused = focused);
+          if (focused) {
+            Scrollable.ensureVisible(
+              context,
+              alignment: 0.5,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+            );
+          }
+        },
         onKey: (node, event) {
           if (event is RawKeyDownEvent) {
             if (event.logicalKey == LogicalKeyboardKey.select ||

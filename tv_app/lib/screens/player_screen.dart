@@ -70,6 +70,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Timer? _progressSaveTimer;
   Timer? _osdHideTimer;
+  Timer? _seekCommitTimer;
+  DateTime? _seekStartTime;
+  Duration? _pendingSeekPosition;
+  int _accumulatedSeekDelta = 0;
   final List<StreamSubscription> _subscriptions = [];
   String? _errorMessage;
   bool _isExiting = false;
@@ -421,8 +425,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         key == LogicalKeyboardKey.space ||
         key == LogicalKeyboardKey.mediaPlayPause) {
       if (event is KeyRepeatEvent) return KeyEventResult.handled;
+      final wasPlaying = _isPlaying;
       _player.playOrPause();
-      if (_player.state.playing) {
+      if (wasPlaying) {
         _hudController.triggerPause();
       } else {
         _hudController.triggerPlay();
@@ -439,14 +444,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
       if (!_showOsd) {
-        _seekDelta(-10);
+        _seekDelta(-1);
         return KeyEventResult.handled;
       }
     }
 
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.mediaFastForward) {
       if (!_showOsd) {
-        _seekDelta(10);
+        _seekDelta(1);
         return KeyEventResult.handled;
       }
     }
@@ -462,18 +467,49 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return KeyEventResult.ignored;
   }
 
-  void _seekDelta(int seconds) {
-    final current = _player.state.position;
+  int _getAcceleratedStep() {
+    if (_seekStartTime == null) {
+      _seekStartTime = DateTime.now();
+      return 10;
+    }
+    final elapsedMs = DateTime.now().difference(_seekStartTime!).inMilliseconds;
+    if (elapsedMs < 3000) {
+      return 10;
+    } else if (elapsedMs < 6000) {
+      return 30;
+    } else if (elapsedMs < 9000) {
+      return 60;
+    } else {
+      return 180;
+    }
+  }
+
+  void _seekDelta(int direction) {
+    final step = _getAcceleratedStep() * direction;
+    _accumulatedSeekDelta += step;
+
+    final current = _pendingSeekPosition ?? _player.state.position;
     final duration = _player.state.duration;
-    final target = current + Duration(seconds: seconds);
+    final target = current + Duration(seconds: step);
     final clamped = target < Duration.zero
         ? Duration.zero
         : (duration > Duration.zero && target > duration ? duration : target);
-    _player.seek(clamped);
+
+    _pendingSeekPosition = clamped;
     _hudController.triggerSeek(
-      deltaSeconds: seconds,
+      deltaSeconds: _accumulatedSeekDelta,
       targetTime: formatDuration(clamped.inSeconds),
     );
+
+    _seekCommitTimer?.cancel();
+    _seekCommitTimer = Timer(const Duration(milliseconds: 250), () {
+      if (_pendingSeekPosition != null) {
+        _player.seek(_pendingSeekPosition!);
+        _pendingSeekPosition = null;
+        _seekStartTime = null;
+        _accumulatedSeekDelta = 0;
+      }
+    });
   }
 
   void _exitPlayer() {
@@ -489,6 +525,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _osdHideTimer?.cancel();
     _progressSaveTimer?.cancel();
+    _seekCommitTimer?.cancel();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
@@ -685,7 +722,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   iconSize: 28,
                   onTap: () {
                     _resetOsdTimer();
-                    _seekDelta(-10);
+                    _seekDelta(-1);
                   },
                 ),
                 const SizedBox(width: 24),
@@ -698,7 +735,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   isPrimary: true,
                   onTap: () {
                     _resetOsdTimer();
+                    final wasPlaying = _isPlaying;
                     _player.playOrPause();
+                    if (wasPlaying) {
+                      _hudController.triggerPause();
+                    } else {
+                      _hudController.triggerPlay();
+                    }
                   },
                 ),
                 const SizedBox(width: 24),
@@ -710,7 +753,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   iconSize: 28,
                   onTap: () {
                     _resetOsdTimer();
-                    _seekDelta(10);
+                    _seekDelta(1);
                   },
                 ),
               ],
@@ -725,17 +768,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 _resetOsdTimer();
                 if (event is KeyDownEvent || event is KeyRepeatEvent) {
                   if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                    _seekDelta(-10);
+                    _seekDelta(-1);
                     return KeyEventResult.handled;
                   }
                   if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                    _seekDelta(10);
+                    _seekDelta(1);
                     return KeyEventResult.handled;
                   }
                   if (event.logicalKey == LogicalKeyboardKey.select ||
                       event.logicalKey == LogicalKeyboardKey.enter ||
                       event.logicalKey == LogicalKeyboardKey.space) {
+                    final wasPlaying = _isPlaying;
                     _player.playOrPause();
+                    if (wasPlaying) {
+                      _hudController.triggerPause();
+                    } else {
+                      _hudController.triggerPlay();
+                    }
                     return KeyEventResult.handled;
                   }
                 }

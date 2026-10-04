@@ -12,6 +12,7 @@ class StreamSelector extends StatelessWidget {
   final void Function(Map<String, dynamic> stream) onStreamSelected;
   final FocusNode firstStreamFocusNode;
   final FocusNode retryFocusNode;
+  final VoidCallback? onSectionFocused;
 
   const StreamSelector({
     super.key,
@@ -24,6 +25,7 @@ class StreamSelector extends StatelessWidget {
     required this.onStreamSelected,
     required this.firstStreamFocusNode,
     required this.retryFocusNode,
+    this.onSectionFocused,
   });
 
   @override
@@ -160,6 +162,7 @@ class StreamSelector extends StatelessWidget {
                   stream: stream,
                   focusNode: index == 0 ? firstStreamFocusNode : null,
                   onSelect: () => onStreamSelected(stream),
+                  onFocused: onSectionFocused,
                 );
               },
             ),
@@ -173,12 +176,14 @@ class _StreamItemButton extends StatefulWidget {
   final Map<String, dynamic> stream;
   final FocusNode? focusNode;
   final VoidCallback onSelect;
+  final VoidCallback? onFocused;
 
   const _StreamItemButton({
     super.key,
     required this.stream,
     this.focusNode,
     required this.onSelect,
+    this.onFocused,
   });
 
   @override
@@ -215,7 +220,18 @@ class _StreamItemButtonState extends State<_StreamItemButton> {
       padding: const EdgeInsets.only(right: 14.0),
       child: Focus(
         focusNode: widget.focusNode,
-        onFocusChange: (focused) => setState(() => _isFocused = focused),
+        onFocusChange: (focused) {
+          setState(() => _isFocused = focused);
+          if (focused) {
+            Scrollable.ensureVisible(
+              context,
+              alignment: 0.5,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+            );
+            widget.onFocused?.call();
+          }
+        },
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent &&
               (event.logicalKey == LogicalKeyboardKey.select ||

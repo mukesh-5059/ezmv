@@ -10,6 +10,22 @@ enum HudAction {
   info,
 }
 
+String formatSeekDelta(int totalSeconds) {
+  final isPositive = totalSeconds >= 0;
+  final absSec = totalSeconds.abs();
+  final sign = isPositive ? '+' : '-';
+
+  final hours = absSec ~/ 3600;
+  final mins = (absSec % 3600) ~/ 60;
+  final secs = absSec % 60;
+
+  if (hours > 0) {
+    return '$sign$hours:${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  } else {
+    return '$sign$mins:${secs.toString().padLeft(2, '0')}';
+  }
+}
+
 class PlayerHud extends StatefulWidget {
   final PlayerHudController controller;
 
@@ -44,11 +60,7 @@ class PlayerHudController extends ChangeNotifier {
   }
 
   void triggerSeek({required int deltaSeconds, required String targetTime}) {
-    if (currentAction == HudAction.seekForward || currentAction == HudAction.seekBackward) {
-      seekDelta += deltaSeconds;
-    } else {
-      seekDelta = deltaSeconds;
-    }
+    seekDelta = deltaSeconds;
     currentAction = seekDelta >= 0 ? HudAction.seekForward : HudAction.seekBackward;
     targetTimeStr = targetTime;
     _scheduleDismiss(durationMs: 1200);
@@ -115,7 +127,7 @@ class _PlayerHudState extends State<PlayerHud> {
         content = Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.65),
+            color: Colors.black.withValues(alpha: 0.65),
             shape: BoxShape.circle,
           ),
           child: const Icon(Icons.play_arrow, color: Colors.white, size: 56),
@@ -125,7 +137,7 @@ class _PlayerHudState extends State<PlayerHud> {
         content = Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.65),
+            color: Colors.black.withValues(alpha: 0.65),
             shape: BoxShape.circle,
           ),
           child: const Icon(Icons.pause, color: Colors.white, size: 56),
@@ -134,11 +146,10 @@ class _PlayerHudState extends State<PlayerHud> {
       case HudAction.seekForward:
       case HudAction.seekBackward:
         final isForward = widget.controller.seekDelta >= 0;
-        final deltaAbs = widget.controller.seekDelta.abs();
         content = Container(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.75),
+            color: Colors.black.withValues(alpha: 0.75),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white24, width: 1),
           ),
@@ -152,7 +163,7 @@ class _PlayerHudState extends State<PlayerHud> {
               ),
               const SizedBox(width: 12),
               Text(
-                '${isForward ? '+' : '-'}${deltaAbs}s',
+                formatSeekDelta(widget.controller.seekDelta),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 22,
@@ -177,7 +188,7 @@ class _PlayerHudState extends State<PlayerHud> {
         content = Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.75),
+            color: Colors.black.withValues(alpha: 0.75),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: Colors.white24, width: 1),
           ),
@@ -202,7 +213,7 @@ class _PlayerHudState extends State<PlayerHud> {
         content = Container(
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.85),
+            color: Colors.black.withValues(alpha: 0.85),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white30, width: 1.5),
           ),

@@ -57,10 +57,29 @@ class _DetailsScreenState extends State<DetailsScreen> {
   final FocusNode _startOverFocusNode = FocusNode();
   final FocusNode _firstStreamFocusNode = FocusNode();
   final FocusNode _retryFocusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _episodesSectionKey = GlobalKey();
+  final GlobalKey _streamsSectionKey = GlobalKey();
+
+  void _scrollToTop() {
+    if (_scrollController.hasClients && _scrollController.offset > 0) {
+      _scrollController.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _playResumeFocusNode.addListener(() {
+      if (_playResumeFocusNode.hasFocus) _scrollToTop();
+    });
+    _startOverFocusNode.addListener(() {
+      if (_startOverFocusNode.hasFocus) _scrollToTop();
+    });
     _fetchDetails();
     _loadProgress();
     if (!widget.movie.isTv) {
@@ -75,6 +94,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     _startOverFocusNode.dispose();
     _firstStreamFocusNode.dispose();
     _retryFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -420,6 +440,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
         elevation: 0,
         leading: const BackButton(color: Colors.white),
       ),
@@ -474,6 +496,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           Positioned.fill(
             child: SafeArea(
               child: SingleChildScrollView(
+                controller: _scrollController,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20.0),
                   child: Row(
@@ -576,42 +599,47 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               const SizedBox(height: 24),
                             ] else ...[
                               // Primary In-Line Play / Resume Action Row (Movie Only)
-                              if (_streams.isNotEmpty) ...[
-                                Row(
-                                  children: [
-                                    if (_savedProgressSeconds > 15) ...[
-                                      _buildActionButton(
-                                        icon: Icons.play_arrow_rounded,
-                                        label: 'Resume (${_formatTime(_savedProgressSeconds)})',
-                                        focusNode: _playResumeFocusNode,
-                                        isPrimary: true,
-                                        onPressed: () => _handlePlayOrResume(initialSeconds: _savedProgressSeconds),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      _buildActionButton(
-                                        icon: Icons.replay_rounded,
-                                        label: 'Start Over',
-                                        focusNode: _startOverFocusNode,
-                                        isPrimary: false,
-                                        onPressed: () async {
-                                          await LocalStorage.clearProgress(widget.movie.tmdbId);
-                                          setState(() => _savedProgressSeconds = 0);
-                                          _handlePlayOrResume(initialSeconds: 0);
-                                        },
-                                      ),
-                                    ] else ...[
-                                      _buildActionButton(
-                                        icon: Icons.play_arrow_rounded,
-                                        label: 'Play',
-                                        focusNode: _playResumeFocusNode,
-                                        isPrimary: true,
-                                        onPressed: () => _handlePlayOrResume(initialSeconds: 0),
-                                      ),
-                                    ],
+                              Row(
+                                children: [
+                                  if (_savedProgressSeconds > 15) ...[
+                                    _buildActionButton(
+                                      icon: _isLoadingStreams ? Icons.hourglass_top_rounded : Icons.play_arrow_rounded,
+                                      label: _isLoadingStreams
+                                          ? 'Resume (Loading...)'
+                                          : (_streams.isEmpty ? 'Resume (No Streams)' : 'Resume (${_formatTime(_savedProgressSeconds)})'),
+                                      focusNode: _playResumeFocusNode,
+                                      isPrimary: true,
+                                      isEnabled: !_isLoadingStreams && _streams.isNotEmpty,
+                                      onPressed: () => _handlePlayOrResume(initialSeconds: _savedProgressSeconds),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    _buildActionButton(
+                                      icon: Icons.replay_rounded,
+                                      label: 'Start Over',
+                                      focusNode: _startOverFocusNode,
+                                      isPrimary: false,
+                                      isEnabled: !_isLoadingStreams && _streams.isNotEmpty,
+                                      onPressed: () async {
+                                        await LocalStorage.clearProgress(widget.movie.tmdbId);
+                                        setState(() => _savedProgressSeconds = 0);
+                                        _handlePlayOrResume(initialSeconds: 0);
+                                      },
+                                    ),
+                                  ] else ...[
+                                    _buildActionButton(
+                                      icon: _isLoadingStreams ? Icons.hourglass_top_rounded : Icons.play_arrow_rounded,
+                                      label: _isLoadingStreams
+                                          ? 'Play (Loading...)'
+                                          : (_streams.isEmpty ? 'Play (No Streams)' : 'Play'),
+                                      focusNode: _playResumeFocusNode,
+                                      isPrimary: true,
+                                      isEnabled: !_isLoadingStreams && _streams.isNotEmpty,
+                                      onPressed: () => _handlePlayOrResume(initialSeconds: 0),
+                                    ),
                                   ],
-                                ),
-                                const SizedBox(height: 24),
-                              ],
+                                ],
+                              ),
+                              const SizedBox(height: 24),
                             ],
                             if (_details != null && _details!.cast.isNotEmpty) ...[
                               CastCarousel(cast: _details!.cast),
@@ -621,6 +649,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               _buildTvSeasonsAndEpisodesSection()
                             else
                               StreamSelector(
+                                key: _streamsSectionKey,
                                 streams: _streams,
                                 isLoading: _isLoadingStreams,
                                 statusMessage: _statusMessage,
@@ -630,6 +659,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 onStreamSelected: (stream) => _handleStreamSelected(stream),
                                 firstStreamFocusNode: _firstStreamFocusNode,
                                 retryFocusNode: _retryFocusNode,
+                                onSectionFocused: () {
+                                  if (_streamsSectionKey.currentContext != null) {
+                                    Scrollable.ensureVisible(
+                                      _streamsSectionKey.currentContext!,
+                                      alignment: 0.25,
+                                      duration: const Duration(milliseconds: 280),
+                                      curve: Curves.easeOutCubic,
+                                    );
+                                  }
+                                },
                               ),
                           ],
                         ),
@@ -648,81 +687,97 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Widget _buildTvSeasonsAndEpisodesSection() {
     final seasons = _details?.seasons ?? [];
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 12),
-        const Text(
-          'Episodes',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-        ),
-        const SizedBox(height: 14),
-
-        // Season Chips Selector
-        if (seasons.isNotEmpty) ...[
-          SizedBox(
-            height: 44,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: seasons.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (context, index) {
-                final season = seasons[index];
-                final isSelected = season.seasonNumber == _selectedSeasonNumber;
-                return _buildSeasonChip(season, isSelected);
-              },
-            ),
+    return Container(
+      key: _episodesSectionKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 12),
+          const Text(
+            'Episodes',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
           ),
-          const SizedBox(height: 20),
-        ],
+          const SizedBox(height: 14),
 
-        // Episodes Container / Loader
-        if (_isLoadingSeason)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 32.0),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: TVTheme.accent),
-                  ),
-                  SizedBox(width: 14),
-                  Text('Loading episodes...', style: TextStyle(color: Colors.white70, fontSize: 14)),
-                ],
+          // Season Chips Selector
+          if (seasons.isNotEmpty) ...[
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: seasons.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final season = seasons[index];
+                  final isSelected = season.seasonNumber == _selectedSeasonNumber;
+                  return _buildSeasonChip(season, isSelected);
+                },
               ),
             ),
-          )
-        else if (_currentSeasonData == null || _currentSeasonData!.episodes.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24.0),
-            child: Text(
-              'No episodes found for Season $_selectedSeasonNumber.',
-              style: const TextStyle(color: Colors.white60, fontSize: 14),
+            const SizedBox(height: 20),
+          ],
+
+          // Episodes Container / Loader
+          if (_isLoadingSeason)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32.0),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: TVTheme.accent),
+                    ),
+                    SizedBox(width: 14),
+                    Text('Loading episodes...', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  ],
+                ),
+              ),
+            )
+          else if (_currentSeasonData == null || _currentSeasonData!.episodes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24.0),
+              child: Text(
+                'No episodes found for Season $_selectedSeasonNumber.',
+                style: const TextStyle(color: Colors.white60, fontSize: 14),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _currentSeasonData!.episodes.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final ep = _currentSeasonData!.episodes[index];
+                return _buildEpisodeTile(ep);
+              },
             ),
-          )
-        else
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _currentSeasonData!.episodes.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final ep = _currentSeasonData!.episodes[index];
-              return _buildEpisodeTile(ep);
-            },
-          ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _buildSeasonChip(TvSeason season, bool isSelected) {
     return Focus(
       onFocusChange: (focused) {
-        if (focused && _selectedSeasonNumber != season.seasonNumber) {
-          _fetchSeasonEpisodes(season.seasonNumber);
+        if (focused) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+          );
+          if (_episodesSectionKey.currentContext != null) {
+            Scrollable.ensureVisible(
+              _episodesSectionKey.currentContext!,
+              alignment: 0.05,
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+            );
+          }
         }
       },
       onKeyEvent: (node, event) {
@@ -793,6 +848,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final progressSecs = _episodeProgress[episode.episodeNumber] ?? 0;
 
     return Focus(
+      onFocusChange: (focused) {
+        if (focused) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.45,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+          );
+        }
+      },
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
             (event.logicalKey == LogicalKeyboardKey.select ||
@@ -998,18 +1063,26 @@ class _DetailsScreenState extends State<DetailsScreen> {
     required FocusNode focusNode,
     required bool isPrimary,
     required VoidCallback onPressed,
+    bool isEnabled = true,
   }) {
     return Focus(
       focusNode: focusNode,
       autofocus: isPrimary,
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          onPressed();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            if (isEnabled) {
+              onPressed();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            _scrollToTop();
+            return KeyEventResult.handled;
+          }
         }
         return KeyEventResult.ignored;
       },
@@ -1017,16 +1090,18 @@ class _DetailsScreenState extends State<DetailsScreen> {
         builder: (context) {
           final focused = Focus.of(context).hasFocus;
           return GestureDetector(
-            onTap: onPressed,
+            onTap: isEnabled ? onPressed : null,
             child: AnimatedScale(
               scale: focused ? 1.05 : 1.0,
               duration: const Duration(milliseconds: 140),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 decoration: BoxDecoration(
-                  color: isPrimary
-                      ? (focused ? Colors.white : TVTheme.accent)
-                      : (focused ? Colors.white24 : Colors.white10),
+                  color: !isEnabled
+                      ? (focused ? Colors.white24 : Colors.white10)
+                      : (isPrimary
+                          ? (focused ? Colors.white : TVTheme.accent)
+                          : (focused ? Colors.white24 : Colors.white10)),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: focused ? Colors.white : Colors.transparent,
@@ -1035,7 +1110,10 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   boxShadow: focused
                       ? [
                           BoxShadow(
-                            color: (isPrimary ? TVTheme.accent : Colors.white).withOpacity(0.45),
+                            color: (!isEnabled
+                                    ? Colors.white38
+                                    : (isPrimary ? TVTheme.accent : Colors.white))
+                                .withValues(alpha: 0.45),
                             blurRadius: 18,
                             spreadRadius: 2,
                           )
@@ -1048,9 +1126,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
                     Icon(
                       icon,
                       size: 20,
-                      color: isPrimary
-                          ? (focused ? Colors.black : Colors.white)
-                          : Colors.white,
+                      color: !isEnabled
+                          ? (focused ? Colors.white70 : Colors.white38)
+                          : (isPrimary
+                              ? (focused ? Colors.black : Colors.white)
+                              : Colors.white),
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -1058,9 +1138,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
-                        color: isPrimary
-                            ? (focused ? Colors.black : Colors.white)
-                            : Colors.white,
+                        color: !isEnabled
+                            ? (focused ? Colors.white70 : Colors.white38)
+                            : (isPrimary
+                                ? (focused ? Colors.black : Colors.white)
+                                : Colors.white),
                       ),
                     ),
                   ],

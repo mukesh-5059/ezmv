@@ -29,6 +29,13 @@ class TVTheme {
         bodyMedium: TextStyle(fontSize: 14, color: textSecondary, height: 1.3),
         bodySmall: TextStyle(fontSize: 12, color: textMuted),
       ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        elevation: 0,
+        iconTheme: IconThemeData(color: Colors.white),
+      ),
       useMaterial3: true,
     );
   }
