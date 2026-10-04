@@ -118,13 +118,7 @@ class MovieLane extends StatelessWidget {
                                 if (node.context != null) {
                                   Scrollable.ensureVisible(
                                     node.context!,
-                                    duration: const Duration(milliseconds: 300),
-                                    alignment: 0.5,
-                                    curve: Curves.easeInOut,
-                                  );
-                                  Scrollable.ensureVisible(
-                                    rowContext,
-                                    duration: const Duration(milliseconds: 300),
+                                    duration: const Duration(milliseconds: 250),
                                     alignment: 0.5,
                                     curve: Curves.easeInOut,
                                   );
@@ -212,13 +206,7 @@ class MovieLane extends StatelessWidget {
                               if (node.context != null) {
                                 Scrollable.ensureVisible(
                                   node.context!,
-                                  duration: const Duration(milliseconds: 300),
-                                  alignment: 0.5,
-                                  curve: Curves.easeInOut,
-                                );
-                                Scrollable.ensureVisible(
-                                  rowContext,
-                                  duration: const Duration(milliseconds: 300),
+                                  duration: const Duration(milliseconds: 250),
                                   alignment: 0.5,
                                   curve: Curves.easeInOut,
                                 );

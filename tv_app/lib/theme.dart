@@ -7,8 +7,8 @@ class TVTheme {
   static const Color accent = Color(0xFFE50914);
   static const Color accentGlow = Color(0xFFFF3B30);
   static const Color textPrimary = Colors.white;
-  static const Color textSecondary = Color(0xFFA0A5B8);
-  static const Color textMuted = Color(0xFF6B7280);
+  static const Color textSecondary = Color(0xFFC0C5D8);
+  static const Color textMuted = Color(0xFF888E9E);
 
   static ThemeData get darkTheme {
     return ThemeData(

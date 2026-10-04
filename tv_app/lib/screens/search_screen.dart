@@ -20,7 +20,30 @@ class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _gridScrollController = ScrollController();
   final ScrollController _listsScrollController = ScrollController();
-  final FocusNode _textFieldFocusNode = FocusNode();
+  late final FocusNode _textFieldFocusNode = FocusNode(
+    onKeyEvent: (node, event) {
+      if (event is KeyDownEvent) {
+        if (event.logicalKey == LogicalKeyboardKey.escape ||
+            event.logicalKey == LogicalKeyboardKey.goBack) {
+          _submitSearchFocusNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _submitSearchFocusNode.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          if (_searchController.text.isNotEmpty && _clearSearchFocusNode.canRequestFocus) {
+            _clearSearchFocusNode.requestFocus();
+          } else {
+            _submitSearchFocusNode.requestFocus();
+          }
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.ignored;
+    },
+  );
   final FocusNode _clearSearchFocusNode = FocusNode();
   final FocusNode _submitSearchFocusNode = FocusNode();
 
@@ -70,6 +93,13 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() => _history = historyList);
     }
     await _executeSearch(resetPage: true);
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _submitSearchFocusNode.canRequestFocus) {
+          _submitSearchFocusNode.requestFocus();
+        }
+      });
+    }
   }
 
   void _onQuerySubmitted(String query) {
@@ -82,6 +112,13 @@ class _SearchScreenState extends State<SearchScreen> {
       });
     }
     _executeSearch(resetPage: true);
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _submitSearchFocusNode.canRequestFocus) {
+          _submitSearchFocusNode.requestFocus();
+        }
+      });
+    }
   }
 
   Future<void> _executeSearch({bool resetPage = false}) async {
@@ -193,7 +230,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void _clearSearch() {
     _searchController.clear();
     _executeSearch(resetPage: true);
-    _textFieldFocusNode.requestFocus();
+    _submitSearchFocusNode.requestFocus();
   }
 
   @override
@@ -375,60 +412,73 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildHistoryChip(String term) {
-    return Container(
-      margin: const EdgeInsets.only(right: 8),
-      child: FocusableActionDetector(
-        actions: {
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              _searchController.text = term;
-              _onQuerySubmitted(term);
-              return null;
+    return Builder(
+      builder: (chipContext) {
+        return Container(
+          margin: const EdgeInsets.only(right: 8),
+          child: FocusableActionDetector(
+            onFocusChange: (focused) {
+              if (focused) {
+                Scrollable.ensureVisible(
+                  chipContext,
+                  alignment: 0.5,
+                  duration: const Duration(milliseconds: 200),
+                );
+              }
             },
-          ),
-        },
-        child: Builder(
-          builder: (context) {
-            final isFocused = Focus.of(context).hasFocus;
-            return InkWell(
-              onTap: () {
-                _searchController.text = term;
-                _onQuerySubmitted(term);
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isFocused ? TVTheme.accent : TVTheme.surfaceElevated,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isFocused ? TVTheme.accent : Colors.transparent,
-                    width: 1.5,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.history,
-                      size: 13,
-                      color: isFocused ? Colors.black : TVTheme.textSecondary,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      term,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isFocused ? Colors.black : TVTheme.textPrimary,
-                        fontWeight: isFocused ? FontWeight.bold : FontWeight.normal,
+            actions: {
+              ActivateIntent: CallbackAction<ActivateIntent>(
+                onInvoke: (_) {
+                  _searchController.text = term;
+                  _onQuerySubmitted(term);
+                  return null;
+                },
+              ),
+            },
+            child: Builder(
+              builder: (context) {
+                final isFocused = Focus.of(context).hasFocus;
+                return InkWell(
+                  onTap: () {
+                    _searchController.text = term;
+                    _onQuerySubmitted(term);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isFocused ? TVTheme.accent : TVTheme.surfaceElevated,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isFocused ? TVTheme.accent : Colors.transparent,
+                        width: 1.5,
                       ),
                     ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.history,
+                          size: 13,
+                          color: isFocused ? Colors.black : TVTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          term,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isFocused ? Colors.black : TVTheme.textPrimary,
+                            fontWeight: isFocused ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 

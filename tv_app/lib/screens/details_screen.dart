@@ -128,12 +128,12 @@ class _DetailsScreenState extends State<DetailsScreen> {
             initialSeason = details.seasons.first.seasonNumber;
           }
         }
-        _fetchSeasonEpisodes(initialSeason);
+        _fetchSeasonEpisodes(initialSeason, autoFocusPlay: true);
       }
     }
   }
 
-  Future<void> _fetchSeasonEpisodes(int seasonNumber) async {
+  Future<void> _fetchSeasonEpisodes(int seasonNumber, {bool autoFocusPlay = false}) async {
     setState(() {
       _selectedSeasonNumber = seasonNumber;
       _isLoadingSeason = true;
@@ -146,6 +146,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
         _isLoadingSeason = false;
       });
       _loadCurrentSeasonProgress();
+      if (autoFocusPlay) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _playResumeFocusNode.canRequestFocus) {
+            _playResumeFocusNode.requestFocus();
+          }
+        });
+      }
     }
   }
 
@@ -713,13 +720,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   Widget _buildSeasonChip(TvSeason season, bool isSelected) {
     return Focus(
+      onFocusChange: (focused) {
+        if (focused && _selectedSeasonNumber != season.seasonNumber) {
+          _fetchSeasonEpisodes(season.seasonNumber);
+        }
+      },
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent &&
             (event.logicalKey == LogicalKeyboardKey.select ||
                 event.logicalKey == LogicalKeyboardKey.enter ||
                 event.logicalKey == LogicalKeyboardKey.numpadEnter ||
                 event.logicalKey == LogicalKeyboardKey.space)) {
-          _fetchSeasonEpisodes(season.seasonNumber);
+          if (_selectedSeasonNumber != season.seasonNumber) {
+            _fetchSeasonEpisodes(season.seasonNumber);
+          }
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -728,7 +742,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
         builder: (context) {
           final focused = Focus.of(context).hasFocus;
           return GestureDetector(
-            onTap: () => _fetchSeasonEpisodes(season.seasonNumber),
+            onTap: () {
+              if (_selectedSeasonNumber != season.seasonNumber) {
+                _fetchSeasonEpisodes(season.seasonNumber);
+              }
+            },
             child: AnimatedScale(
               scale: focused ? 1.05 : 1.0,
               duration: const Duration(milliseconds: 140),
@@ -806,7 +824,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   boxShadow: focused
                       ? [
                           BoxShadow(
-                            color: TVTheme.accent.withOpacity(0.3),
+                            color: TVTheme.accent.withValues(alpha: 0.3),
                             blurRadius: 14,
                             spreadRadius: 1,
                           )
@@ -843,7 +861,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.75),
+                                color: Colors.black.withValues(alpha: 0.75),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -926,9 +944,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: TVTheme.accent.withOpacity(0.2),
+                                    color: TVTheme.accent.withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: TVTheme.accent.withOpacity(0.6), width: 0.8),
+                                    border: Border.all(color: TVTheme.accent.withValues(alpha: 0.6), width: 0.8),
                                   ),
                                   child: Text(
                                     'Resume ${_formatTime(progressSecs)}',

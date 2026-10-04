@@ -391,7 +391,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _resetOsdTimer() {
     _osdHideTimer?.cancel();
-    _osdHideTimer = Timer(const Duration(milliseconds: 4500), () {
+    _osdHideTimer = Timer(const Duration(milliseconds: 6000), () {
       if (mounted && _showOsd) {
         _hideOsdControls();
       }
@@ -405,7 +405,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final key = event.logicalKey;
 
-    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+    if (key == LogicalKeyboardKey.escape) {
       if (_showOsd) {
         _hideOsdControls();
         return KeyEventResult.handled;
@@ -831,6 +831,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }) {
     return Focus(
       focusNode: focusNode,
+      onFocusChange: (focused) {
+        if (focused) _resetOsdTimer();
+      },
       onKeyEvent: (node, event) {
         _resetOsdTimer();
         if (event is KeyDownEvent &&

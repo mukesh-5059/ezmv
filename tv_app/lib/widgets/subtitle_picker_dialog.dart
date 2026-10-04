@@ -223,7 +223,7 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
                               ),
                               const Spacer(),
                               _MiniStepperButton(
-                                label: '−0.5s',
+                                label: '−',
                                 onPressed: () => _adjustDelay(-0.5),
                               ),
                               Padding(
@@ -238,7 +238,7 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
                                 ),
                               ),
                               _MiniStepperButton(
-                                label: '+0.5s',
+                                label: '+',
                                 onPressed: () => _adjustDelay(0.5),
                               ),
                               if (_delay != 0.0) ...[
@@ -360,10 +360,10 @@ class _MiniStepperButtonState extends State<_MiniStepperButton> {
         onTap: widget.onPressed,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: _isFocused ? TVTheme.accent : Colors.white.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(6),
+            color: _isFocused ? TVTheme.accent : Colors.white.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _isFocused ? Colors.white : Colors.white24,
               width: 1.5,
@@ -382,7 +382,7 @@ class _MiniStepperButtonState extends State<_MiniStepperButton> {
             widget.label,
             style: TextStyle(
               color: _isFocused ? Colors.white : Colors.white70,
-              fontSize: 12,
+              fontSize: 14,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -448,7 +448,7 @@ class _SubtitleOptionTileState extends State<_SubtitleOptionTile> {
             boxShadow: _isFocused
                 ? [
                     BoxShadow(
-                      color: TVTheme.accent.withOpacity(0.4),
+                      color: TVTheme.accent.withValues(alpha: 0.4),
                       blurRadius: 12,
                       spreadRadius: 1,
                     ),
