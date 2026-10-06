@@ -50,6 +50,12 @@ class LocalStorage {
     await prefs.setString(_historyKey, jsonStr);
   }
 
+  // Clear all history
+  static Future<void> clearHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_historyKey);
+  }
+
   // Helper key for progress and media identification
   static String mediaKey(int tmdbId, {String mediaType = 'movie', int? season, int? episode}) {
     if (mediaType.toLowerCase() == 'tv' && season != null && episode != null) {
@@ -144,6 +150,119 @@ class LocalStorage {
     await prefs.remove(_tvLastWatchedKey(tmdbId));
   }
 
+  // --- Watched / Completed State ---
+  static String _watchedKey(int tmdbId, {String mediaType = 'movie', int? season, int? episode}) =>
+      'watched_${mediaKey(tmdbId, mediaType: mediaType, season: season, episode: episode)}';
+
+  // Check if media is marked as watched
+  static Future<bool> isWatched(
+    int tmdbId, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _watchedKey(tmdbId, mediaType: mediaType, season: season, episode: episode);
+    return prefs.getBool(key) ?? false;
+  }
+
+  // Set watched state explicitly
+  static Future<void> setWatched(
+    int tmdbId,
+    bool watched, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _watchedKey(tmdbId, mediaType: mediaType, season: season, episode: episode);
+    await prefs.setBool(key, watched);
+  }
+
+  // Toggle watched state
+  static Future<bool> toggleWatched(
+    int tmdbId, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) async {
+    final current = await isWatched(tmdbId, mediaType: mediaType, season: season, episode: episode);
+    final next = !current;
+    await setWatched(tmdbId, next, mediaType: mediaType, season: season, episode: episode);
+    return next;
+  }
+
+  // Auto-mark watched based on playback progress
+  static Future<bool> checkAndAutoMarkWatched(
+    int tmdbId,
+    int currentSeconds,
+    int totalDurationSeconds, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) async {
+    if (totalDurationSeconds <= 60 || currentSeconds <= 0) return false;
+
+    final int remaining = totalDurationSeconds - currentSeconds;
+    final double progressRatio = currentSeconds / totalDurationSeconds;
+
+    // Rule: Mark as watched if within last 300 seconds (5 min) OR progress >= 92%
+    if (remaining <= 300 || progressRatio >= 0.92) {
+      final alreadyWatched = await isWatched(tmdbId, mediaType: mediaType, season: season, episode: episode);
+      if (!alreadyWatched) {
+        await setWatched(tmdbId, true, mediaType: mediaType, season: season, episode: episode);
+      }
+      // If played past 98% (last 30s), clear the resume timestamp so next playback starts fresh
+      if (remaining <= 30 || progressRatio >= 0.98) {
+        await clearProgress(tmdbId, mediaType: mediaType, season: season, episode: episode);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // Get set of watched episode numbers for a TV season
+  static Future<Set<int>> getWatchedEpisodes(
+    int tmdbId,
+    int season,
+    List<int> episodeNumbers,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final Set<int> watched = {};
+    for (final ep in episodeNumbers) {
+      final key = _watchedKey(tmdbId, mediaType: 'tv', season: season, episode: ep);
+      if (prefs.getBool(key) == true) {
+        watched.add(ep);
+      }
+    }
+    return watched;
+  }
+
+  // Check if an entire season is watched (all episodes must be completed)
+  static Future<bool> isSeasonWatched(
+    int tmdbId,
+    int season,
+    List<int> episodeNumbers,
+  ) async {
+    if (episodeNumbers.isEmpty) return false;
+    final watched = await getWatchedEpisodes(tmdbId, season, episodeNumbers);
+    return watched.length == episodeNumbers.length;
+  }
+
+  // Mark all episodes of a season as watched / unwatched
+  static Future<void> markSeasonWatched(
+    int tmdbId,
+    int season,
+    List<int> episodeNumbers,
+    bool watched,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final ep in episodeNumbers) {
+      final key = _watchedKey(tmdbId, mediaType: 'tv', season: season, episode: ep);
+      await prefs.setBool(key, watched);
+    }
+  }
+
   // Per-media Subtitle Choice
   static String _subChoiceKey(int tmdbId, {String mediaType = 'movie', int? season, int? episode}) =>
       'sub_choice_${mediaKey(tmdbId, mediaType: mediaType, season: season, episode: episode)}';
@@ -175,6 +294,14 @@ class LocalStorage {
     return prefs.getString(key);
   }
 
+  static Future<void> setSubtitleChoice(
+    int tmdbId,
+    String? subtitleUrl, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) => saveSubtitleChoice(tmdbId, subtitleUrl, mediaType: mediaType, season: season, episode: episode);
+
   // Per-media Subtitle Delay / Shift
   static String _subDelayKey(int tmdbId, {String mediaType = 'movie', int? season, int? episode}) =>
       'sub_delay_${mediaKey(tmdbId, mediaType: mediaType, season: season, episode: episode)}';
@@ -190,6 +317,14 @@ class LocalStorage {
     final key = _subDelayKey(tmdbId, mediaType: mediaType, season: season, episode: episode);
     await prefs.setDouble(key, delaySeconds);
   }
+
+  static Future<void> setSubtitleDelay(
+    int tmdbId,
+    double delaySeconds, {
+    String mediaType = 'movie',
+    int? season,
+    int? episode,
+  }) => saveSubtitleDelay(tmdbId, delaySeconds, mediaType: mediaType, season: season, episode: episode);
 
   static Future<double> getSubtitleDelay(
     int tmdbId, {
@@ -214,4 +349,6 @@ class LocalStorage {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_subFontSizeKey, size);
   }
+
+  static Future<void> setSubtitleFontSize(double size) => saveSubtitleFontSize(size);
 }

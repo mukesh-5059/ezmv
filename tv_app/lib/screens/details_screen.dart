@@ -45,6 +45,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
   bool _isLoadingSeason = false;
   Map<String, dynamic>? _tvLastWatched;
   Map<int, int> _episodeProgress = {};
+  bool _isMovieWatched = false;
+  Set<int> _watchedEpisodes = {};
+  Map<int, bool> _seasonWatchedMap = {};
 
   bool get _isTv => widget.movie.isTv || (_details?.isTv ?? false);
 
@@ -96,18 +99,39 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Future<void> _loadProgress() async {
     final pos = await LocalStorage.getProgress(widget.movie.tmdbId);
     final tvLast = await LocalStorage.getTvLastWatched(widget.movie.tmdbId);
+    final isWatched = await LocalStorage.isWatched(widget.movie.tmdbId, mediaType: widget.movie.mediaType);
     if (mounted) {
       setState(() {
         _savedProgressSeconds = pos;
         _tvLastWatched = tvLast;
+        _isMovieWatched = isWatched;
       });
       _loadCurrentSeasonProgress();
+      _checkSeasonsWatched();
+    }
+  }
+
+  Future<void> _checkSeasonsWatched() async {
+    if (_details == null || _details!.seasons.isEmpty) return;
+    final Map<int, bool> map = {};
+    for (final s in _details!.seasons) {
+      if (s.episodeCount > 0) {
+        final epList = List.generate(s.episodeCount, (i) => i + 1);
+        final isWatched = await LocalStorage.isSeasonWatched(widget.movie.tmdbId, s.seasonNumber, epList);
+        map[s.seasonNumber] = isWatched;
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _seasonWatchedMap = map;
+      });
     }
   }
 
   Future<void> _loadCurrentSeasonProgress() async {
     if (_currentSeasonData == null) return;
     final Map<int, int> progressMap = {};
+    final epNums = _currentSeasonData!.episodes.map((e) => e.episodeNumber).toList();
     for (final ep in _currentSeasonData!.episodes) {
       final p = await LocalStorage.getProgress(
         widget.movie.tmdbId,
@@ -119,9 +143,18 @@ class _DetailsScreenState extends State<DetailsScreen> {
         progressMap[ep.episodeNumber] = p;
       }
     }
+    final watched = await LocalStorage.getWatchedEpisodes(
+      widget.movie.tmdbId,
+      _selectedSeasonNumber,
+      epNums,
+    );
     if (mounted) {
       setState(() {
         _episodeProgress = progressMap;
+        _watchedEpisodes = watched;
+        if (epNums.isNotEmpty) {
+          _seasonWatchedMap[_selectedSeasonNumber] = (watched.length == epNums.length);
+        }
       });
     }
   }
@@ -132,6 +165,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       setState(() {
         _details = details;
       });
+      _checkSeasonsWatched();
 
       if (details.isTv || details.seasons.isNotEmpty) {
         int initialSeason = 1;
@@ -554,6 +588,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 _buildBadge(Icons.star, rating.toStringAsFixed(1), iconColor: Colors.amber),
                                 if (genreText.isNotEmpty)
                                   _buildBadge(Icons.movie_filter_outlined, genreText),
+                                if (!_isTv && _isMovieWatched)
+                                  _buildBadge(Icons.check_circle_rounded, 'Watched', iconColor: TVTheme.accent),
                               ],
                             ),
                             const SizedBox(height: 18),
@@ -758,6 +794,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   }
 
   Widget _buildSeasonChip(TvSeason season, bool isSelected) {
+    final isSeasonComplete = _seasonWatchedMap[season.seasonNumber] ?? false;
     return Focus(
       onFocusChange: (focused) {
         if (focused) {
@@ -828,15 +865,26 @@ class _DetailsScreenState extends State<DetailsScreen> {
                         ]
                       : [],
                 ),
-                child: Center(
-                  child: Text(
-                    season.name.isNotEmpty ? season.name : 'Season ${season.seasonNumber}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                      color: isSelected && focused ? Colors.black : Colors.white,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isSeasonComplete) ...[
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 14,
+                        color: isSelected ? (focused ? Colors.black : Colors.white) : TVTheme.accent,
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      season.name.isNotEmpty ? season.name : 'Season ${season.seasonNumber}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        color: isSelected && focused ? Colors.black : Colors.white,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
@@ -848,6 +896,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   Widget _buildEpisodeTile(TvEpisode episode) {
     final progressSecs = _episodeProgress[episode.episodeNumber] ?? 0;
+    final isEpisodeWatched = _watchedEpisodes.contains(episode.episodeNumber);
 
     return Focus(
       onFocusChange: (focused) {
@@ -946,6 +995,23 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               ),
                             ),
                           ),
+                          if (isEpisodeWatched)
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.75),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 14,
+                                  color: TVTheme.accent,
+                                ),
+                              ),
+                            ),
                           if (progressSecs > 15)
                             Positioned(
                               bottom: 0,
@@ -1009,6 +1075,32 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                           color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
                                     ),
                                   ],
+                                ),
+                              ],
+                              if (isEpisodeWatched) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: TVTheme.accent.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: TVTheme.accent.withValues(alpha: 0.6), width: 0.8),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.check_circle_rounded, size: 11, color: TVTheme.accent),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        'Watched',
+                                        style: TextStyle(
+                                          color: TVTheme.accent,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                               if (progressSecs > 15) ...[

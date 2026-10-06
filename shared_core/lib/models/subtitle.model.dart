@@ -44,6 +44,10 @@ class SubtitleTrackInfo {
     }
     return base;
   }
+
+  String get name => label;
+  bool get isExternal => url.isNotEmpty;
+  bool get isEnglish => code.toLowerCase().startsWith('en') || language.toLowerCase().contains('eng');
 }
 
 class SubtitleResponse {

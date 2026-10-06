@@ -355,7 +355,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final pos = _player.state.position;
     final dur = _player.state.duration;
     if (dur.inSeconds > 30) {
-      if (pos.inSeconds >= (dur.inSeconds * 0.95)) {
+      // Check & auto-mark watched (remaining <= 300s or progress >= 92%)
+      LocalStorage.checkAndAutoMarkWatched(
+        widget.tmdbId,
+        pos.inSeconds,
+        dur.inSeconds,
+        mediaType: widget.mediaType,
+        season: widget.season,
+        episode: widget.episode,
+      );
+
+      // Clear timestamp only at the very end (remaining <= 30s or progress >= 98%)
+      final remaining = dur.inSeconds - pos.inSeconds;
+      final progressRatio = pos.inSeconds / dur.inSeconds;
+      if (remaining <= 30 || progressRatio >= 0.98) {
         LocalStorage.clearProgress(
           widget.tmdbId,
           mediaType: widget.mediaType,

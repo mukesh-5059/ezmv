@@ -140,4 +140,7 @@ class MovieDetails {
     if (genres.isEmpty) return '';
     return genres.map((g) => g.name).join(' • ');
   }
+
+  String get year => releaseDate.isNotEmpty ? releaseDate.split('-')[0] : '';
+  String get releaseYear => year;
 }
