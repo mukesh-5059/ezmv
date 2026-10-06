@@ -30,6 +30,7 @@ class StreamSelectorBottomSheet extends StatefulWidget {
     return showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (context) => StreamSelectorBottomSheet(
         movie: movie,
@@ -149,17 +150,19 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
   Widget build(BuildContext context) {
     final displayTitle = widget.title ?? widget.movie.title;
 
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.75,
-      ),
-      decoration: const BoxDecoration(
-        color: MobileTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        decoration: const BoxDecoration(
+          color: MobileTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
           // Drag Handle
           const SizedBox(height: 10),
           Container(
@@ -232,8 +235,9 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildLoadingState() {
     return Padding(
@@ -292,7 +296,7 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
 
   Widget _buildStreamsList() {
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
       shrinkWrap: true,
       physics: const BouncingScrollPhysics(),
       itemCount: _streams.length,

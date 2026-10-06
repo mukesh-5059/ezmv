@@ -7,7 +7,8 @@ import 'package:shared_core/shared_core.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../theme.dart';
 import '../widgets/resume_dialog.dart';
-import '../widgets/subtitle_picker_sheet.dart';
+import '../widgets/subtitle_side_panel.dart';
+import '../widgets/subtitle_settings_side_panel.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String streamUrl;
@@ -52,6 +53,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isLoadingSubtitles = false;
   double _subtitleFontSize = 24.0;
   double _subtitleDelaySeconds = 0.0;
+  bool _isSpeedingUp = false;
+  final BoxFit _fitMode = BoxFit.contain;
+  final double _playbackRate = 1.0;
 
   Map<String, String> get _requestHeaders {
     return {
@@ -296,12 +300,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return '${minutes}m ${seconds.toString().padLeft(2, '0')}s';
   }
 
-  Future<void> _openSubtitleSheet() async {
-    final result = await SubtitlePickerSheet.show(
+  Future<void> _openSubtitleSidePanel() async {
+    final result = await SubtitleSidePanel.show(
       context: context,
       subtitles: _subtitles,
       selectedSubtitle: _selectedSubtitle,
       isLoading: _isLoadingSubtitles,
+    );
+
+    if (result != null) {
+      if (result.isOff) {
+        _disableSubtitles();
+      } else if (result.track != null) {
+        _applySubtitleTrack(result.track!);
+      }
+    }
+  }
+
+  Future<void> _openSubtitleSettingsSidePanel() async {
+    await SubtitleSettingsSidePanel.show(
+      context: context,
       initialFontSize: _subtitleFontSize,
       initialDelaySeconds: _subtitleDelaySeconds,
       onFontSizeChanged: (size) async {
@@ -325,14 +343,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         } catch (_) {}
       },
     );
-
-    if (result != null) {
-      if (result.isOff) {
-        _disableSubtitles();
-      } else if (result.track != null) {
-        _applySubtitleTrack(result.track!);
-      }
-    }
   }
 
   @override
@@ -402,7 +412,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 color: _selectedSubtitle != null ? MobileTheme.accent : Colors.white,
               ),
               tooltip: 'Subtitles',
-              onPressed: _openSubtitleSheet,
+              onPressed: _openSubtitleSidePanel,
+            ),
+            IconButton(
+              icon: const Icon(Icons.tune_rounded, color: Colors.white),
+              tooltip: 'Subtitle Settings',
+              onPressed: _openSubtitleSettingsSidePanel,
             ),
           ],
         ),
@@ -414,10 +429,64 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
         child: Stack(
           children: [
-            Video(
-              controller: _videoController,
-              controls: MaterialVideoControls,
+            GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onLongPressStart: (_) {
+                if (_player.state.playing) {
+                  _player.setRate(2.0);
+                  setState(() => _isSpeedingUp = true);
+                }
+              },
+              onLongPressEnd: (_) {
+                if (_isSpeedingUp) {
+                  _player.setRate(_playbackRate);
+                  setState(() => _isSpeedingUp = false);
+                }
+              },
+              onLongPressCancel: () {
+                if (_isSpeedingUp) {
+                  _player.setRate(_playbackRate);
+                  setState(() => _isSpeedingUp = false);
+                }
+              },
+              child: Video(
+                controller: _videoController,
+                controls: MaterialVideoControls,
+                fit: _fitMode,
+              ),
             ),
+            if (_isSpeedingUp)
+              Positioned(
+                top: 54,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.8),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white24, width: 0.8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.fast_forward_rounded, color: Colors.white, size: 16),
+                        SizedBox(width: 6),
+                        Text(
+                          '2X Speed',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             if (_errorMessage != null)
               Center(
                 child: Container(

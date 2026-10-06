@@ -8,6 +8,9 @@ class MovieLane extends StatelessWidget {
   final List<Movie> movies;
   final String? subtitle;
   final VoidCallback? onSeeAll;
+  final VoidCallback? onLoadMore;
+  final bool hasMore;
+  final bool isLoadingMore;
   final double cardWidth;
   final double cardHeight;
 
@@ -17,6 +20,9 @@ class MovieLane extends StatelessWidget {
     required this.movies,
     this.subtitle,
     this.onSeeAll,
+    this.onLoadMore,
+    this.hasMore = false,
+    this.isLoadingMore = false,
     this.cardWidth = 120,
     this.cardHeight = 180,
   });
@@ -80,20 +86,41 @@ class MovieLane extends StatelessWidget {
         // Horizontal Scrollable Cards List
         SizedBox(
           height: cardHeight + 42,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: movies.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 12),
-            itemBuilder: (context, index) {
-              final movie = movies[index];
-              return MovieCard(
-                movie: movie,
-                width: cardWidth,
-                height: cardHeight,
-              );
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) {
+              if (notification.metrics.pixels >= notification.metrics.maxScrollExtent - 150) {
+                if (hasMore && !isLoadingMore && onLoadMore != null) {
+                  onLoadMore!();
+                }
+              }
+              return false;
             },
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: movies.length + (hasMore || isLoadingMore ? 1 : 0),
+              separatorBuilder: (context, index) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                if (index >= movies.length) {
+                  return Container(
+                    width: 60,
+                    alignment: Alignment.center,
+                    child: const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
+                    ),
+                  );
+                }
+                final movie = movies[index];
+                return MovieCard(
+                  movie: movie,
+                  width: cardWidth,
+                  height: cardHeight,
+                );
+              },
+            ),
           ),
         ),
       ],

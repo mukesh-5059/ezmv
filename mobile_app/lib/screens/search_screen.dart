@@ -23,10 +23,12 @@ class _SearchScreenState extends State<SearchScreen> {
   List<Movie> _displayMovies = [];
 
   int _page = 1;
+  int _listPage = 1;
   bool _isLoading = false;
   bool _isLoadingListMovies = false;
   bool _isLoadingMore = false;
   bool _hasMore = true;
+  bool _directHasMore = true;
 
   @override
   void initState() {
@@ -66,7 +68,8 @@ class _SearchScreenState extends State<SearchScreen> {
         _displayMovies = results;
         _traktLists = traktLists;
         _isLoading = false;
-        _hasMore = results.isNotEmpty;
+        _hasMore = results.length >= 20;
+        _directHasMore = results.length >= 20;
       });
     }
   }
@@ -83,6 +86,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _isLoading = true;
       _selectedList = null;
       _page = 1;
+      _hasMore = true;
     });
 
     if (query.isNotEmpty) {
@@ -108,7 +112,8 @@ class _SearchScreenState extends State<SearchScreen> {
         _displayMovies = movies;
         _traktLists = lists;
         _isLoading = false;
-        _hasMore = movies.isNotEmpty;
+        _hasMore = movies.length >= 20;
+        _directHasMore = movies.length >= 20;
       });
     }
   }
@@ -117,27 +122,48 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_isLoadingMore || !_hasMore) return;
     setState(() => _isLoadingMore = true);
 
-    final nextPage = _page + 1;
-    final query = _searchController.text.trim();
+    if (_selectedList != null) {
+      final nextListPage = _listPage + 1;
+      final nextMovies = await ApiClient.getListItems(
+        listId: _selectedList!.id,
+        page: nextListPage,
+        limit: 20,
+      );
 
-    final nextMovies = await ApiClient.searchMovies(
-      query: query.isNotEmpty ? query : null,
-      page: nextPage,
-    );
-
-    if (mounted) {
-      setState(() {
-        _page = nextPage;
-        _isLoadingMore = false;
-        if (nextMovies.isEmpty) {
-          _hasMore = false;
-        } else {
-          _directMovies.addAll(nextMovies);
-          if (_selectedList == null) {
+      if (mounted) {
+        setState(() {
+          _listPage = nextListPage;
+          _isLoadingMore = false;
+          if (nextMovies.isEmpty || nextMovies.length < 20) {
+            _hasMore = false;
+          }
+          if (nextMovies.isNotEmpty) {
             _displayMovies.addAll(nextMovies);
           }
-        }
-      });
+        });
+      }
+    } else {
+      final nextPage = _page + 1;
+      final query = _searchController.text.trim();
+
+      final nextMovies = await ApiClient.searchMovies(
+        query: query.isNotEmpty ? query : null,
+        page: nextPage,
+      );
+
+      if (mounted) {
+        setState(() {
+          _page = nextPage;
+          _isLoadingMore = false;
+          final hasMoreNow = nextMovies.length >= 20;
+          _hasMore = hasMoreNow;
+          _directHasMore = hasMoreNow;
+          if (nextMovies.isNotEmpty) {
+            _directMovies.addAll(nextMovies);
+            _displayMovies.addAll(nextMovies);
+          }
+        });
+      }
     }
   }
 
@@ -147,21 +173,25 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _selectedList = null;
         _displayMovies = _directMovies;
+        _hasMore = _directHasMore;
       });
       return;
     }
 
     setState(() {
       _selectedList = list;
+      _listPage = 1;
+      _hasMore = true;
       _isLoadingListMovies = true;
     });
 
-    final listMovies = await ApiClient.getListItems(listId: list.id);
+    final listMovies = await ApiClient.getListItems(listId: list.id, page: 1, limit: 20);
 
     if (mounted) {
       setState(() {
         _displayMovies = listMovies;
         _isLoadingListMovies = false;
+        _hasMore = listMovies.length >= 20;
       });
     }
   }

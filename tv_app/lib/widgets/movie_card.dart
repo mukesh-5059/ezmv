@@ -142,6 +142,26 @@ class _MovieCardState extends State<MovieCard> {
                       )
                     else
                       _buildFallbackCard(),
+                    if (widget.movie.isTv)
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: TVTheme.accent.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'TV',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
                     if (widget.progress != null && widget.progress! > 0)
                       Positioned(
                         bottom: 0,

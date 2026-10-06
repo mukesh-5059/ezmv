@@ -4,6 +4,7 @@ import 'package:shared_core/shared_core.dart';
 import 'theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/settings_screen.dart';
 import 'widgets/movie_card.dart';
 
 void main() async {
@@ -41,6 +42,7 @@ class _MobileRootScreenState extends State<MobileRootScreen> {
     HomeScreen(),
     SearchScreen(),
     LibraryScreen(),
+    SettingsScreen(),
   ];
 
   @override
@@ -50,26 +52,66 @@ class _MobileRootScreenState extends State<MobileRootScreen> {
         index: _currentIndex,
         children: _screens,
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home_filled),
-            label: 'Home',
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: MobileTheme.surface,
+          border: Border(
+            top: BorderSide(color: Colors.white10, width: 0.8),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search_outlined),
-            activeIcon: Icon(Icons.search),
-            label: 'Search',
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 56,
+            child: Row(
+              children: [
+                _buildNavItem(0, Icons.home_outlined, Icons.home_filled, 'Home'),
+                _buildNavItem(1, Icons.search_outlined, Icons.search, 'Search'),
+                _buildNavItem(2, Icons.video_library_outlined, Icons.video_library_rounded, 'Library'),
+                _buildNavItem(3, Icons.settings_outlined, Icons.settings, 'Settings'),
+              ],
+            ),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.video_library_outlined),
-            activeIcon: Icon(Icons.video_library_rounded),
-            label: 'Library',
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem(int index, IconData icon, IconData activeIcon, String label) {
+    final isSelected = _currentIndex == index;
+    return Expanded(
+      child: Center(
+        child: InkResponse(
+          onTap: () => setState(() => _currentIndex = index),
+          radius: 26,
+          containedInkWell: false,
+          highlightShape: BoxShape.circle,
+          splashFactory: InkRipple.splashFactory,
+          splashColor: MobileTheme.accent.withValues(alpha: 0.3),
+          highlightColor: Colors.transparent,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isSelected ? activeIcon : icon,
+                  size: 22,
+                  color: isSelected ? MobileTheme.accent : MobileTheme.textMuted,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected ? MobileTheme.accent : MobileTheme.textMuted,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }

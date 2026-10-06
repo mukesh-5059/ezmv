@@ -45,6 +45,7 @@ class SubtitlePickerSheet extends StatefulWidget {
     return showModalBottomSheet<SubtitlePickerResult?>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (context) => SubtitlePickerSheet(
         subtitles: subtitles,
@@ -82,17 +83,23 @@ class _SubtitlePickerSheetState extends State<SubtitlePickerSheet> {
       return s.name.toLowerCase().contains(q) || s.language.toLowerCase().contains(q);
     }).toList();
 
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.8,
-      ),
-      decoration: const BoxDecoration(
-        color: MobileTheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: isLandscape
+              ? MediaQuery.of(context).size.height * 0.94
+              : MediaQuery.of(context).size.height * 0.85,
+        ),
+        decoration: const BoxDecoration(
+          color: MobileTheme.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
           // Drag Handle
           const SizedBox(height: 10),
           Container(
@@ -205,7 +212,12 @@ class _SubtitlePickerSheetState extends State<SubtitlePickerSheet> {
           ),
           // Controls (Font Size & Delay)
           Container(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+            padding: EdgeInsets.fromLTRB(
+              18,
+              isLandscape ? 6 : 12,
+              18,
+              isLandscape ? 8 : (14 + MediaQuery.of(context).viewPadding.bottom),
+            ),
             decoration: const BoxDecoration(
               color: Color(0xFF0F0F12),
               border: Border(top: BorderSide(color: Colors.white12)),
@@ -216,45 +228,52 @@ class _SubtitlePickerSheetState extends State<SubtitlePickerSheet> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Subtitle Size', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                    Text('${_fontSize.toInt()} px', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    const Text('Subtitle Size', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                    Text('${_fontSize.toInt()} px', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                   ],
                 ),
-                Slider(
-                  value: _fontSize,
-                  min: 16.0,
-                  max: 48.0,
-                  activeColor: MobileTheme.accent,
-                  inactiveColor: Colors.white12,
-                  onChanged: (val) {
-                    setState(() => _fontSize = val);
-                    widget.onFontSizeChanged?.call(val);
-                  },
+                SizedBox(
+                  height: isLandscape ? 30 : 38,
+                  child: Slider(
+                    value: _fontSize,
+                    min: 16.0,
+                    max: 48.0,
+                    activeColor: MobileTheme.accent,
+                    inactiveColor: Colors.white12,
+                    onChanged: (val) {
+                      setState(() => _fontSize = val);
+                      widget.onFontSizeChanged?.call(val);
+                    },
+                  ),
                 ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Sync Offset (Delay)', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                    Text('${_delay >= 0 ? "+" : ""}${_delay.toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    const Text('Sync Offset (Delay)', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                    Text('${_delay >= 0 ? "+" : ""}${_delay.toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                   ],
                 ),
-                Slider(
-                  value: _delay,
-                  min: -10.0,
-                  max: 10.0,
-                  divisions: 40,
-                  activeColor: MobileTheme.accent,
-                  inactiveColor: Colors.white12,
-                  onChanged: (val) {
-                    setState(() => _delay = val);
-                    widget.onDelayChanged?.call(val);
-                  },
+                SizedBox(
+                  height: isLandscape ? 30 : 38,
+                  child: Slider(
+                    value: _delay,
+                    min: -10.0,
+                    max: 10.0,
+                    divisions: 40,
+                    activeColor: MobileTheme.accent,
+                    inactiveColor: Colors.white12,
+                    onChanged: (val) {
+                      setState(() => _delay = val);
+                      widget.onDelayChanged?.call(val);
+                    },
+                  ),
                 ),
               ],
             ),
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
