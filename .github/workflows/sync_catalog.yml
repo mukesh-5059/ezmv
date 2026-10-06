@@ -1,0 +1,55 @@
+name: Sync Catalog & Publish CDN
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
+  workflow_dispatch:      # Manual trigger button in GitHub UI
+
+permissions:
+  contents: write
+
+jobs:
+  sync-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run IMDb sync, metadata enrichment & JSON exporter
+        env:
+          ReadAccessToken: ${{ secrets.READ_ACCESS_TOKEN || secrets.TMDB_READ_ACCESS_TOKEN || secrets.READACCESSTOKEN }}
+          ApiKey: ${{ secrets.TMDB_API_KEY || secrets.APIKEY }}
+        run: |
+          python backend/scripts/sync_catalog.py --export-dir catalog
+
+      - name: Persist updated catalog database
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/data/catalog.db
+          if git diff --staged --quiet; then
+            echo "No database changes to commit."
+          else
+            git commit -m "chore(catalog): update catalog.db [skip ci]"
+            git push
+          fi
+
+      - name: Deploy catalog JSONs to GitHub Pages (gh-pages branch)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./catalog
+          destination_dir: catalog

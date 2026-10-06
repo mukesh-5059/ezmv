@@ -67,13 +67,15 @@ LANES_SYNC_CONFIG = {
         "sort_order": "ASC",
         "constraints": {},
         "deep_crawler": False,
+        "max_depth": 150,
     },
     "comedy": {
         "title": "Popular Tamil Comedy",
         "sort_by": "POPULARITY",
         "sort_order": "ASC",
         "constraints": {"genreConstraint": {"anyGenreIds": ["Comedy"]}},
-        "deep_crawler": False,
+        "deep_crawler": True,
+        "max_depth": 400,
     },
     "top_rated": {
         "title": "All-Time Most Watched",
@@ -81,6 +83,7 @@ LANES_SYNC_CONFIG = {
         "sort_order": "DESC",
         "constraints": {},
         "deep_crawler": True,
+        "max_depth": 500,
     },
     "box_office": {
         "title": "Record-Breaking Box Office",
@@ -88,6 +91,7 @@ LANES_SYNC_CONFIG = {
         "sort_order": "DESC",
         "constraints": {},
         "deep_crawler": True,
+        "max_depth": 500,
     },
 }
 
@@ -251,10 +255,15 @@ async def sync_deep_tail(conn: sqlite3.Connection, lane_id: str, cfg: dict, top5
     current_tail_rank = int(rank_row["value"]) if rank_row else 50
     active_cursor = stored_cursor or top50_cursor
 
+    max_depth = cfg.get("max_depth", 500)
+    if current_tail_rank >= max_depth:
+        print(f"  [Tail Cap] Lane '{lane_id}' reached max_depth ({current_tail_rank}/{max_depth}). Skipping deep crawl.")
+        return
+
     if not active_cursor:
         return
 
-    print(f"  [Tail] Lane '{lane_id}' starting at rank {current_tail_rank}...")
+    print(f"  [Tail] Lane '{lane_id}' starting at rank {current_tail_rank} (cap: {max_depth})...")
     try:
         items, new_cursor = await fetch_graphql_lane(
             sort_by=cfg["sort_by"],
@@ -309,6 +318,26 @@ async def sync_all_lanes():
                 merge_lane_data(conn, lane_id, items, now)
                 print(f"[Lane OK] '{lane_id}' Top 50 merged ({len(items)} items).")
 
+                # For trending: if max_depth > 50, fetch additional pages up to max_depth
+                if lane_id == "trending" and cfg.get("max_depth", 50) > 50 and end_cursor:
+                    curr_cursor = end_cursor
+                    current_count = len(items)
+                    target = cfg.get("max_depth", 150)
+                    while current_count < target and curr_cursor:
+                        more_items, next_cursor = await fetch_graphql_lane(
+                            sort_by=cfg["sort_by"],
+                            sort_order=cfg["sort_order"],
+                            extra_constraints=cfg["constraints"],
+                            limit=50,
+                            after=curr_cursor,
+                        )
+                        if not more_items:
+                            break
+                        merge_deep_tail(conn, lane_id, more_items, current_count, now)
+                        current_count += len(more_items)
+                        curr_cursor = next_cursor
+                    print(f"[Lane OK] '{lane_id}' expanded to {current_count} trending items.")
+
                 if cfg.get("deep_crawler"):
                     await sync_deep_tail(conn, lane_id, cfg, end_cursor, now)
             except Exception as e:
@@ -325,13 +354,13 @@ async def sync_all_lanes():
 async def enrich_posters():
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT imdb_id FROM movies WHERE poster_path IS NULL LIMIT 250;"
+            "SELECT imdb_id FROM movies WHERE poster_path IS NULL OR genre_ids IS NULL LIMIT 250;"
         ).fetchall()
 
     if not rows:
         return
 
-    print(f"Enriching {len(rows)} movies with TMDB posters/backdrops...")
+    print(f"Enriching {len(rows)} movies with TMDB posters/backdrops/genres...")
     sem = asyncio.Semaphore(10)
 
     async def fetch_one(imdb_id: str):
@@ -339,16 +368,19 @@ async def enrich_posters():
             try:
                 tmdb_info = await tmdb_client.find_movie_by_imdb_id(imdb_id)
                 if tmdb_info:
+                    genre_list = tmdb_info.get("genre_ids") or []
+                    genres_str = ",".join(str(g) for g in genre_list) if genre_list else ""
                     return (
                         imdb_id,
                         tmdb_info.get("id"),
                         tmdb_info.get("poster_path") or "",
                         tmdb_info.get("backdrop_path") or "",
                         tmdb_info.get("overview") or "",
+                        genres_str,
                     )
                 else:
-                    return (imdb_id, None, "", "", "")
-            except Exception as e:
+                    return (imdb_id, None, "", "", "", "")
+            except Exception:
                 pass
             return None
 
@@ -363,13 +395,120 @@ async def enrich_posters():
                     tmdb_id = COALESCE(?, tmdb_id),
                     poster_path = ?,
                     backdrop_path = ?,
-                    overview = ?
+                    overview = ?,
+                    genre_ids = ?
                 WHERE imdb_id = ?;
                 """,
-                [(u[1], u[2], u[3], u[4], u[0]) for u in updates],
+                [(u[1], u[2], u[3], u[4], u[5], u[0]) for u in updates],
             )
             conn.commit()
-        print(f"Successfully enriched {len(updates)} movies with TMDB posters.")
+        print(f"Successfully enriched {len(updates)} movies with TMDB metadata.")
+
+async def enrich_actors(output_file: Path) -> list[dict]:
+    actors_cfg_path = ROOT_DIR / "config" / "actors.json"
+    if not actors_cfg_path.exists():
+        actors_cfg_path = ROOT_DIR / "backend" / "data" / "actors.json"
+    if not actors_cfg_path.exists():
+        print(f"[Actors] Actors config not found at config/actors.json or backend/data/actors.json. Skipping actors export.")
+        return []
+
+    with open(actors_cfg_path, "r", encoding="utf-8") as f:
+        actors_list = json.load(f)
+
+    print(f"[Actors] Enriching {len(actors_list)} curated actors from TMDb...")
+    sem = asyncio.Semaphore(10)
+
+    async def fetch_actor(actor_entry: dict):
+        a_id = actor_entry.get("id")
+        fallback_name = actor_entry.get("name", "")
+        async with sem:
+            try:
+                details = await tmdb_client.get_person_details(a_id)
+                if details:
+                    return {
+                        "id": details.get("id", a_id),
+                        "name": details.get("name") or fallback_name,
+                        "profile_path": details.get("profile_path"),
+                        "known_for_department": details.get("known_for_department", "Acting"),
+                    }
+            except Exception as e:
+                print(f"[Actors Warn] Failed to fetch actor {a_id}: {e}")
+            return {
+                "id": a_id,
+                "name": fallback_name,
+                "profile_path": None,
+                "known_for_department": "Acting",
+            }
+
+    enriched = await asyncio.gather(*(fetch_actor(a) for a in actors_list))
+    valid = [a for a in enriched if a and a.get("name")]
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(valid, f, indent=2, ensure_ascii=False)
+    print(f"[Actors OK] Exported {len(valid)} actors to {output_file}.")
+    return valid
+
+async def export_catalog_json(output_dir: str = "catalog"):
+    out_path = Path(output_dir).resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+
+    from backend.services.catalog import CatalogService
+    catalog_service = CatalogService()
+
+    manifest_lanes = []
+    total_exported = 0
+
+    for lane_id, cfg in LANES_SYNC_CONFIG.items():
+        max_depth = cfg.get("max_depth", 500)
+        movies = catalog_service.get_lane_movies(lane_id, limit=max_depth)
+
+        valid_movies = []
+        for idx, m in enumerate(movies, start=1):
+            if not m.get("poster_path"):
+                continue
+            valid_movies.append({
+                "imdb_id": m.get("imdb_id"),
+                "tmdb_id": m.get("tmdb_id"),
+                "title": m.get("title"),
+                "year": m.get("year"),
+                "rating": m.get("rating"),
+                "votes": m.get("votes"),
+                "rank": m.get("today_rank") or m.get("previous_rank") or idx,
+                "poster_path": m.get("poster_path"),
+                "backdrop_path": m.get("backdrop_path"),
+                "overview": m.get("overview"),
+                "genre_ids": m.get("genre_ids", []),
+            })
+
+        lane_file = f"{lane_id}.json"
+        lane_json_path = out_path / lane_file
+        with open(lane_json_path, "w", encoding="utf-8") as f:
+            json.dump(valid_movies, f, separators=(",", ":"), ensure_ascii=False)
+
+        manifest_lanes.append({
+            "id": lane_id,
+            "title": cfg["title"],
+            "file": lane_file,
+            "count": len(valid_movies),
+        })
+        total_exported += len(valid_movies)
+        print(f"[Export OK] {lane_id}: {len(valid_movies)} movies -> {lane_file}")
+
+    actors_file = out_path / "actors.json"
+    actors_data = await enrich_actors(actors_file)
+
+    manifest = {
+        "updated_at": now,
+        "total_movies": total_exported,
+        "lanes": manifest_lanes,
+        "actors_file": "actors.json" if actors_data else None,
+    }
+    with open(out_path / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    print(f"[Manifest OK] Successfully generated manifest.json in {out_path}")
 
 def print_stats(label: str):
     conn = sqlite3.connect(DB_PATH)
@@ -385,34 +524,30 @@ def print_stats(label: str):
     print("Crawler Positions:", {r["key"]: r["value"] for r in meta if "cursor" not in r["key"]})
 
 async def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="IMDb & TMDb Catalog Sync & JSON Pipeline")
+    parser.add_argument("--export-dir", type=str, default="catalog", help="Directory to export JSON files")
+    parser.add_argument("--export-only", action="store_true", help="Skip sync and only export JSON from current DB")
+    args = parser.parse_args()
+
     await init_session()
-    print_stats("State BEFORE Sync")
 
-    print("\n[>>] Starting IMDb sync cycle...")
-    await sync_all_lanes()
-    print("[OK] Sync cycle complete!")
+    if not args.export_only:
+        print_stats("State BEFORE Sync")
 
-    print("\n[>>] Fetching posters & overviews from TMDb...")
-    await enrich_posters()
-    print("[OK] Poster enrichment complete!")
+        print("\n[>>] Starting IMDb sync cycle...")
+        await sync_all_lanes()
+        print("[OK] Sync cycle complete!")
 
-    print_stats("State AFTER Sync")
+        print("\n[>>] Fetching posters & overviews & genres from TMDb...")
+        await enrich_posters()
+        print("[OK] Metadata enrichment complete!")
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    latest_tail = conn.execute("""
-        SELECT le.previous_rank, m.title, m.year, m.rating, m.votes, m.poster_path
-        FROM lane_entries le
-        JOIN movies m ON le.imdb_id = m.imdb_id
-        WHERE le.lane_id = 'top_rated'
-        ORDER BY le.previous_rank DESC
-        LIMIT 5;
-    """).fetchall()
-    conn.close()
+        print_stats("State AFTER Sync")
 
-    print("\nLatest 5 crawled titles in 'top_rated' tail:")
-    for item in reversed(latest_tail):
-        print(f"  #{item['previous_rank']} | {item['title']} ({item['year']}) | Poster: {item['poster_path']}")
+    print(f"\n[>>] Exporting JSON files to '{args.export_dir}'...")
+    await export_catalog_json(args.export_dir)
+    print("[OK] Catalog JSON pipeline export complete!")
 
     await close_session()
 

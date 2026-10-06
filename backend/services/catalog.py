@@ -43,10 +43,16 @@ def init_db(conn: sqlite3.Connection):
         poster_path TEXT,
         backdrop_path TEXT,
         overview TEXT,
+        genre_ids TEXT,
         first_seen INTEGER,
         last_updated INTEGER
     );
     """)
+
+    # Ensure genre_ids column exists if migrating existing DB
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(movies);").fetchall()]
+    if "genre_ids" not in cols:
+        conn.execute("ALTER TABLE movies ADD COLUMN genre_ids TEXT;")
 
     conn.execute("""
     CREATE TABLE IF NOT EXISTS lane_entries (
@@ -97,6 +103,7 @@ class CatalogService:
             m.poster_path,
             m.backdrop_path,
             m.overview,
+            m.genre_ids,
             le.today_rank,
             le.previous_rank,
             le.last_seen
@@ -111,7 +118,19 @@ class CatalogService:
         """
         with self._get_connection() as conn:
             cursor = conn.execute(query, (lane_id, limit, offset))
-            return [dict(row) for row in cursor.fetchall()]
+            items = []
+            for row in cursor.fetchall():
+                d = dict(row)
+                raw_genres = d.get("genre_ids")
+                if raw_genres:
+                    try:
+                        d["genre_ids"] = [int(g.strip()) for g in raw_genres.split(",") if g.strip()]
+                    except Exception:
+                        d["genre_ids"] = []
+                else:
+                    d["genre_ids"] = []
+                items.append(d)
+            return items
 
     def get_available_lanes(self) -> list[dict]:
         lanes = []
