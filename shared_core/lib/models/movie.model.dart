@@ -1,5 +1,6 @@
 class Movie {
   final int tmdbId;
+  final String? imdbId;
   final String title;
   final String overview;
   final String releaseDate;
@@ -9,9 +10,11 @@ class Movie {
   final String originalLanguage;
   final String mediaType;
   final List<int> genreIds;
+  final int? rank;
 
   Movie({
     required this.tmdbId,
+    this.imdbId,
     required this.title,
     required this.overview,
     required this.releaseDate,
@@ -21,28 +24,39 @@ class Movie {
     required this.originalLanguage,
     this.mediaType = 'movie',
     this.genreIds = const [],
+    this.rank,
   });
 
   factory Movie.fromJson(Map<String, dynamic> json) {
+    String relDate = json['release_date'] ?? json['first_air_date'] ?? '';
+    if (relDate.isEmpty && json['year'] != null) {
+      relDate = json['year'].toString();
+    }
+
     return Movie(
-      tmdbId: json['tmdb_id'] ?? 0,
+      tmdbId: json['tmdb_id'] ?? json['id'] ?? 0,
+      imdbId: json['imdb_id'],
       title: json['title'] ?? json['name'] ?? 'Unknown',
       overview: json['overview'] ?? '',
-      releaseDate: json['release_date'] ?? json['first_air_date'] ?? '',
+      releaseDate: relDate,
       posterPath: json['poster_path'] ?? '',
       backdropPath: json['backdrop_path'] ?? '',
-      voteAverage: (json['vote_average'] as num?)?.toDouble() ?? 0.0,
-      originalLanguage: json['original_language'] ?? 'en',
+      voteAverage: (json['vote_average'] as num?)?.toDouble() ??
+          (json['rating'] as num?)?.toDouble() ??
+          0.0,
+      originalLanguage: json['original_language'] ?? 'ta',
       mediaType: json['media_type'] ?? 'movie',
       genreIds: json['genre_ids'] != null
           ? List<int>.from(json['genre_ids'])
           : const [],
+      rank: json['rank'] is int ? json['rank'] : null,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'tmdb_id': tmdbId,
+      'imdb_id': imdbId,
       'title': title,
       'overview': overview,
       'release_date': releaseDate,
@@ -52,6 +66,7 @@ class Movie {
       'original_language': originalLanguage,
       'media_type': mediaType,
       'genre_ids': genreIds,
+      'rank': rank,
     };
   }
 

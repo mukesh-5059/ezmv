@@ -16,6 +16,11 @@ class ApiClient {
   static const String defaultBaseUrl = 'http://192.168.29.195:8080/api/v1';
   static String _currentBaseUrl = defaultBaseUrl;
 
+  static const String defaultCdnBaseUrl = 'https://mukesh-5059.github.io/ezmv/catalog';
+  static String _currentCdnBaseUrl = defaultCdnBaseUrl;
+
+  static String get cdnBaseUrl => _currentCdnBaseUrl;
+
   static Future<bool> testConnection([String? url]) async {
     final target = url ?? _currentBaseUrl;
     try {
@@ -161,7 +166,70 @@ class ApiClient {
     return [];
   }
 
+  static Future<List<DashboardLane>> _getDashboardFromCdn() async {
+    try {
+      final manifestUrl = Uri.parse('$_currentCdnBaseUrl/manifest.json');
+      final manifestResp = await http.get(manifestUrl).timeout(const Duration(seconds: 10));
+      if (manifestResp.statusCode != 200) return [];
+
+      final manifest = json.decode(manifestResp.body);
+      final List lanesMeta = manifest['lanes'] ?? [];
+      final List<DashboardLane> lanes = [];
+
+      final futures = lanesMeta.map((meta) async {
+        final laneId = meta['id'] ?? '';
+        final laneTitle = meta['title'] ?? '';
+        final fileName = meta['file'] ?? '$laneId.json';
+
+        final laneUrl = Uri.parse('$_currentCdnBaseUrl/$fileName');
+        final resp = await http.get(laneUrl).timeout(const Duration(seconds: 10));
+        if (resp.statusCode == 200) {
+          final List rawMovies = json.decode(resp.body);
+          final movies = rawMovies.map((e) => Movie.fromJson(e)).toList();
+          return DashboardLane(
+            id: laneId,
+            title: laneTitle,
+            items: movies.take(25).toList(),
+            hasMore: movies.length > 25,
+            nextPage: 2,
+          );
+        }
+        return null;
+      }).toList();
+
+      final results = await Future.wait(futures);
+      for (final l in results) {
+        if (l != null) lanes.add(l);
+      }
+      return lanes;
+    } catch (e) {
+      print('Get dashboard from CDN failed: $e');
+      return [];
+    }
+  }
+
+  static Future<List<Movie>> getLaneAllMovies({required String laneId}) async {
+    try {
+      final url = Uri.parse('$_currentCdnBaseUrl/$laneId.json');
+      final response = await http.get(url).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        return data.map((item) => Movie.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Get lane all movies from CDN failed: $e');
+    }
+    return [];
+  }
+
   static Future<List<DashboardLane>> getDashboard({required String language}) async {
+    if (language.toLowerCase().startsWith('ta')) {
+      final cdnLanes = await _getDashboardFromCdn();
+      if (cdnLanes.isNotEmpty) {
+        return cdnLanes;
+      }
+    }
+
     final url = Uri.parse('$_currentBaseUrl/movies/dashboard?language=$language');
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 20));
@@ -181,6 +249,25 @@ class ApiClient {
     required String language,
     required int page,
   }) async {
+    if (language.toLowerCase().startsWith('ta')) {
+      final all = await getLaneAllMovies(laneId: laneId);
+      if (all.isNotEmpty) {
+        const pageSize = 25;
+        final startIndex = (page - 1) * pageSize;
+        if (startIndex >= all.length) {
+          return {'items': [], 'has_more': false, 'next_page': null};
+        }
+        final endIndex = (startIndex + pageSize).clamp(0, all.length);
+        final pageItems = all.sublist(startIndex, endIndex);
+        final hasMore = endIndex < all.length;
+        return {
+          'items': pageItems.map((m) => m.toJson()).toList(),
+          'has_more': hasMore,
+          'next_page': hasMore ? page + 1 : null,
+        };
+      }
+    }
+
     final url = Uri.parse('$_currentBaseUrl/movies/dashboard/lane?lane_id=$laneId&language=$language&page=$page');
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 20));
@@ -291,9 +378,22 @@ class ApiClient {
   }
 
   static Future<List<Actor>> getCuratedActors({String language = 'ta'}) async {
+    // 1. Try CDN first
+    try {
+      final url = Uri.parse('$_currentCdnBaseUrl/actors.json');
+      final response = await http.get(url).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final List data = json.decode(response.body);
+        return data.map((item) => Actor.fromJson(item)).toList();
+      }
+    } catch (e) {
+      print('Get curated actors from CDN failed: $e');
+    }
+
+    // 2. Fallback to backend API
     final url = Uri.parse('$_currentBaseUrl/movies/actors/curated?language=$language');
     try {
-      final response = await http.get(url).timeout(const Duration(seconds: 25));
+      final response = await http.get(url).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
         return data.map((item) => Actor.fromJson(item)).toList();
