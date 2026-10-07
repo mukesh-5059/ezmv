@@ -159,6 +159,56 @@ class ApiClient {
     await prefs.setString('trakt_client_id', _traktClientId);
   }
 
+  static Future<bool> verifyTmdbKey(String key) async {
+    final cleanKey = key.trim();
+    if (cleanKey.isEmpty) return false;
+
+    final params = <String, String>{};
+    final headers = <String, String>{
+      'accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    };
+
+    if (cleanKey.startsWith('eyJ') || cleanKey.length > 50) {
+      headers['Authorization'] = 'Bearer $cleanKey';
+    } else {
+      params['api_key'] = cleanKey;
+    }
+
+    final query = params.isNotEmpty ? Uri(queryParameters: params).query : '';
+    final fullPath = query.isNotEmpty ? '/3/authentication?$query' : '/3/authentication';
+
+    const hosts = ['api.themoviedb.org', 'api.tmdb.org'];
+    for (final host in hosts) {
+      final response = await _tmdbSecureSocketGet(host, fullPath, headers);
+      if (response != null) {
+        return response.statusCode == 200;
+      }
+      try {
+        final uri = Uri.https(host, '/3/authentication', params.isNotEmpty ? params : null);
+        final resp = await http.get(uri, headers: headers).timeout(const Duration(seconds: 5));
+        return resp.statusCode == 200;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  static Future<bool> verifyTraktClientId(String id) async {
+    final cleanId = id.trim();
+    if (cleanId.isEmpty) return false;
+    try {
+      final url = Uri.parse('https://api.trakt.tv/movies/trending?limit=1');
+      final response = await http.get(url, headers: {
+        'Content-Type': 'application/json',
+        'trakt-api-version': '2',
+        'trakt-api-key': cleanId,
+      }).timeout(const Duration(seconds: 8));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static List<String> _cachedTmdbIps = [];
   static DateTime? _lastDohResolution;
 
@@ -303,18 +353,20 @@ class ApiClient {
 
     const hosts = ['api.themoviedb.org', 'api.tmdb.org'];
     for (final host in hosts) {
-      try {
-        final uri = Uri.https(host, '/3$path', params.isNotEmpty ? params : null);
-        final response = await http.get(uri, headers: headers).timeout(const Duration(seconds: 4));
-        if (response.statusCode == 200 || response.statusCode == 404) {
-          return response;
-        }
-      } catch (_) {}
-
+      // Primary: Always resolve via DNS-over-HTTPS (DoH)
       final response = await _tmdbSecureSocketGet(host, fullPath, headers);
-      if (response != null && (response.statusCode == 200 || response.statusCode == 404)) {
+      if (response != null && (response.statusCode == 200 || response.statusCode == 404 || response.statusCode == 401)) {
         return response;
       }
+
+      // Fallback: Standard HTTPS
+      try {
+        final uri = Uri.https(host, '/3$path', params.isNotEmpty ? params : null);
+        final fallbackResp = await http.get(uri, headers: headers).timeout(const Duration(seconds: 4));
+        if (fallbackResp.statusCode == 200 || fallbackResp.statusCode == 404 || fallbackResp.statusCode == 401) {
+          return fallbackResp;
+        }
+      } catch (_) {}
     }
     return null;
   }
@@ -393,6 +445,135 @@ class ApiClient {
     return [];
   }
 
+  static Future<List<Movie>> _enrichTraktMedia(List raw) async {
+    final movies = <Movie>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final map = Map<String, dynamic>.from(item);
+      final type = map['type']?.toString() ?? (map.containsKey('show') ? 'show' : 'movie');
+      final mediaObj = (type == 'show' ? map['show'] : map['movie']) ?? map;
+      if (mediaObj is Map) {
+        final m = Map<String, dynamic>.from(mediaObj);
+        final ids = m['ids'] is Map ? Map<String, dynamic>.from(m['ids']) : {};
+        final tmdbId = (ids['tmdb'] as num?)?.toInt() ?? 0;
+        final imdbId = ids['imdb']?.toString();
+        movies.add(Movie(
+          tmdbId: tmdbId,
+          imdbId: imdbId,
+          title: (m['title'] ?? m['name'] ?? '').toString(),
+          overview: (m['overview'] ?? '').toString(),
+          releaseDate: (m['year'] ?? '').toString(),
+          posterPath: '',
+          backdropPath: '',
+          voteAverage: (m['rating'] as num?)?.toDouble() ?? 0.0,
+          originalLanguage: 'en',
+          mediaType: type == 'show' ? 'tv' : 'movie',
+        ));
+      }
+    }
+
+    if (hasTmdbKey && movies.isNotEmpty) {
+      final futures = movies.map((m) async {
+        if (m.tmdbId <= 0) return m;
+        try {
+          final tmdbResp = await _tmdbGet('/${m.mediaType}/${m.tmdbId}');
+          if (tmdbResp != null && tmdbResp.statusCode == 200) {
+            final data = json.decode(tmdbResp.body);
+            return Movie(
+              tmdbId: m.tmdbId,
+              imdbId: m.imdbId ?? data['imdb_id']?.toString(),
+              title: m.title.isNotEmpty ? m.title : (data['title'] ?? data['name'] ?? ''),
+              overview: data['overview'] ?? m.overview,
+              releaseDate: data['release_date'] ?? data['first_air_date'] ?? m.releaseDate,
+              posterPath: data['poster_path'] ?? '',
+              backdropPath: data['backdrop_path'] ?? '',
+              voteAverage: (data['vote_average'] as num?)?.toDouble() ?? m.voteAverage,
+              originalLanguage: data['original_language'] ?? m.originalLanguage,
+              mediaType: m.mediaType,
+            );
+          }
+        } catch (_) {}
+        return m;
+      });
+      return await Future.wait(futures);
+    }
+
+    return movies;
+  }
+
+  static Future<List<Map<String, dynamic>>> _loadEnglishLanesConfig() async {
+    try {
+      final url = Uri.parse('$_currentCdnBaseUrl/lanes_en.json');
+      final resp = await http.get(url).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final List raw = json.decode(resp.body);
+        return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
+    } catch (_) {}
+
+    return const [
+      {'id': 'trending', 'title': 'Trending Right Now', 'type': 'trakt_trending'},
+      {'id': 'watched_weekly', 'title': 'Most Watched This Week', 'type': 'trakt_watched', 'period': 'weekly'},
+      {'id': 'box_office', 'title': 'Current Box Office Hits', 'type': 'trakt_box_office'},
+      {'id': 'imdb_top', 'title': 'IMDb: Top Rated', 'type': 'trakt_list', 'list_id': '2142753'},
+      {'id': 'mindfucks', 'title': 'Best Mindfucks & Thrillers', 'type': 'trakt_list', 'list_id': '800238'},
+      {'id': 'mcu', 'title': 'Marvel Cinematic Universe', 'type': 'trakt_list', 'list_id': '1248149'},
+      {'id': 'anticipated', 'title': 'Most Anticipated', 'type': 'trakt_anticipated'},
+    ];
+  }
+
+  static Future<List<Movie>> _fetchTraktLaneMovies(Map<String, dynamic> cfg, {int page = 1, int limit = 20}) async {
+    if (!hasTraktKey) return [];
+    try {
+      final lType = cfg['type']?.toString() ?? '';
+      Uri? url;
+      if (lType == 'trakt_trending') {
+        url = Uri.parse('https://api.trakt.tv/movies/trending?page=$page&limit=$limit');
+      } else if (lType == 'trakt_watched') {
+        final period = cfg['period'] ?? 'weekly';
+        url = Uri.parse('https://api.trakt.tv/movies/watched/$period?page=$page&limit=$limit');
+      } else if (lType == 'trakt_box_office') {
+        url = Uri.parse('https://api.trakt.tv/movies/boxoffice');
+      } else if (lType == 'trakt_anticipated') {
+        url = Uri.parse('https://api.trakt.tv/movies/anticipated?page=$page&limit=$limit');
+      } else if (lType == 'trakt_list') {
+        final listId = cfg['list_id'] ?? '';
+        url = Uri.parse('https://api.trakt.tv/lists/$listId/items/movies,shows?page=$page&limit=$limit&extended=full');
+      }
+
+      if (url != null) {
+        final resp = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 20));
+        if (resp.statusCode == 200) {
+          final List raw = json.decode(resp.body);
+          return await _enrichTraktMedia(raw);
+        }
+      }
+    } catch (e) {
+      print('Fetch Trakt lane failed (${cfg['id']}): $e');
+    }
+    return [];
+  }
+
+  static Future<List<DashboardLane>> _getEnglishDashboardFromCdn() async {
+    final enConfigs = await _loadEnglishLanesConfig();
+    final futures = enConfigs.map((cfg) async {
+      final laneId = cfg['id']?.toString() ?? '';
+      final title = cfg['title']?.toString() ?? 'Popular';
+      final movies = await _fetchTraktLaneMovies(cfg, page: 1, limit: 20);
+      if (movies.isEmpty) return null;
+      return DashboardLane(
+        id: laneId,
+        title: title,
+        items: movies,
+        hasMore: movies.length >= 20,
+        nextPage: movies.length >= 20 ? 2 : null,
+      );
+    }).toList();
+
+    final results = await Future.wait(futures);
+    return results.whereType<DashboardLane>().toList();
+  }
+
   static Future<List<Movie>> getListItems({required String listId, int page = 1, int limit = 20}) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
       if (hasTraktKey) {
@@ -401,56 +582,7 @@ class ApiClient {
           final response = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 20));
           if (response.statusCode == 200) {
             final List raw = json.decode(response.body);
-            final movies = <Movie>[];
-            for (final item in raw) {
-              final type = item['type'] ?? 'movie';
-              final mediaObj = type == 'show' ? item['show'] : item['movie'];
-              if (mediaObj != null) {
-                final ids = mediaObj['ids'] ?? {};
-                final tmdbId = (ids['tmdb'] as num?)?.toInt() ?? 0;
-                final imdbId = ids['imdb']?.toString();
-                movies.add(Movie(
-                  tmdbId: tmdbId,
-                  imdbId: imdbId,
-                  title: mediaObj['title'] ?? mediaObj['name'] ?? '',
-                  overview: mediaObj['overview'] ?? '',
-                  releaseDate: (mediaObj['year'] ?? '').toString(),
-                  posterPath: '',
-                  backdropPath: '',
-                  voteAverage: (mediaObj['rating'] as num?)?.toDouble() ?? 0.0,
-                  originalLanguage: 'en',
-                  mediaType: type == 'show' ? 'tv' : 'movie',
-                ));
-              }
-            }
-
-            if (hasTmdbKey && movies.isNotEmpty) {
-              final futures = movies.map((m) async {
-                if (m.tmdbId <= 0) return m;
-                try {
-                  final tmdbResp = await _tmdbGet('/${m.mediaType}/${m.tmdbId}');
-                  if (tmdbResp != null && tmdbResp.statusCode == 200) {
-                    final data = json.decode(tmdbResp.body);
-                    return Movie(
-                      tmdbId: m.tmdbId,
-                      imdbId: m.imdbId ?? data['imdb_id']?.toString(),
-                      title: m.title,
-                      overview: data['overview'] ?? m.overview,
-                      releaseDate: data['release_date'] ?? data['first_air_date'] ?? m.releaseDate,
-                      posterPath: data['poster_path'] ?? '',
-                      backdropPath: data['backdrop_path'] ?? '',
-                      voteAverage: (data['vote_average'] as num?)?.toDouble() ?? m.voteAverage,
-                      originalLanguage: data['original_language'] ?? m.originalLanguage,
-                      mediaType: m.mediaType,
-                    );
-                  }
-                } catch (_) {}
-                return m;
-              });
-              return await Future.wait(futures);
-            }
-
-            return movies;
+            return await _enrichTraktMedia(raw);
           }
         } catch (e) {
           print('Direct Trakt getListItems failed: $e');
@@ -481,6 +613,20 @@ class ApiClient {
     final isQuery = cleanQuery != null && cleanQuery.isNotEmpty;
 
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      if (isQuery && hasTraktKey) {
+        try {
+          final encodedQ = Uri.encodeComponent(cleanQuery);
+          final url = Uri.parse('https://api.trakt.tv/search/movie,show?query=$encodedQ&page=$page&limit=20&extended=full');
+          final response = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 15));
+          if (response.statusCode == 200) {
+            final List raw = json.decode(response.body);
+            return await _enrichTraktMedia(raw);
+          }
+        } catch (e) {
+          print('Trakt searchMovies failed, falling back to TMDB: $e');
+        }
+      }
+
       if (hasTmdbKey) {
         try {
           final path = isQuery ? '/search/multi' : '/trending/all/week';
@@ -586,7 +732,7 @@ class ApiClient {
       if (language.toLowerCase().startsWith('ta')) {
         return await _getDashboardFromCdn();
       }
-      return [];
+      return await _getEnglishDashboardFromCdn();
     }
 
     final url = Uri.parse('$_currentBaseUrl/movies/dashboard?language=$language');
@@ -622,6 +768,21 @@ class ApiClient {
           final hasMore = endIndex < all.length;
           return {
             'items': pageItems.map((m) => m.toJson()).toList(),
+            'has_more': hasMore,
+            'next_page': hasMore ? page + 1 : null,
+          };
+        }
+      } else {
+        final enConfigs = await _loadEnglishLanesConfig();
+        final matchedCfg = enConfigs.firstWhere(
+          (c) => c['id'] == laneId,
+          orElse: () => <String, dynamic>{},
+        );
+        if (matchedCfg.isNotEmpty) {
+          final items = await _fetchTraktLaneMovies(matchedCfg, page: page, limit: 20);
+          final hasMore = items.length >= 20;
+          return {
+            'items': items.map((m) => m.toJson()).toList(),
             'has_more': hasMore,
             'next_page': hasMore ? page + 1 : null,
           };

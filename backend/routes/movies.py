@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from fastapi import APIRouter, Query, HTTPException
 from backend.models import (
     MovieSummary,
@@ -20,6 +21,43 @@ from backend.services.catalog import catalog_service
 from backend.services.trakt import trakt_client
 
 router = APIRouter()
+
+
+def _load_lanes_en_config() -> list[dict]:
+    for p in [Path("config/lanes_en.json"), Path("backend/data/lanes_en.json")]:
+        if p.exists():
+            try:
+                import json
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return [
+        {"id": "trending", "title": "Trending Right Now", "type": "trakt_trending"},
+        {"id": "watched_weekly", "title": "Most Watched This Week", "type": "trakt_watched", "period": "weekly"},
+        {"id": "box_office", "title": "Current Box Office Hits", "type": "trakt_box_office"},
+        {"id": "imdb_top", "title": "IMDb: Top Rated", "type": "trakt_list", "list_id": "2142753"},
+        {"id": "mindfucks", "title": "Best Mindfucks & Thrillers", "type": "trakt_list", "list_id": "800238"},
+        {"id": "mcu", "title": "Marvel Cinematic Universe", "type": "trakt_list", "list_id": "1248149"},
+        {"id": "anticipated", "title": "Most Anticipated", "type": "trakt_anticipated"},
+    ]
+
+
+async def _fetch_trakt_lane_items(lane_cfg: dict, page: int = 1, limit: int = 20) -> list:
+    l_type = lane_cfg.get("type", "")
+    if l_type == "trakt_trending":
+        return await trakt_client.get_trending(page=page, limit=limit)
+    elif l_type == "trakt_watched":
+        period = lane_cfg.get("period", "weekly")
+        return await trakt_client.get_watched(period=period, page=page, limit=limit)
+    elif l_type == "trakt_box_office":
+        return await trakt_client.get_box_office()
+    elif l_type == "trakt_anticipated":
+        return await trakt_client.get_anticipated(page=page, limit=limit)
+    elif l_type == "trakt_list":
+        list_id = lane_cfg.get("list_id", "")
+        return await trakt_client.get_list_items(list_id, page=page, limit=limit)
+    return []
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
@@ -50,28 +88,15 @@ async def get_dashboard(
                 )
             )
     else:
+        en_configs = _load_lanes_en_config()
         results = await asyncio.gather(
-            trakt_client.get_trending(page=1, limit=20),
-            trakt_client.get_watched(period="weekly", page=1, limit=20),
-            trakt_client.get_box_office(),
-            trakt_client.get_anticipated(page=1, limit=20),
-            trakt_client.get_list_items("2142753", page=1, limit=20),
-            trakt_client.get_list_items("800238", page=1, limit=20),
-            trakt_client.get_list_items("1248149", page=1, limit=20),
+            *[_fetch_trakt_lane_items(cfg, page=1, limit=20) for cfg in en_configs],
             return_exceptions=True,
         )
 
-        en_configs = [
-            ("trending", "Trending Right Now"),
-            ("watched_weekly", "Most Watched This Week"),
-            ("box_office", "Current Box Office Hits"),
-            ("anticipated", "Most Anticipated"),
-            ("imdb_top", "IMDb: Top Rated"),
-            ("mindfucks", "Best Mindfucks & Thrillers"),
-            ("mcu", "Marvel Cinematic Universe"),
-        ]
-
-        for i, (lane_id, title) in enumerate(en_configs):
+        for i, cfg in enumerate(en_configs):
+            lane_id = cfg.get("id", f"lane_{i}")
+            title = cfg.get("title", "Popular")
             res = results[i]
             if isinstance(res, Exception) or not res:
                 items = []
@@ -117,21 +142,11 @@ async def get_dashboard_lane(
             items=items,
         )
 
-    # Trakt feeds & lists pagination
-    if lane_id == "trending":
-        items = await trakt_client.get_trending(page=safe_page, limit=safe_limit)
-    elif lane_id == "watched_weekly":
-        items = await trakt_client.get_watched(period="weekly", page=safe_page, limit=safe_limit)
-    elif lane_id == "box_office":
-        items = await trakt_client.get_box_office()
-    elif lane_id == "anticipated":
-        items = await trakt_client.get_anticipated(page=safe_page, limit=safe_limit)
-    elif lane_id == "imdb_top":
-        items = await trakt_client.get_list_items("2142753", page=safe_page, limit=safe_limit)
-    elif lane_id == "mindfucks":
-        items = await trakt_client.get_list_items("800238", page=safe_page, limit=safe_limit)
-    elif lane_id == "mcu":
-        items = await trakt_client.get_list_items("1248149", page=safe_page, limit=safe_limit)
+    # Dynamic Trakt English lanes pagination
+    en_configs = _load_lanes_en_config()
+    matched_cfg = next((c for c in en_configs if c.get("id") == lane_id), None)
+    if matched_cfg:
+        items = await _fetch_trakt_lane_items(matched_cfg, page=safe_page, limit=safe_limit)
     else:
         raw_items = await tmdb_client.discover_movies(language=safe_lang, page=safe_page)
         items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]

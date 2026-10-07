@@ -2,6 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 
+enum KeyStatus {
+  notConfigured,
+  configured,
+  unverified,
+  invalid,
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -17,6 +24,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   CatalogSourceMode _sourceMode = ApiClient.catalogSourceMode;
   bool _obscureTmdb = true;
+
+  KeyStatus _tmdbStatus = KeyStatus.notConfigured;
+  KeyStatus _traktStatus = KeyStatus.notConfigured;
 
   bool _isSavingServer = false;
   bool _isSavingTmdb = false;
@@ -35,6 +45,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _cdnController = TextEditingController(text: ApiClient.cdnBaseUrl);
     _sourceMode = ApiClient.catalogSourceMode;
 
+    _tmdbStatus = ApiClient.hasTmdbKey ? KeyStatus.configured : KeyStatus.notConfigured;
+    _traktStatus = ApiClient.hasTraktKey ? KeyStatus.configured : KeyStatus.notConfigured;
+
+    _tmdbController.addListener(_onTmdbChanged);
+    _traktController.addListener(_onTraktChanged);
+
     if (_sourceMode == CatalogSourceMode.server) {
       _testCurrentConnection();
     }
@@ -42,11 +58,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _tmdbController.removeListener(_onTmdbChanged);
+    _traktController.removeListener(_onTraktChanged);
     _serverController.dispose();
     _tmdbController.dispose();
     _traktController.dispose();
     _cdnController.dispose();
     super.dispose();
+  }
+
+  void _onTmdbChanged() {
+    final text = _tmdbController.text.trim();
+    if (text.isEmpty) {
+      if (_tmdbStatus != KeyStatus.notConfigured) {
+        setState(() => _tmdbStatus = KeyStatus.notConfigured);
+      }
+    } else if (text == ApiClient.tmdbApiKey && ApiClient.hasTmdbKey) {
+      if (_tmdbStatus != KeyStatus.configured) {
+        setState(() => _tmdbStatus = KeyStatus.configured);
+      }
+    } else {
+      if (_tmdbStatus != KeyStatus.unverified && _tmdbStatus != KeyStatus.invalid) {
+        setState(() => _tmdbStatus = KeyStatus.unverified);
+      }
+    }
+  }
+
+  void _onTraktChanged() {
+    final text = _traktController.text.trim();
+    if (text.isEmpty) {
+      if (_traktStatus != KeyStatus.notConfigured) {
+        setState(() => _traktStatus = KeyStatus.notConfigured);
+      }
+    } else if (text == ApiClient.traktClientId && ApiClient.hasTraktKey) {
+      if (_traktStatus != KeyStatus.configured) {
+        setState(() => _traktStatus = KeyStatus.configured);
+      }
+    } else {
+      if (_traktStatus != KeyStatus.unverified && _traktStatus != KeyStatus.invalid) {
+        setState(() => _traktStatus = KeyStatus.unverified);
+      }
+    }
   }
 
   Future<void> _setSourceMode(CatalogSourceMode mode) async {
@@ -80,12 +132,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(found ? 'Server discovered: ${ApiClient.baseUrl}' : 'No EzMV server found on LAN'),
-          backgroundColor: MobileTheme.surfaceElevated,
-          behavior: SnackBarBehavior.floating,
-        ),
+      _showToast(
+        found ? 'Server discovered: ${ApiClient.baseUrl}' : 'No EzMV server found on LAN',
+        isError: !found,
       );
     }
   }
@@ -107,20 +156,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _saveTmdbKey() async {
+    final key = _tmdbController.text.trim();
+    if (key.isEmpty) {
+      setState(() {
+        _isSavingTmdb = true;
+        _tmdbStatus = KeyStatus.notConfigured;
+      });
+      await ApiClient.setTmdbApiKey('');
+      if (mounted) {
+        setState(() => _isSavingTmdb = false);
+        _showToast('TMDb key cleared');
+      }
+      return;
+    }
+
     setState(() => _isSavingTmdb = true);
-    await ApiClient.setTmdbApiKey(_tmdbController.text.trim());
+    final isValid = await ApiClient.verifyTmdbKey(key);
     if (mounted) {
-      setState(() => _isSavingTmdb = false);
-      _showToast(ApiClient.hasTmdbKey ? 'TMDb key configured successfully' : 'TMDb key cleared');
+      if (isValid) {
+        await ApiClient.setTmdbApiKey(key);
+        setState(() {
+          _tmdbStatus = KeyStatus.configured;
+          _isSavingTmdb = false;
+        });
+        _showToast('TMDb key verified and configured successfully');
+      } else {
+        setState(() {
+          _tmdbStatus = KeyStatus.invalid;
+          _isSavingTmdb = false;
+        });
+        _showToast('Invalid TMDb key. Please verify and retry.', isError: true);
+      }
     }
   }
 
   Future<void> _saveTraktKey() async {
+    final id = _traktController.text.trim();
+    if (id.isEmpty) {
+      setState(() {
+        _isSavingTrakt = true;
+        _traktStatus = KeyStatus.notConfigured;
+      });
+      await ApiClient.setTraktClientId('');
+      if (mounted) {
+        setState(() => _isSavingTrakt = false);
+        _showToast('Trakt Client ID cleared');
+      }
+      return;
+    }
+
     setState(() => _isSavingTrakt = true);
-    await ApiClient.setTraktClientId(_traktController.text.trim());
+    final isValid = await ApiClient.verifyTraktClientId(id);
     if (mounted) {
-      setState(() => _isSavingTrakt = false);
-      _showToast(ApiClient.hasTraktKey ? 'Trakt Client ID configured' : 'Trakt Client ID cleared');
+      if (isValid) {
+        await ApiClient.setTraktClientId(id);
+        setState(() {
+          _traktStatus = KeyStatus.configured;
+          _isSavingTrakt = false;
+        });
+        _showToast('Trakt Client ID verified and configured');
+      } else {
+        setState(() {
+          _traktStatus = KeyStatus.invalid;
+          _isSavingTrakt = false;
+        });
+        _showToast('Invalid Trakt Client ID. Please verify and retry.', isError: true);
+      }
     }
   }
 
@@ -135,13 +236,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _showToast(String message) {
+  void _showToast(String message, {bool isError = false}) {
+    final bgColor = isError ? const Color(0xFFB91C1C) : const Color(0xFF15803D);
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: MobileTheme.surfaceElevated,
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded,
+              size: 20,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: bgColor,
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -270,9 +395,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       _buildStatusBadge(
-                        configured: ApiClient.hasTmdbKey,
-                        activeLabel: 'Configured ✓',
-                        inactiveLabel: 'Required for Search',
+                        _tmdbStatus,
+                        notConfiguredLabel: 'Required for Search',
                       ),
                     ],
                   ),
@@ -339,9 +463,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       _buildStatusBadge(
-                        configured: ApiClient.hasTraktKey,
-                        activeLabel: 'Configured ✓',
-                        inactiveLabel: 'Optional (Lists)',
+                        _traktStatus,
+                        notConfiguredLabel: 'Optional (Lists)',
                         isOptional: true,
                       ),
                     ],
@@ -670,32 +793,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildStatusBadge({
-    required bool configured,
-    required String activeLabel,
-    required String inactiveLabel,
+  Widget _buildStatusBadge(
+    KeyStatus status, {
+    String? notConfiguredLabel,
     bool isOptional = false,
   }) {
+    Color bg;
+    Color border;
+    Color textColor;
+    String label;
+
+    switch (status) {
+      case KeyStatus.configured:
+        bg = const Color(0xFF15803D).withValues(alpha: 0.15);
+        border = Colors.greenAccent.withValues(alpha: 0.5);
+        textColor = Colors.greenAccent;
+        label = 'Configured ✓';
+        break;
+      case KeyStatus.invalid:
+        bg = const Color(0xFFB91C1C).withValues(alpha: 0.15);
+        border = Colors.redAccent.withValues(alpha: 0.5);
+        textColor = Colors.redAccent;
+        label = 'Invalid Key ✗';
+        break;
+      case KeyStatus.unverified:
+        bg = Colors.amber.withValues(alpha: 0.15);
+        border = Colors.amberAccent.withValues(alpha: 0.5);
+        textColor = Colors.amberAccent;
+        label = 'Unsaved / Tap Save';
+        break;
+      case KeyStatus.notConfigured:
+        bg = isOptional ? Colors.white10 : Colors.amber.withValues(alpha: 0.15);
+        border = isOptional ? Colors.white24 : Colors.amber.withValues(alpha: 0.5);
+        textColor = isOptional ? Colors.white60 : Colors.amberAccent;
+        label = notConfiguredLabel ?? (isOptional ? 'Optional (Lists)' : 'Required for Search');
+        break;
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: configured
-            ? Colors.green.withValues(alpha: 0.15)
-            : (isOptional ? Colors.white10 : Colors.amber.withValues(alpha: 0.15)),
+        color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: configured
-              ? Colors.greenAccent.withValues(alpha: 0.5)
-              : (isOptional ? Colors.white24 : Colors.amber.withValues(alpha: 0.5)),
-          width: 0.8,
-        ),
+        border: Border.all(color: border, width: 0.8),
       ),
       child: Text(
-        configured ? activeLabel : inactiveLabel,
+        label,
         style: TextStyle(
-          color: configured
-              ? Colors.greenAccent
-              : (isOptional ? Colors.white60 : Colors.amberAccent),
+          color: textColor,
           fontSize: 10,
           fontWeight: FontWeight.bold,
         ),

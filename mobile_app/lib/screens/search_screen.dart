@@ -14,7 +14,6 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  Timer? _debounceTimer;
 
   List<String> _history = [];
   List<Movie> _directMovies = [];
@@ -39,7 +38,6 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
-    _debounceTimer?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -72,13 +70,6 @@ class _SearchScreenState extends State<SearchScreen> {
         _directHasMore = results.length >= 20;
       });
     }
-  }
-
-  void _onSearchChanged(String query) {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 400), () {
-      _executeSearch(query.trim());
-    });
   }
 
   Future<void> _executeSearch(String query) async {
@@ -220,25 +211,40 @@ class _SearchScreenState extends State<SearchScreen> {
       appBar: AppBar(
         titleSpacing: 0,
         title: Padding(
-          padding: const EdgeInsets.only(right: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: TextField(
             controller: _searchController,
-            onChanged: _onSearchChanged,
+            textInputAction: TextInputAction.search,
+            onChanged: (val) => setState(() {}),
             onSubmitted: (val) => _executeSearch(val.trim()),
             autofocus: false,
             decoration: InputDecoration(
               hintText: 'Search movies, series, anime...',
               hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
               prefixIcon: const Icon(Icons.search_rounded, color: Colors.white60, size: 20),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_searchController.text.isNotEmpty)
+                    IconButton(
                       icon: const Icon(Icons.clear_rounded, color: Colors.white60, size: 18),
+                      tooltip: 'Clear',
                       onPressed: () {
                         _searchController.clear();
+                        setState(() {});
                         _executeSearch('');
                       },
-                    )
-                  : null,
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.search_rounded, color: MobileTheme.accent, size: 20),
+                    tooltip: 'Search',
+                    onPressed: () {
+                      FocusScope.of(context).unfocus();
+                      _executeSearch(_searchController.text.trim());
+                    },
+                  ),
+                ],
+              ),
               isDense: true,
               filled: true,
               fillColor: MobileTheme.surfaceElevated,
@@ -278,6 +284,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     side: BorderSide.none,
                     onPressed: () {
                       _searchController.text = item;
+                      setState(() {});
                       _executeSearch(item);
                     },
                   );
@@ -331,13 +338,24 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
 
-          // Results Grid
+          // Results Grid with Pull-to-Refresh
           Expanded(
-            child: _isLoading || _isLoadingListMovies
-                ? const Center(child: CircularProgressIndicator(color: MobileTheme.accent))
-                : (_displayMovies.isEmpty
-                    ? _buildEmptyState()
-                    : _buildGrid()),
+            child: RefreshIndicator(
+              onRefresh: () => _executeSearch(_searchController.text.trim()),
+              color: MobileTheme.accent,
+              backgroundColor: MobileTheme.surfaceElevated,
+              child: _isLoading || _isLoadingListMovies
+                  ? const Center(child: CircularProgressIndicator(color: MobileTheme.accent))
+                  : (_displayMovies.isEmpty
+                      ? ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            SizedBox(height: MediaQuery.of(context).size.height * 0.18),
+                            _buildEmptyState(),
+                          ],
+                        )
+                      : _buildGrid()),
+            ),
           ),
         ],
       ),
@@ -371,21 +389,51 @@ class _SearchScreenState extends State<SearchScreen> {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
               ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: MobileTheme.surfaceElevated,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: const BorderSide(color: Colors.white12),
+                  ),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 18, color: MobileTheme.accent),
+                label: const Text('Reload / Check Key'),
+                onPressed: () => _executeSearch(_searchController.text.trim()),
+              ),
             ],
           ),
         ),
       );
     }
 
-    return const Center(
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off_rounded, color: Colors.white30, size: 54),
-          SizedBox(height: 12),
-          Text('No titles found', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-          SizedBox(height: 6),
-          Text('Try searching with different keywords or check spelling.', style: TextStyle(color: Colors.white54, fontSize: 13)),
+          const Icon(Icons.search_off_rounded, color: Colors.white30, size: 54),
+          const SizedBox(height: 12),
+          const Text('No titles found', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          const Text('Try searching with different keywords or check spelling.', style: TextStyle(color: Colors.white54, fontSize: 13)),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MobileTheme.surfaceElevated,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: const BorderSide(color: Colors.white12),
+              ),
+            ),
+            icon: const Icon(Icons.refresh_rounded, size: 18, color: MobileTheme.accent),
+            label: const Text('Reload Results'),
+            onPressed: () => _executeSearch(_searchController.text.trim()),
+          ),
         ],
       ),
     );

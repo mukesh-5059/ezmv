@@ -1,0 +1,41 @@
+[
+  {
+    "id": "trending",
+    "title": "Trending Right Now",
+    "type": "trakt_trending"
+  },
+  {
+    "id": "watched_weekly",
+    "title": "Most Watched This Week",
+    "type": "trakt_watched",
+    "period": "weekly"
+  },
+  {
+    "id": "box_office",
+    "title": "Current Box Office Hits",
+    "type": "trakt_box_office"
+  },
+  {
+    "id": "imdb_top",
+    "title": "IMDb: Top Rated",
+    "type": "trakt_list",
+    "list_id": "2142753"
+  },
+  {
+    "id": "mindfucks",
+    "title": "Best Mindfucks & Thrillers",
+    "type": "trakt_list",
+    "list_id": "800238"
+  },
+  {
+    "id": "mcu",
+    "title": "Marvel Cinematic Universe",
+    "type": "trakt_list",
+    "list_id": "1248149"
+  },
+  {
+    "id": "anticipated",
+    "title": "Most Anticipated",
+    "type": "trakt_anticipated"
+  }
+]

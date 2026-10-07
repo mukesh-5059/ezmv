@@ -50,6 +50,15 @@ class MobileTheme {
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
+      snackBarTheme: const SnackBarThemeData(
+        backgroundColor: surfaceElevated,
+        contentTextStyle: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.w500),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(10)),
+          side: BorderSide(color: Colors.white12),
+        ),
+      ),
       useMaterial3: true,
     );
   }

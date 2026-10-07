@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import date
+from pathlib import Path
 from backend.config import settings
 from backend.session import get_session
 from backend.services.cache_db import get_tmdb_cache, set_tmdb_cache
@@ -391,31 +392,45 @@ class TMDBClient:
         if cached is not None:
             return cached
 
-        curated_ids = [
-            (91555, "Rajinikanth"),
-            (93193, "Kamal Haasan"),
-            (91547, "Vijay"),
-            (148360, "Ajith Kumar"),
-            (85720, "Suriya"),
-            (93191, "Vikram"),
-            (550165, "Dhanush"),
-            (1123766, "Vijay Sethupathi"),
-            (587982, "Sivakarthikeyan"),
-            (123066, "Karthi"),
-            (222760, "Silambarasan"),
-            (1072750, "Fahadh Faasil"),
-            (559892, "Vishal"),
-            (292250, "S. J. Suryah"),
-            (91548, "Nayanthara"),
-            (116925, "Trisha Krishnan"),
-            (225312, "Samantha Ruth Prabhu"),
-            (1295762, "Keerthy Suresh"),
-            (91549, "Vadivelu"),
-            (85523, "Vivek"),
-            (141076, "Santhanam"),
-            (1540764, "Yogi Babu"),
-            (544897, "Soori"),
-        ]
+        curated_ids = []
+        for path in [Path("config/actors.json"), Path("backend/data/actors.json")]:
+            if path.exists():
+                try:
+                    import json
+                    with open(path, "r", encoding="utf-8") as f:
+                        actors_data = json.load(f)
+                    curated_ids = [(a.get("id"), a.get("name", "")) for a in actors_data if a.get("id")]
+                    if curated_ids:
+                        break
+                except Exception as e:
+                    logger.error(f"Failed to read {path}: {e}")
+
+        if not curated_ids:
+            curated_ids = [
+                (91555, "Rajinikanth"),
+                (93193, "Kamal Haasan"),
+                (91547, "Vijay"),
+                (148360, "Ajith Kumar"),
+                (85720, "Suriya"),
+                (93191, "Vikram"),
+                (550165, "Dhanush"),
+                (1123766, "Vijay Sethupathi"),
+                (587982, "Sivakarthikeyan"),
+                (123066, "Karthi"),
+                (222760, "Silambarasan"),
+                (1072750, "Fahadh Faasil"),
+                (559892, "Vishal"),
+                (292250, "S. J. Suryah"),
+                (91548, "Nayanthara"),
+                (116925, "Trisha Krishnan"),
+                (225312, "Samantha Ruth Prabhu"),
+                (1295762, "Keerthy Suresh"),
+                (91549, "Vadivelu"),
+                (85523, "Vivek"),
+                (141076, "Santhanam"),
+                (1540764, "Yogi Babu"),
+                (544897, "Soori"),
+            ]
 
         async def fetch_actor_info(p_id: int, fallback_name: str):
             details = await self.get_person_details(p_id)

@@ -193,6 +193,22 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+
+    if (_lanes.isEmpty && _curatedActors.isEmpty) {
+      return RefreshIndicator(
+        color: MobileTheme.accent,
+        backgroundColor: MobileTheme.surfaceElevated,
+        onRefresh: _loadDashboardData,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          children: [
+            SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+            _buildEmptyState(),
+          ],
+        ),
+      );
+    }
+
     return RefreshIndicator(
       color: MobileTheme.accent,
       backgroundColor: MobileTheme.surfaceElevated,
@@ -223,6 +239,92 @@ class _HomeScreenState extends State<HomeScreen> {
           }),
           const SizedBox(height: 24),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    if (ApiClient.isServerlessMode && _selectedLanguage == 'en' && !ApiClient.hasTraktKey) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: MobileTheme.accent.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.list_alt_rounded, color: MobileTheme.accent, size: 36),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Trakt API Key Required',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'English curated lists, trending, and box office discovery require a Trakt Client ID in Self-Serving mode.\n\nPlease configure your Trakt Client ID in Settings.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: MobileTheme.surfaceElevated,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: const BorderSide(color: Colors.white12),
+                  ),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 18, color: MobileTheme.accent),
+                label: const Text('Reload / Check Key'),
+                onPressed: _loadDashboardData,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.movie_filter_outlined, color: Colors.white30, size: 54),
+            const SizedBox(height: 12),
+            const Text(
+              'No titles found',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Unable to load movies for this category.',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: MobileTheme.surfaceElevated,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: Colors.white12),
+                ),
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 18, color: MobileTheme.accent),
+              label: const Text('Reload'),
+              onPressed: _loadDashboardData,
+            ),
+          ],
+        ),
       ),
     );
   }
