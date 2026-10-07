@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/movie.model.dart';
+import '../models/trakt_list.model.dart';
 
 class LocalStorage {
   static const String _historyKey = 'watch_history';
@@ -351,4 +352,104 @@ class LocalStorage {
   }
 
   static Future<void> setSubtitleFontSize(double size) => saveSubtitleFontSize(size);
+
+  // --- WATCHLIST (MOVIES & SERIES) ---
+  static const String _watchlistKey = 'user_watchlist';
+
+  static Future<List<Movie>> getWatchlist() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString(_watchlistKey);
+    if (jsonStr == null) return [];
+
+    try {
+      final List decoded = json.decode(jsonStr);
+      return decoded.map((item) => Movie.fromJson(item)).toList();
+    } catch (e) {
+      print('Failed to parse watchlist: $e');
+      return [];
+    }
+  }
+
+  static Future<void> addToWatchlist(Movie movie) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await getWatchlist();
+    list.removeWhere((m) => m.tmdbId == movie.tmdbId);
+    list.insert(0, movie);
+    final jsonStr = json.encode(list.map((m) => m.toJson()).toList());
+    await prefs.setString(_watchlistKey, jsonStr);
+  }
+
+  static Future<void> removeFromWatchlist(int tmdbId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await getWatchlist();
+    list.removeWhere((m) => m.tmdbId == tmdbId);
+    final jsonStr = json.encode(list.map((m) => m.toJson()).toList());
+    await prefs.setString(_watchlistKey, jsonStr);
+  }
+
+  static Future<bool> isWatchlisted(int tmdbId) async {
+    final list = await getWatchlist();
+    return list.any((m) => m.tmdbId == tmdbId);
+  }
+
+  static Future<bool> toggleWatchlist(Movie movie) async {
+    final isPresent = await isWatchlisted(movie.tmdbId);
+    if (isPresent) {
+      await removeFromWatchlist(movie.tmdbId);
+      return false;
+    } else {
+      await addToWatchlist(movie);
+      return true;
+    }
+  }
+
+  // --- STARRED CURATED LISTS ---
+  static const String _starredListsKey = 'starred_trakt_lists';
+
+  static Future<List<TraktList>> getStarredLists() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString(_starredListsKey);
+    if (jsonStr == null) return [];
+
+    try {
+      final List decoded = json.decode(jsonStr);
+      return decoded.map((item) => TraktList.fromJson(item)).toList();
+    } catch (e) {
+      print('Failed to parse starred lists: $e');
+      return [];
+    }
+  }
+
+  static Future<void> addStarredList(TraktList traktList) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await getStarredLists();
+    list.removeWhere((l) => l.id == traktList.id);
+    list.insert(0, traktList);
+    final jsonStr = json.encode(list.map((l) => l.toJson()).toList());
+    await prefs.setString(_starredListsKey, jsonStr);
+  }
+
+  static Future<void> removeStarredList(String listId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await getStarredLists();
+    list.removeWhere((l) => l.id == listId);
+    final jsonStr = json.encode(list.map((l) => l.toJson()).toList());
+    await prefs.setString(_starredListsKey, jsonStr);
+  }
+
+  static Future<bool> isListStarred(String listId) async {
+    final list = await getStarredLists();
+    return list.any((l) => l.id == listId);
+  }
+
+  static Future<bool> toggleStarredList(TraktList traktList) async {
+    final isPresent = await isListStarred(traktList.id);
+    if (isPresent) {
+      await removeStarredList(traktList.id);
+      return false;
+    } else {
+      await addStarredList(traktList);
+      return true;
+    }
+  }
 }

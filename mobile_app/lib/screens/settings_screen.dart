@@ -279,7 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(
         title: const Text(
           'Settings',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
       ),
       body: ListView(
@@ -328,8 +328,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             isServerless ? 'Self-Serving (Serverless)' : 'Dedicated Backend Server',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14.5,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -392,7 +392,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       const Text(
                         'TMDb Access Token / API Key',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500, fontSize: 12.5),
                       ),
                       _buildStatusBadge(
                         _tmdbStatus,
@@ -404,6 +404,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   TextField(
                     controller: _tmdbController,
                     obscureText: _obscureTmdb,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.normal),
                     decoration: InputDecoration(
                       hintText: 'Bearer Token (eyJ...) or 32-char API Key',
                       isDense: true,
@@ -411,11 +412,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fillColor: MobileTheme.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.white12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: MobileTheme.accent),
+                        borderSide: const BorderSide(color: MobileTheme.accent, width: 1.2),
                       ),
                       prefixIcon: const Icon(Icons.vpn_key_rounded, size: 18, color: Colors.white54),
                       suffixIcon: Row(
@@ -460,7 +465,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       const Text(
                         'Trakt.tv Client ID',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500, fontSize: 12.5),
                       ),
                       _buildStatusBadge(
                         _traktStatus,
@@ -472,6 +477,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _traktController,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.normal),
                     decoration: InputDecoration(
                       hintText: 'Trakt Application Client ID',
                       isDense: true,
@@ -479,22 +485,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fillColor: MobileTheme.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.white12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: MobileTheme.accent),
+                        borderSide: const BorderSide(color: MobileTheme.accent, width: 1.2),
                       ),
                       prefixIcon: const Icon(Icons.list_alt_rounded, size: 18, color: Colors.white54),
                       suffixIcon: _isSavingTrakt
                           ? const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
-                              ),
-                            )
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
+                                ),
+                              )
                           : IconButton(
                               icon: const Icon(Icons.save_rounded, color: MobileTheme.accent),
                               tooltip: 'Save Trakt Client ID',
@@ -512,11 +522,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   // GitHub CDN URL Field
                   const Text(
                     'Catalog CDN Base URL',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500, fontSize: 12.5),
                   ),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _cdnController,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.normal),
                     decoration: InputDecoration(
                       hintText: 'https://mukesh-5059.github.io/ezmv/catalog',
                       isDense: true,
@@ -524,11 +535,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fillColor: MobileTheme.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.white12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: MobileTheme.accent),
+                        borderSide: const BorderSide(color: MobileTheme.accent, width: 1.2),
                       ),
                       prefixIcon: const Icon(Icons.link_rounded, size: 18, color: Colors.white54),
                       suffixIcon: _isSavingCdn
@@ -590,7 +605,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _isConnected == true
                               ? 'Server Online'
                               : (_isConnected == false ? 'Server Offline' : 'Checking Connection...'),
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600, fontSize: 13.5),
                         ),
                       ),
                       IconButton(
@@ -609,20 +624,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 14),
                   TextField(
                     controller: _serverController,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.normal),
                     decoration: InputDecoration(
                       labelText: 'Server API URL / IP',
-                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 13),
+                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12.5, fontWeight: FontWeight.w500),
                       hintText: 'http://192.168.1.100:8080/api/v1',
                       isDense: true,
                       filled: true,
                       fillColor: MobileTheme.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.white12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: MobileTheme.accent),
+                        borderSide: const BorderSide(color: MobileTheme.accent, width: 1.2),
                       ),
                       suffixIcon: _isSavingServer
                           ? const Padding(
@@ -677,7 +697,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             child: ListTile(
               leading: const Icon(Icons.delete_sweep_outlined, color: Colors.white70),
-              title: const Text('Clear Watch History', style: TextStyle(color: Colors.white, fontSize: 14)),
+              title: Text('Clear Watch History', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13.5, fontWeight: FontWeight.w500)),
               subtitle: const Text('Delete saved playback checkpoints & resume states', style: TextStyle(color: Colors.white38, fontSize: 11)),
               trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
               onTap: () async {
@@ -717,20 +737,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               color: MobileTheme.surfaceElevated,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Column(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('EzMV Mobile Client', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('v1.0.0', style: TextStyle(color: MobileTheme.accent, fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text('EzMV Mobile Client', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.w600, fontSize: 13.5)),
+                    const Text('v1.0.0', style: TextStyle(color: MobileTheme.accent, fontWeight: FontWeight.w600, fontSize: 12)),
                   ],
                 ),
-                SizedBox(height: 6),
-                Text(
+                const SizedBox(height: 6),
+                const Text(
                   'Hybrid serverless streaming engine with GitHub Actions catalog pipeline, direct TMDb & Trakt discovery, and subtitle integration powered by shared_core.',
-                  style: TextStyle(color: Colors.white54, fontSize: 11, height: 1.4),
+                  style: TextStyle(color: Colors.white38, fontSize: 11.5, height: 1.4),
                 ),
               ],
             ),
@@ -775,7 +795,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title,
               style: TextStyle(
                 color: selected ? Colors.white : Colors.white70,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
                 fontSize: 13,
               ),
             ),
@@ -842,7 +862,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         style: TextStyle(
           color: textColor,
           fontSize: 10,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -852,9 +872,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Text(
       title,
       style: const TextStyle(
-        color: Colors.white54,
+        color: Colors.white38,
         fontSize: 11,
-        fontWeight: FontWeight.bold,
+        fontWeight: FontWeight.w600,
         letterSpacing: 0.8,
       ),
     );

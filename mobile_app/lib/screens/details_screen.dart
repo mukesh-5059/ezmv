@@ -30,6 +30,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
   Set<int> _watchedEpisodes = {};
   Map<int, bool> _seasonWatchedMap = {};
   int _savedProgressSeconds = 0;
+  bool _isWatchlisted = false;
 
   bool get _isTv => widget.movie.isTv || (_details?.isTv ?? false);
 
@@ -44,11 +45,13 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final pos = await LocalStorage.getProgress(widget.movie.tmdbId);
     final tvLast = await LocalStorage.getTvLastWatched(widget.movie.tmdbId);
     final isWatched = await LocalStorage.isWatched(widget.movie.tmdbId, mediaType: widget.movie.mediaType);
+    final isWl = await LocalStorage.isWatchlisted(widget.movie.tmdbId);
     if (mounted) {
       setState(() {
         _savedProgressSeconds = pos;
         _tvLastWatched = tvLast;
         _isMovieWatched = isWatched;
+        _isWatchlisted = isWl;
       });
       _loadCurrentSeasonProgress();
       _checkSeasonsWatched();
@@ -249,6 +252,64 @@ class _DetailsScreenState extends State<DetailsScreen> {
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _toggleWatchlist() async {
+    final added = await LocalStorage.toggleWatchlist(widget.movie);
+    if (mounted) {
+      setState(() => _isWatchlisted = added);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                added ? Icons.bookmark_added_rounded : Icons.bookmark_remove_rounded,
+                color: added ? Colors.greenAccent : Colors.white70,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                added ? 'Added to Watchlist' : 'Removed from Watchlist',
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          backgroundColor: MobileTheme.surfaceElevated,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
+  }
+
+  Widget _buildWatchlistButton() {
+    return SizedBox(
+      height: 46,
+      width: 48,
+      child: Tooltip(
+        message: _isWatchlisted ? 'In Watchlist' : 'Add to Watchlist',
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            foregroundColor: _isWatchlisted ? MobileTheme.accent : Colors.white70,
+            backgroundColor: _isWatchlisted ? MobileTheme.accent.withValues(alpha: 0.15) : MobileTheme.surfaceElevated,
+            side: BorderSide(
+              color: _isWatchlisted ? MobileTheme.accent : Colors.white24,
+              width: 1,
+            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          onPressed: _toggleWatchlist,
+          child: Icon(
+            _isWatchlisted ? Icons.bookmark_added_rounded : Icons.bookmark_add_outlined,
+            size: 22,
+            color: _isWatchlisted ? MobileTheme.accent : Colors.white70,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -423,7 +484,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Action Buttons (Play / Resume)
+                  // Action Buttons (Play / Resume / Watchlist)
                   if (!_isTv) ...[
                     if (_savedProgressSeconds > 15) ...[
                       Row(
@@ -445,71 +506,97 @@ class _DetailsScreenState extends State<DetailsScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
                           SizedBox(
                             height: 46,
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                side: const BorderSide(color: Colors.white24, width: 1),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            child: Tooltip(
+                              message: 'Start Over',
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.white24, width: 1),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                ),
+                                onPressed: () async {
+                                  await LocalStorage.clearProgress(widget.movie.tmdbId);
+                                  setState(() => _savedProgressSeconds = 0);
+                                  _playMovieStream(initialSeconds: 0);
+                                },
+                                child: const Icon(Icons.replay_rounded, size: 20),
                               ),
-                              icon: const Icon(Icons.replay_rounded, size: 20),
-                              label: const Text('Start Over', style: TextStyle(fontSize: 14)),
-                              onPressed: () async {
-                                await LocalStorage.clearProgress(widget.movie.tmdbId);
-                                setState(() => _savedProgressSeconds = 0);
-                                _playMovieStream(initialSeconds: 0);
-                              },
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          _buildWatchlistButton(),
                         ],
                       ),
                     ] else ...[
-                      SizedBox(
-                        width: double.infinity,
-                        height: 46,
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: MobileTheme.accent,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 46,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: MobileTheme.accent,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                                label: const Text(
+                                  'Play Movie',
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: () => _playMovieStream(initialSeconds: 0),
+                              ),
+                            ),
                           ),
-                          icon: const Icon(Icons.play_arrow_rounded, size: 24),
-                          label: const Text(
-                            'Play Movie',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                          ),
-                          onPressed: () => _playMovieStream(initialSeconds: 0),
-                        ),
+                          const SizedBox(width: 8),
+                          _buildWatchlistButton(),
+                        ],
                       ),
                     ],
-                  ] else if (_tvLastWatched != null && (_tvLastWatched!['position'] as int? ?? 0) > 15) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: MobileTheme.accent,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        icon: const Icon(Icons.play_arrow_rounded, size: 24),
-                        label: Text(
-                          'Resume S${_tvLastWatched!['season']}E${_tvLastWatched!['episode']} (${_formatTime(_tvLastWatched!['position'] as int)})',
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () {
-                          if (_currentSeasonData != null) {
-                            final targetEp = _currentSeasonData!.episodes.cast<TvEpisode?>().firstWhere(
-                                  (e) => e?.episodeNumber == _tvLastWatched!['episode'],
-                                  orElse: () => null,
-                                );
-                            if (targetEp != null) {
-                              _playEpisodeStream(targetEp);
-                            }
-                          }
-                        },
+                  ] else if (_isTv) ...[
+                    if (_tvLastWatched != null && (_tvLastWatched!['position'] as int? ?? 0) > 15) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 46,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: MobileTheme.accent,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                                label: Text(
+                                  'Resume S${_tvLastWatched!['season']}E${_tvLastWatched!['episode']} (${_formatTime(_tvLastWatched!['position'] as int)})',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: () {
+                                  if (_currentSeasonData != null) {
+                                    final targetEp = _currentSeasonData!.episodes.cast<TvEpisode?>().firstWhere(
+                                          (e) => e?.episodeNumber == _tvLastWatched!['episode'],
+                                          orElse: () => null,
+                                        );
+                                    if (targetEp != null) {
+                                      _playEpisodeStream(targetEp);
+                                    }
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _buildWatchlistButton(),
+                        ],
                       ),
-                    ),
+                    ] else ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _buildWatchlistButton(),
+                      ),
+                    ],
                   ],
 
                   const SizedBox(height: 14),

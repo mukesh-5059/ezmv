@@ -24,6 +24,7 @@ class _SearchScreenState extends State<SearchScreen> {
   int _selectedTabIndex = 0; // 0: Curated Lists, 1: Movies
   bool _isDescExpanded = false;
   bool _showBackToTop = false;
+  bool _isStarredList = false;
 
   int _directPage = 1;
   int _listPage = 1;
@@ -209,14 +210,47 @@ class _SearchScreenState extends State<SearchScreen> {
       _isLoadingListMovies = true;
     });
 
+    final isStarred = await LocalStorage.isListStarred(list.id);
     final listMovies = await ApiClient.getListItems(listId: list.id, page: 1, limit: 50);
 
     if (mounted) {
       setState(() {
+        _isStarredList = isStarred;
         _displayMovies = listMovies;
         _isLoadingListMovies = false;
         _hasMore = listMovies.length >= 50;
       });
+    }
+  }
+
+  Future<void> _toggleStarredList() async {
+    if (_selectedList == null) return;
+    final starred = await LocalStorage.toggleStarredList(_selectedList!);
+    if (mounted) {
+      setState(() => _isStarredList = starred);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                starred ? Icons.star_rounded : Icons.star_border_rounded,
+                color: starred ? Colors.amberAccent : Colors.white70,
+                size: 20,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                starred ? 'Added to Starred Lists' : 'Removed from Starred Lists',
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          backgroundColor: MobileTheme.surfaceElevated,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
     }
   }
 
@@ -433,16 +467,20 @@ class _SearchScreenState extends State<SearchScreen> {
             if (count > 0) ...[
               const SizedBox(width: 6),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.black26 : Colors.white10,
+                  color: isSelected ? Colors.black38 : Colors.white.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isSelected ? Colors.white30 : Colors.white12,
+                    width: 0.8,
+                  ),
                 ),
                 child: Text(
                   '$count',
                   style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.white70,
-                    fontSize: 10,
+                    color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.9),
+                    fontSize: 10.5,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -480,12 +518,13 @@ class _SearchScreenState extends State<SearchScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       InkWell(
                         onTap: _clearSelectedList,
                         borderRadius: BorderRadius.circular(8),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
                           decoration: BoxDecoration(
                             color: Colors.white10,
                             borderRadius: BorderRadius.circular(8),
@@ -501,15 +540,59 @@ class _SearchScreenState extends State<SearchScreen> {
                         ),
                       ),
                       const Spacer(),
+                      InkWell(
+                        onTap: _toggleStarredList,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                          decoration: BoxDecoration(
+                            color: _isStarredList ? Colors.amber.withValues(alpha: 0.15) : Colors.white10,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isStarredList ? Colors.amberAccent.withValues(alpha: 0.5) : Colors.white12,
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isStarredList ? Icons.star_rounded : Icons.star_border_rounded,
+                                size: 15,
+                                color: _isStarredList ? Colors.amberAccent : Colors.white70,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _isStarredList ? 'Starred' : 'Star',
+                                style: TextStyle(
+                                  color: _isStarredList ? Colors.amberAccent : Colors.white70,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
                         decoration: BoxDecoration(
-                          color: MobileTheme.accent.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(6),
+                          color: MobileTheme.accent.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: MobileTheme.accent.withValues(alpha: 0.6),
+                            width: 0.8,
+                          ),
                         ),
                         child: Text(
                           '${_selectedList!.itemCount} items',
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.3,
+                          ),
                         ),
                       ),
                     ],
@@ -856,12 +939,12 @@ class _SearchScreenState extends State<SearchScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.check_circle_outline_rounded, color: Colors.white38, size: 14),
+                    const Icon(Icons.check_circle_outline_rounded, color: Colors.white54, size: 14),
                     const SizedBox(width: 6),
                     Text(
                       'End of $label ($count loaded)',
                       style: const TextStyle(
-                        color: Colors.white38,
+                        color: Colors.white60,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
