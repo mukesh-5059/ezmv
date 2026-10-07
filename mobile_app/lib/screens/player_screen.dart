@@ -6,7 +6,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:shared_core/shared_core.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../theme.dart';
-import '../widgets/resume_dialog.dart';
 import '../widgets/subtitle_side_panel.dart';
 import '../widgets/subtitle_settings_side_panel.dart';
 
@@ -121,24 +120,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }));
 
     try {
+      final startDuration = widget.initialPositionSeconds > 0
+          ? Duration(seconds: widget.initialPositionSeconds)
+          : null;
+
       await _player.open(
-        Media(widget.streamUrl, httpHeaders: _requestHeaders),
+        Media(
+          widget.streamUrl,
+          httpHeaders: _requestHeaders,
+          start: startDuration,
+        ),
         play: true,
       );
 
-      // Check if we should resume
-      if (widget.initialPositionSeconds > 15) {
-        WidgetsBinding.instance.addPostFrameCallback((_) async {
-          if (!mounted) return;
-          final resume = await ResumeDialog.show(
-            context: context,
-            savedSeconds: widget.initialPositionSeconds,
-            formatDuration: _formatDuration,
-          );
-          if (resume == true) {
-            await _player.seek(Duration(seconds: widget.initialPositionSeconds));
+      if (widget.initialPositionSeconds > 0) {
+        final startPosition = Duration(seconds: widget.initialPositionSeconds);
+        _player.stream.buffer.firstWhere((b) => b > Duration.zero).then((_) async {
+          await Future.delayed(const Duration(milliseconds: 300));
+          if (mounted) {
+            await _player.seek(startPosition);
           }
-        });
+        }).catchError((_) {});
       }
     } catch (e) {
       if (mounted) {
@@ -288,16 +290,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
       }
     }
-  }
-
-  String _formatDuration(int totalSecs) {
-    final hours = totalSecs ~/ 3600;
-    final minutes = (totalSecs % 3600) ~/ 60;
-    final seconds = totalSecs % 60;
-    if (hours > 0) {
-      return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
-    }
-    return '${minutes}m ${seconds.toString().padLeft(2, '0')}s';
   }
 
   Future<void> _openSubtitleSidePanel() async {

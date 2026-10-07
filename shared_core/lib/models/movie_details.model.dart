@@ -1,4 +1,5 @@
 import 'tv_season.model.dart';
+import 'movie.model.dart';
 
 class CastMember {
   final int id;
@@ -87,23 +88,57 @@ class MovieDetails {
 
   bool get isTv => mediaType == 'tv';
 
+  factory MovieDetails.fromMovie(Movie movie) {
+    return MovieDetails(
+      tmdbId: movie.tmdbId,
+      imdbId: movie.imdbId,
+      title: movie.title,
+      overview: movie.overview,
+      releaseDate: movie.releaseDate,
+      posterPath: movie.posterPath,
+      backdropPath: movie.backdropPath,
+      voteAverage: movie.voteAverage,
+      voteCount: 0,
+      mediaType: movie.mediaType,
+    );
+  }
+
   factory MovieDetails.fromJson(Map<String, dynamic> json) {
     final rawGenres = json['genres'] as List? ?? [];
-    final rawCast = json['cast'] as List? ?? [];
+    final rawCast = json['cast'] as List? ??
+        (json['credits'] != null && json['credits']['cast'] is List
+            ? json['credits']['cast'] as List
+            : []);
     final rawSeasons = json['seasons'] as List? ?? [];
+
+    String? imdb;
+    if (json['imdb_id'] != null && json['imdb_id'].toString().isNotEmpty) {
+      imdb = json['imdb_id'].toString();
+    } else if (json['external_ids'] != null && json['external_ids']['imdb_id'] != null) {
+      imdb = json['external_ids']['imdb_id'].toString();
+    }
+
+    int? computedRuntime = json['runtime'];
+    if (computedRuntime == null && json['episode_run_time'] is List && (json['episode_run_time'] as List).isNotEmpty) {
+      computedRuntime = json['episode_run_time'][0];
+    }
+
+    final detectedMediaType = json['media_type'] ??
+        (json['seasons'] != null || json['number_of_seasons'] != null || json['name'] != null ? 'tv' : 'movie');
+
     return MovieDetails(
-      tmdbId: json['tmdb_id'] ?? 0,
-      imdbId: json['imdb_id'],
-      title: json['title'] ?? '',
+      tmdbId: json['tmdb_id'] ?? json['id'] ?? 0,
+      imdbId: imdb,
+      title: json['title'] ?? json['name'] ?? '',
       overview: json['overview'] ?? '',
-      releaseDate: json['release_date'] ?? '',
+      releaseDate: json['release_date'] ?? json['first_air_date'] ?? '',
       posterPath: json['poster_path'] ?? '',
       backdropPath: json['backdrop_path'] ?? '',
       voteAverage: (json['vote_average'] as num?)?.toDouble() ?? 0.0,
       voteCount: json['vote_count'] ?? 0,
-      runtime: json['runtime'],
+      runtime: computedRuntime,
       tagline: json['tagline'],
-      mediaType: json['media_type'] ?? 'movie',
+      mediaType: detectedMediaType,
       numberOfSeasons: json['number_of_seasons'] ?? rawSeasons.length,
       numberOfEpisodes: json['number_of_episodes'] ?? 0,
       genres: rawGenres.map((g) => GenreItem.fromJson(Map<String, dynamic>.from(g))).toList(),

@@ -110,7 +110,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
     });
 
     try {
-      final details = await ApiClient.getMovieDetails(widget.movie.tmdbId, mediaType: widget.movie.mediaType);
+      final details = await ApiClient.getMovieDetails(
+        widget.movie.tmdbId,
+        mediaType: widget.movie.mediaType,
+        fallbackMovie: widget.movie,
+      );
       if (!mounted) return;
 
       if (details == null) {
@@ -421,24 +425,64 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
                   // Action Buttons (Play / Resume)
                   if (!_isTv) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: MobileTheme.accent,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        icon: const Icon(Icons.play_arrow_rounded, size: 24),
-                        label: Text(
-                          _savedProgressSeconds > 15
-                              ? 'Resume (${_formatTime(_savedProgressSeconds)})'
-                              : 'Play Movie',
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () => _playMovieStream(initialSeconds: _savedProgressSeconds),
+                    if (_savedProgressSeconds > 15) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 46,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: MobileTheme.accent,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                                label: Text(
+                                  'Resume (${_formatTime(_savedProgressSeconds)})',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                ),
+                                onPressed: () => _playMovieStream(initialSeconds: _savedProgressSeconds),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          SizedBox(
+                            height: 46,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.white24, width: 1),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.replay_rounded, size: 20),
+                              label: const Text('Start Over', style: TextStyle(fontSize: 14)),
+                              onPressed: () async {
+                                await LocalStorage.clearProgress(widget.movie.tmdbId);
+                                setState(() => _savedProgressSeconds = 0);
+                                _playMovieStream(initialSeconds: 0);
+                              },
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
+                    ] else ...[
+                      SizedBox(
+                        width: double.infinity,
+                        height: 46,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: MobileTheme.accent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                          label: const Text(
+                            'Play Movie',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                          ),
+                          onPressed: () => _playMovieStream(initialSeconds: 0),
+                        ),
+                      ),
+                    ],
                   ] else if (_tvLastWatched != null && (_tvLastWatched!['position'] as int? ?? 0) > 15) ...[
                     SizedBox(
                       width: double.infinity,

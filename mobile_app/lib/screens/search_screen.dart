@@ -134,11 +134,19 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _listPage = nextListPage;
           _isLoadingMore = false;
-          if (nextMovies.isEmpty || nextMovies.length < 20) {
+          if (nextMovies.isEmpty) {
             _hasMore = false;
-          }
-          if (nextMovies.isNotEmpty) {
-            _displayMovies.addAll(nextMovies);
+          } else {
+            final existingKeys = _displayMovies.map((m) => m.tmdbId > 0 ? '${m.mediaType}_${m.tmdbId}' : m.title.toLowerCase()).toSet();
+            final uniqueNext = nextMovies.where((m) {
+              final key = m.tmdbId > 0 ? '${m.mediaType}_${m.tmdbId}' : m.title.toLowerCase();
+              return !existingKeys.contains(key);
+            }).toList();
+            if (uniqueNext.isEmpty) {
+              _hasMore = false;
+            } else {
+              _displayMovies.addAll(uniqueNext);
+            }
           }
         });
       }
@@ -155,12 +163,22 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _page = nextPage;
           _isLoadingMore = false;
-          final hasMoreNow = nextMovies.length >= 20;
-          _hasMore = hasMoreNow;
-          _directHasMore = hasMoreNow;
-          if (nextMovies.isNotEmpty) {
-            _directMovies.addAll(nextMovies);
-            _displayMovies.addAll(nextMovies);
+          if (nextMovies.isEmpty) {
+            _hasMore = false;
+            _directHasMore = false;
+          } else {
+            final existingKeys = _directMovies.map((m) => m.tmdbId > 0 ? '${m.mediaType}_${m.tmdbId}' : m.title.toLowerCase()).toSet();
+            final uniqueNext = nextMovies.where((m) {
+              final key = m.tmdbId > 0 ? '${m.mediaType}_${m.tmdbId}' : m.title.toLowerCase();
+              return !existingKeys.contains(key);
+            }).toList();
+            if (uniqueNext.isEmpty) {
+              _hasMore = false;
+              _directHasMore = false;
+            } else {
+              _directMovies.addAll(uniqueNext);
+              _displayMovies.addAll(uniqueNext);
+            }
           }
         });
       }
@@ -191,7 +209,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _displayMovies = listMovies;
         _isLoadingListMovies = false;
-        _hasMore = listMovies.length >= 20;
+        _hasMore = listMovies.isNotEmpty;
       });
     }
   }
@@ -327,6 +345,38 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildEmptyState() {
+    if (ApiClient.isServerlessMode && !ApiClient.hasTmdbKey) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: MobileTheme.accent.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.vpn_key_rounded, color: MobileTheme.accent, size: 36),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'TMDb Key Required',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Direct global search and recommendations require a free TMDb API key in Serverless Mode.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return const Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
