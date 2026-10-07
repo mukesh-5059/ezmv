@@ -19,6 +19,15 @@ class FilterOption {
       yearMax: json['year_max'] as int?,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'label': label,
+      'year_min': yearMin,
+      'year_max': yearMax,
+    };
+  }
 }
 
 class FiltersData {
@@ -49,5 +58,14 @@ class FiltersData {
           .map((item) => FilterOption.fromJson(Map<String, dynamic>.from(item)))
           .toList(),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'languages': languages.map((e) => e.toJson()).toList(),
+      'genres': genres.map((e) => e.toJson()).toList(),
+      'years': years.map((e) => e.toJson()).toList(),
+      'sort_options': sortOptions.map((e) => e.toJson()).toList(),
+    };
   }
 }

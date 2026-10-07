@@ -13,6 +13,8 @@ export 'models/tv_season.model.dart';
 
 // Core Services
 export 'core/api_client.dart';
+export 'core/cache_manager.dart';
 export 'core/discovery_service.dart';
 export 'core/local_storage.dart';
 export 'core/search_history.dart';
+export 'utils/profanity_checker.dart';

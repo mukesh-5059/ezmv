@@ -31,32 +31,6 @@ class _StarredListsScreenState extends State<StarredListsScreen> {
     }
   }
 
-  Future<void> _unstarList(TraktList list) async {
-    await LocalStorage.removeStarredList(list.id);
-    _loadStarredLists();
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(
-            children: [
-              Icon(Icons.star_border_rounded, color: Colors.white70, size: 20),
-              SizedBox(width: 10),
-              Text(
-                'Removed from Starred Lists',
-                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-          backgroundColor: MobileTheme.surfaceElevated,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -183,23 +157,7 @@ class _StarredListsScreenState extends State<StarredListsScreen> {
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(width: 6),
-                                      InkWell(
-                                        onTap: () => _unstarList(list),
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.all(6),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withValues(alpha: 0.06),
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: const Icon(
-                                            Icons.delete_outline_rounded,
-                                            size: 16,
-                                            color: Colors.white60,
-                                          ),
-                                        ),
-                                      ),
+
                                     ],
                                   ),
                                   if (list.description.trim().isNotEmpty) ...[

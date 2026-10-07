@@ -170,6 +170,12 @@
       "languageVersion": "3.0"
     },
     {
+      "name": "profanity_filter",
+      "rootUri": "file:///home/mukes/.pub-cache/hosted/pub.dev/profanity_filter-2.0.0",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
+    },
+    {
       "name": "shared_preferences",
       "rootUri": "file:///home/mukes/.pub-cache/hosted/pub.dev/shared_preferences-2.5.5",
       "packageUri": "lib/",

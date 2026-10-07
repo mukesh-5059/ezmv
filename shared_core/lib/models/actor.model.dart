@@ -25,6 +25,15 @@ class Actor {
   String get profileUrl => (profilePath != null && profilePath!.isNotEmpty)
       ? 'https://image.tmdb.org/t/p/w185$profilePath'
       : '';
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'profile_path': profilePath,
+      'known_for_department': knownForDepartment,
+    };
+  }
 }
 
 class ActorFilmography {
@@ -69,4 +78,18 @@ class ActorFilmography {
   String get profileUrl => (profilePath != null && profilePath!.isNotEmpty)
       ? 'https://image.tmdb.org/t/p/w185$profilePath'
       : '';
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'biography': biography,
+      'profile_path': profilePath,
+      'known_for_department': knownForDepartment,
+      'birthday': birthday,
+      'place_of_birth': placeOfBirth,
+      'popular': popular.map((m) => m.toJson()).toList(),
+      'recent': recent.map((m) => m.toJson()).toList(),
+    };
+  }
 }

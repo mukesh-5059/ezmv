@@ -43,4 +43,18 @@ class TvEpisode {
     if (runtime == null || runtime! <= 0) return '';
     return '${runtime}m';
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'episode_number': episodeNumber,
+      'season_number': seasonNumber,
+      'name': name,
+      'overview': overview,
+      'still_path': stillPath,
+      'air_date': airDate,
+      'vote_average': voteAverage,
+      'runtime': runtime,
+    };
+  }
 }

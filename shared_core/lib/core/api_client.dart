@@ -12,6 +12,8 @@ import '../models/filter.model.dart';
 import '../models/trakt_list.model.dart';
 import '../models/tv_season.model.dart';
 import '../models/actor.model.dart';
+import 'cache_manager.dart';
+import '../utils/profanity_checker.dart';
 
 enum CatalogSourceMode {
   cdn,    // Self-Serving / Serverless via GitHub Pages CDN (Default)
@@ -81,6 +83,8 @@ class ApiClient {
       if (!isReachable) {
         await autoDiscoverAndConnect();
       }
+    } else {
+      CacheManager.cleanExpired();
     }
   }
 
@@ -128,6 +132,9 @@ class ApiClient {
     _catalogSourceMode = mode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('catalog_source_mode', mode == CatalogSourceMode.server ? 'server' : 'cdn');
+    if (mode == CatalogSourceMode.cdn) {
+      CacheManager.cleanExpired();
+    }
   }
 
   static Future<void> setServerlessMode(bool enabled) async {
@@ -399,26 +406,55 @@ class ApiClient {
   static Future<List<TraktList>> searchLists({String? query, int page = 1, int limit = 20}) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
       if (hasTraktKey) {
+        final cleanQ = (query ?? '').trim();
+        if (cleanQ.isNotEmpty && ProfanityChecker.hasProfanity(cleanQ)) {
+          return [];
+        }
+
+        final cacheKey = cleanQ.isNotEmpty
+            ? 'trakt:lists:search:${cleanQ}_${page}_$limit'
+            : 'trakt:lists:popular:${page}_$limit';
+
+        final cached = await CacheManager.get(cacheKey);
+        if (cached is List) {
+          return cached.map((item) => TraktList.fromJson(Map<String, dynamic>.from(item))).toList();
+        }
+
         try {
-          final isQuery = query != null && query.trim().isNotEmpty;
+          final isQuery = cleanQ.isNotEmpty;
           final url = isQuery
-              ? Uri.parse('https://api.trakt.tv/search/list?query=${Uri.encodeComponent(query.trim())}&page=$page&limit=$limit')
+              ? Uri.parse('https://api.trakt.tv/search/list?query=${Uri.encodeComponent(cleanQ)}&page=$page&limit=$limit')
               : Uri.parse('https://api.trakt.tv/lists/popular?page=$page&limit=$limit');
           final response = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 15));
           if (response.statusCode == 200) {
             final List raw = json.decode(response.body);
-            return raw.map((item) {
+            final lists = <TraktList>[];
+            for (final item in raw) {
               final listObj = item['list'] != null ? item['list'] : item;
-              return TraktList(
-                id: listObj['ids']?['trakt']?.toString() ?? listObj['id']?.toString() ?? '',
-                name: listObj['name'] ?? '',
-                description: listObj['description'] ?? '',
+              final name = listObj['name'] ?? '';
+              final description = listObj['description'] ?? '';
+              final slug = listObj['ids']?['slug'] ?? listObj['slug'] ?? '';
+              if (ProfanityChecker.hasProfanity(name) ||
+                  ProfanityChecker.hasProfanity(description) ||
+                  ProfanityChecker.hasProfanity(slug)) {
+                continue;
+              }
+              final id = listObj['ids']?['trakt']?.toString() ?? listObj['id']?.toString() ?? '';
+              if (id.isEmpty) continue;
+              lists.add(TraktList(
+                id: id,
+                name: name,
+                description: description,
                 itemCount: (listObj['item_count'] as num?)?.toInt() ?? 0,
                 likes: (listObj['likes'] as num?)?.toInt() ?? (item['like_count'] as num?)?.toInt() ?? 0,
                 userName: listObj['user']?['username'] ?? listObj['user_name'] ?? '',
-                slug: listObj['ids']?['slug'] ?? listObj['slug'] ?? '',
-              );
-            }).toList();
+                slug: slug,
+              ));
+            }
+            if (lists.isNotEmpty) {
+              await CacheManager.set(cacheKey, lists.map((l) => l.toJson()).toList(), CacheManager.searchTtl);
+            }
+            return lists;
           }
         } catch (e) {
           print('Direct Trakt searchLists failed: $e');
@@ -549,20 +585,27 @@ class ApiClient {
 
   static Future<List<Movie>> _fetchTraktLaneMovies(Map<String, dynamic> cfg, {int page = 1, int limit = 20}) async {
     if (!hasTraktKey) return [];
+    final lType = cfg['type']?.toString() ?? '';
+    final listId = cfg['list_id']?.toString() ?? '';
+    final period = cfg['period']?.toString() ?? '';
+    final cacheKey = 'trakt:lane:${lType}_${listId}_${period}_${page}_$limit';
+
+    final cached = await CacheManager.get(cacheKey);
+    if (cached is List) {
+      return cached.map((e) => Movie.fromJson(Map<String, dynamic>.from(e))).toList();
+    }
+
     try {
-      final lType = cfg['type']?.toString() ?? '';
       Uri? url;
       if (lType == 'trakt_trending') {
         url = Uri.parse('https://api.trakt.tv/movies/trending?page=$page&limit=$limit');
       } else if (lType == 'trakt_watched') {
-        final period = cfg['period'] ?? 'weekly';
         url = Uri.parse('https://api.trakt.tv/movies/watched/$period?page=$page&limit=$limit');
       } else if (lType == 'trakt_box_office') {
         url = Uri.parse('https://api.trakt.tv/movies/boxoffice');
       } else if (lType == 'trakt_anticipated') {
         url = Uri.parse('https://api.trakt.tv/movies/anticipated?page=$page&limit=$limit');
       } else if (lType == 'trakt_list') {
-        final listId = cfg['list_id'] ?? '';
         url = Uri.parse('https://api.trakt.tv/lists/$listId/items?page=$page&limit=$limit&extended=full');
       }
 
@@ -570,7 +613,11 @@ class ApiClient {
         final resp = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 20));
         if (resp.statusCode == 200) {
           final List raw = json.decode(resp.body);
-          return await _enrichTraktMedia(raw);
+          final movies = await _enrichTraktMedia(raw);
+          if (movies.isNotEmpty) {
+            await CacheManager.set(cacheKey, movies.map((m) => m.toJson()).toList(), CacheManager.searchTtl);
+          }
+          return movies;
         }
       }
     } catch (e) {
@@ -602,12 +649,22 @@ class ApiClient {
   static Future<List<Movie>> getListItems({required String listId, int page = 1, int limit = 20}) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
       if (hasTraktKey) {
+        final cacheKey = 'trakt:list:$listId:${page}_$limit';
+        final cached = await CacheManager.get(cacheKey);
+        if (cached is List) {
+          return cached.map((e) => Movie.fromJson(Map<String, dynamic>.from(e))).toList();
+        }
+
         try {
           final url = Uri.parse('https://api.trakt.tv/lists/$listId/items?page=$page&limit=$limit&extended=full');
           final response = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 20));
           if (response.statusCode == 200) {
             final List raw = json.decode(response.body);
-            return await _enrichTraktMedia(raw);
+            final movies = await _enrichTraktMedia(raw);
+            if (movies.isNotEmpty) {
+              await CacheManager.set(cacheKey, movies.map((m) => m.toJson()).toList(), CacheManager.searchTtl);
+            }
+            return movies;
           }
         } catch (e) {
           print('Direct Trakt getListItems failed: $e');
@@ -638,6 +695,15 @@ class ApiClient {
     final isQuery = cleanQuery != null && cleanQuery.isNotEmpty;
 
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      final cacheKey = isQuery
+          ? 'search_movies:${cleanQuery}_$page'
+          : 'trending_multi_$page';
+
+      final cached = await CacheManager.get(cacheKey);
+      if (cached is List) {
+        return cached.map((e) => Movie.fromJson(Map<String, dynamic>.from(e))).toList();
+      }
+
       if (isQuery && hasTraktKey) {
         try {
           final encodedQ = Uri.encodeComponent(cleanQuery);
@@ -645,7 +711,11 @@ class ApiClient {
           final response = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 15));
           if (response.statusCode == 200) {
             final List raw = json.decode(response.body);
-            return await _enrichTraktMedia(raw);
+            final movies = await _enrichTraktMedia(raw);
+            if (movies.isNotEmpty) {
+              await CacheManager.set(cacheKey, movies.map((m) => m.toJson()).toList(), CacheManager.searchTtl);
+            }
+            return movies;
           }
         } catch (e) {
           print('Trakt searchMovies failed, falling back to TMDB: $e');
@@ -666,10 +736,14 @@ class ApiClient {
           if (response != null && response.statusCode == 200) {
             final data = json.decode(response.body);
             final List results = data['results'] ?? [];
-            return results
+            final movies = results
                 .where((item) => item['media_type'] != 'person')
                 .map((item) => Movie.fromJson(item))
                 .toList();
+            if (movies.isNotEmpty) {
+              await CacheManager.set(cacheKey, movies.map((m) => m.toJson()).toList(), CacheManager.searchTtl);
+            }
+            return movies;
           }
         } catch (e) {
           print('Direct TMDB searchMovies failed: $e');
@@ -739,12 +813,21 @@ class ApiClient {
   }
 
   static Future<List<Movie>> getLaneAllMovies({required String laneId}) async {
+    final cacheKey = 'cdn_lane_all:$laneId';
+    final cached = await CacheManager.get(cacheKey);
+    if (cached is List) {
+      return cached.map((e) => Movie.fromJson(Map<String, dynamic>.from(e))).toList();
+    }
     try {
       final url = Uri.parse('$_currentCdnBaseUrl/$laneId.json');
       final response = await http.get(url).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final List data = json.decode(response.body);
-        return data.map((item) => Movie.fromJson(item)).toList();
+        final movies = data.map((item) => Movie.fromJson(item)).toList();
+        if (movies.isNotEmpty) {
+          await CacheManager.set(cacheKey, movies.map((m) => m.toJson()).toList(), CacheManager.searchTtl);
+        }
+        return movies;
       }
     } catch (e) {
       print('Get lane all movies from CDN failed: $e');
@@ -838,6 +921,12 @@ class ApiClient {
     int page = 1,
   }) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      final cacheKey = 'discover:${language}_${year}_${yearMin}_${yearMax}_${genreId}_${sortBy}_$page';
+      final cached = await CacheManager.get(cacheKey);
+      if (cached is List) {
+        return cached.map((item) => Movie.fromJson(Map<String, dynamic>.from(item))).toList();
+      }
+
       if (hasTmdbKey) {
         try {
           final params = <String, String>{
@@ -866,7 +955,11 @@ class ApiClient {
           if (response != null && response.statusCode == 200) {
             final data = json.decode(response.body);
             final List results = data['results'] ?? [];
-            return results.map((item) => Movie.fromJson(item)).toList();
+            final movies = results.map((item) => Movie.fromJson(item)).toList();
+            if (movies.isNotEmpty) {
+              await CacheManager.set(cacheKey, movies.map((m) => m.toJson()).toList(), CacheManager.searchTtl);
+            }
+            return movies;
           }
         } catch (e) {
           print('Direct TMDB discoverMovies failed: $e');
@@ -916,6 +1009,12 @@ class ApiClient {
     final cleanType = mediaType.toLowerCase() == 'tv' ? 'tv' : 'movie';
 
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      final cacheKey = '${cleanType}_details:$tmdbId';
+      final cached = await CacheManager.get(cacheKey);
+      if (cached is Map<String, dynamic>) {
+        return MovieDetails.fromJson(cached);
+      }
+
       if (hasTmdbKey) {
         try {
           final response = await _tmdbGet('/$cleanType/$tmdbId', {
@@ -923,7 +1022,9 @@ class ApiClient {
           });
           if (response != null && response.statusCode == 200) {
             final data = json.decode(response.body);
-            return MovieDetails.fromJson(Map<String, dynamic>.from(data));
+            final details = MovieDetails.fromJson(Map<String, dynamic>.from(data));
+            await CacheManager.set(cacheKey, details.toJson(), CacheManager.detailsTtl);
+            return details;
           }
         } catch (e) {
           print('Direct TMDB getMovieDetails failed: $e');
@@ -953,12 +1054,20 @@ class ApiClient {
 
   static Future<TvSeason?> getTvSeason(int tmdbId, int seasonNumber) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      final cacheKey = 'tv_season:$tmdbId:$seasonNumber';
+      final cached = await CacheManager.get(cacheKey);
+      if (cached is Map<String, dynamic>) {
+        return TvSeason.fromJson(cached);
+      }
+
       if (hasTmdbKey) {
         try {
           final response = await _tmdbGet('/tv/$tmdbId/season/$seasonNumber');
           if (response != null && response.statusCode == 200) {
             final data = json.decode(response.body);
-            return TvSeason.fromJson(Map<String, dynamic>.from(data));
+            final season = TvSeason.fromJson(Map<String, dynamic>.from(data));
+            await CacheManager.set(cacheKey, season.toJson(), CacheManager.detailsTtl);
+            return season;
           }
         } catch (e) {
           print('Direct TMDB getTvSeason failed: $e');
@@ -1049,12 +1158,22 @@ class ApiClient {
 
   static Future<List<Actor>> getCuratedActors({String language = 'ta'}) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      final cacheKey = 'curated_actors:$language';
+      final cached = await CacheManager.get(cacheKey);
+      if (cached is List) {
+        return cached.map((e) => Actor.fromJson(Map<String, dynamic>.from(e))).toList();
+      }
+
       try {
         final url = Uri.parse('$_currentCdnBaseUrl/actors.json');
         final response = await http.get(url).timeout(const Duration(seconds: 10));
         if (response.statusCode == 200) {
           final List data = json.decode(response.body);
-          return data.map((item) => Actor.fromJson(item)).toList();
+          final actors = data.map((item) => Actor.fromJson(item)).toList();
+          if (actors.isNotEmpty) {
+            await CacheManager.set(cacheKey, actors.map((a) => a.toJson()).toList(), CacheManager.detailsTtl);
+          }
+          return actors;
         }
       } catch (e) {
         print('Get curated actors from CDN failed: $e');
@@ -1078,6 +1197,12 @@ class ApiClient {
 
   static Future<ActorFilmography?> getActorFilmography(int personId) async {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
+      final cacheKey = 'person_details:$personId';
+      final cached = await CacheManager.get(cacheKey);
+      if (cached is Map<String, dynamic>) {
+        return ActorFilmography.fromJson(cached);
+      }
+
       if (hasTmdbKey) {
         try {
           final response = await _tmdbGet('/person/$personId', {
@@ -1132,7 +1257,7 @@ class ApiClient {
                 .toList()
               ..sort((a, b) => getDate(b).compareTo(getDate(a)));
 
-            return ActorFilmography(
+            final filmography = ActorFilmography(
               id: data['id'] ?? personId,
               name: data['name'] ?? '',
               biography: data['biography'] ?? '',
@@ -1143,6 +1268,8 @@ class ApiClient {
               popular: popularSorted.take(30).map((e) => Movie.fromJson(e)).toList(),
               recent: recentSorted.take(30).map((e) => Movie.fromJson(e)).toList(),
             );
+            await CacheManager.set(cacheKey, filmography.toJson(), CacheManager.detailsTtl);
+            return filmography;
           }
         } catch (e) {
           print('Direct TMDB getActorFilmography failed: $e');

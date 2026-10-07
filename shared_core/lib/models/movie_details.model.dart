@@ -29,6 +29,16 @@ class CastMember {
   String get profileUrl => (profilePath != null && profilePath!.isNotEmpty)
       ? 'https://image.tmdb.org/t/p/w185$profilePath'
       : '';
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'character': character,
+      'profile_path': profilePath,
+      'order': order,
+    };
+  }
 }
 
 class GenreItem {
@@ -42,6 +52,13 @@ class GenreItem {
       id: json['id'] ?? 0,
       name: json['name'] ?? '',
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+    };
   }
 }
 
@@ -178,4 +195,27 @@ class MovieDetails {
 
   String get year => releaseDate.isNotEmpty ? releaseDate.split('-')[0] : '';
   String get releaseYear => year;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'tmdb_id': tmdbId,
+      'imdb_id': imdbId,
+      'title': title,
+      'overview': overview,
+      'release_date': releaseDate,
+      'poster_path': posterPath,
+      'backdrop_path': backdropPath,
+      'vote_average': voteAverage,
+      'vote_count': voteCount,
+      'runtime': runtime,
+      'tagline': tagline,
+      'media_type': mediaType,
+      'number_of_seasons': numberOfSeasons,
+      'number_of_episodes': numberOfEpisodes,
+      'genres': genres.map((g) => g.toJson()).toList(),
+      'cast': cast.map((c) => c.toJson()).toList(),
+      'seasons': seasons.map((s) => s.toJson()).toList(),
+      'external_ids': externalIds,
+    };
+  }
 }

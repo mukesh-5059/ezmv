@@ -40,4 +40,17 @@ class TvSeason {
   String get posterUrl => (posterPath != null && posterPath!.isNotEmpty)
       ? 'https://image.tmdb.org/t/p/w342$posterPath'
       : '';
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'season_number': seasonNumber,
+      'name': name,
+      'overview': overview,
+      'poster_path': posterPath,
+      'episode_count': episodeCount,
+      'air_date': airDate,
+      'episodes': episodes.map((e) => e.toJson()).toList(),
+    };
+  }
 }

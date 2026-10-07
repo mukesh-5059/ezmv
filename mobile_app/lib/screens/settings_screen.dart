@@ -13,10 +13,10 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  State<SettingsScreen> createState() => SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _serverController;
   late TextEditingController _tmdbController;
   late TextEditingController _traktController;
@@ -36,6 +36,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isTesting = false;
   bool? _isConnected;
 
+  int _cacheSizeBytes = 0;
+  int _cacheItemCount = 0;
+  bool _isClearingCache = false;
+
   @override
   void initState() {
     super.initState();
@@ -50,6 +54,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     _tmdbController.addListener(_onTmdbChanged);
     _traktController.addListener(_onTraktChanged);
+
+    loadCacheInfo();
 
     if (_sourceMode == CatalogSourceMode.server) {
       _testCurrentConnection();
@@ -271,6 +277,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> loadCacheInfo() async {
+    final bytes = await CacheManager.getCacheSizeBytes();
+    final count = await CacheManager.getCacheItemCount();
+    if (mounted) {
+      setState(() {
+        _cacheSizeBytes = bytes;
+        _cacheItemCount = count;
+      });
+    }
+  }
+
+  Future<void> _clearCache() async {
+    setState(() => _isClearingCache = true);
+    await CacheManager.clearAll();
+    await loadCacheInfo();
+    if (mounted) {
+      setState(() => _isClearingCache = false);
+      _showToast('Client storage cache cleared');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isServerless = _sourceMode == CatalogSourceMode.cdn;
@@ -282,10 +309,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        physics: const BouncingScrollPhysics(),
-        children: [
+      body: RefreshIndicator(
+        color: MobileTheme.accent,
+        backgroundColor: MobileTheme.surfaceElevated,
+        onRefresh: loadCacheInfo,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+          children: [
           // SOURCE MODE SELECTION CARD
           _buildSectionHeader('METADATA & CATALOG SOURCE'),
           const SizedBox(height: 8),
@@ -687,43 +718,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 24),
           ],
 
-          // Preferences & History
-          _buildSectionHeader('PREFERENCES & DATA'),
+          // Preferences & History & Cache
+          _buildSectionHeader('PREFERENCES & STORAGE'),
           const SizedBox(height: 8),
           Container(
             decoration: BoxDecoration(
               color: MobileTheme.surfaceElevated,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: ListTile(
-              leading: const Icon(Icons.delete_sweep_outlined, color: Colors.white70),
-              title: Text('Clear Watch History', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13.5, fontWeight: FontWeight.w500)),
-              subtitle: const Text('Delete saved playback checkpoints & resume states', style: TextStyle(color: Colors.white38, fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
-              onTap: () async {
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    backgroundColor: MobileTheme.surfaceElevated,
-                    title: const Text('Clear Watch History?', style: TextStyle(color: Colors.white)),
-                    content: const Text('This will remove all progress and history from this device.', style: TextStyle(color: Colors.white70)),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(color: Colors.white60))),
-                      FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: MobileTheme.accent),
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Clear'),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.cached_rounded, color: Colors.white70),
+                  title: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Client Storage Cache',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      InkWell(
+                        onTap: loadCacheInfo,
+                        borderRadius: BorderRadius.circular(12),
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.refresh_rounded, size: 14, color: Colors.white54),
+                        ),
                       ),
                     ],
                   ),
-                );
-                if (confirm == true) {
-                  await LocalStorage.clearHistory();
-                  if (context.mounted) {
-                    _showToast('Watch history cleared');
-                  }
-                }
-              },
+                  subtitle: Text(
+                    _cacheItemCount > 0
+                        ? '${CacheManager.formatBytes(_cacheSizeBytes)} • $_cacheItemCount cached items'
+                        : '0 B • No cached entries',
+                    style: TextStyle(
+                      color: _cacheSizeBytes > 0 ? Colors.white70 : Colors.white38,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                  trailing: _isClearingCache
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
+                        )
+                      : TextButton(
+                          onPressed: _cacheSizeBytes > 0 ? _clearCache : null,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: Text(
+                            'Clear',
+                            style: TextStyle(
+                              color: _cacheSizeBytes > 0 ? Colors.redAccent : Colors.white24,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                ),
+                const Divider(height: 1, color: Colors.white10),
+                ListTile(
+                  leading: const Icon(Icons.delete_sweep_outlined, color: Colors.white70),
+                  title: Text('Clear Watch History', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13.5, fontWeight: FontWeight.w500)),
+                  subtitle: const Text('Delete saved playback checkpoints & resume states', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white38),
+                  onTap: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        backgroundColor: MobileTheme.surfaceElevated,
+                        title: const Text('Clear Watch History?', style: TextStyle(color: Colors.white)),
+                        content: const Text('This will remove all progress and history from this device.', style: TextStyle(color: Colors.white70)),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(color: Colors.white60))),
+                          FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: MobileTheme.accent),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Clear'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      await LocalStorage.clearHistory();
+                      if (context.mounted) {
+                        _showToast('Watch history cleared');
+                      }
+                    }
+                  },
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
@@ -758,8 +849,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 32),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildModeOption({
     required String title,

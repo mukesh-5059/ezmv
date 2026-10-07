@@ -37,13 +37,27 @@ class MobileRootScreen extends StatefulWidget {
 
 class _MobileRootScreenState extends State<MobileRootScreen> {
   int _currentIndex = 0;
+  final GlobalKey<SettingsScreenState> _settingsKey = GlobalKey<SettingsScreenState>();
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    SearchScreen(),
-    LibraryScreen(),
-    SettingsScreen(),
-  ];
+  late final List<Widget> _screens;
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      const HomeScreen(),
+      const SearchScreen(),
+      const LibraryScreen(),
+      SettingsScreen(key: _settingsKey),
+    ];
+  }
+
+  void _onTabSelected(int index) {
+    if (index == 3) {
+      _settingsKey.currentState?.loadCacheInfo();
+    }
+    setState(() => _currentIndex = index);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +96,7 @@ class _MobileRootScreenState extends State<MobileRootScreen> {
     return Expanded(
       child: Center(
         child: InkResponse(
-          onTap: () => setState(() => _currentIndex = index),
+          onTap: () => _onTabSelected(index),
           radius: 26,
           containedInkWell: false,
           highlightShape: BoxShape.circle,
