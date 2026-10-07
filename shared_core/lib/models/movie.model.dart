@@ -11,6 +11,7 @@ class Movie {
   final String mediaType;
   final List<int> genreIds;
   final int? rank;
+  final String? episodeTag;
 
   Movie({
     required this.tmdbId,
@@ -25,6 +26,7 @@ class Movie {
     this.mediaType = 'movie',
     this.genreIds = const [],
     this.rank,
+    this.episodeTag,
   });
 
   factory Movie.fromJson(Map<String, dynamic> json) {
@@ -50,6 +52,7 @@ class Movie {
           ? List<int>.from(json['genre_ids'])
           : const [],
       rank: json['rank'] is int ? json['rank'] : null,
+      episodeTag: json['episode_tag'],
     );
   }
 
@@ -67,6 +70,7 @@ class Movie {
       'media_type': mediaType,
       'genre_ids': genreIds,
       'rank': rank,
+      'episode_tag': episodeTag,
     };
   }
 

@@ -409,6 +409,13 @@ async def sync_catalog_json(output_dir: str = "catalog"):
     # 5. Enrich & Export Actors
     actors_data = await enrich_actors(out_path / "actors.json")
 
+    # Export English lanes configuration
+    lanes_en_path = ROOT_DIR / "config" / "lanes_en.json"
+    if lanes_en_path.exists():
+        import shutil
+        shutil.copy(lanes_en_path, out_path / "lanes_en.json")
+        print(f"[Config OK] Exported lanes_en.json to {out_path / 'lanes_en.json'}")
+
     # 6. Export manifest.json
     manifest = {
         "updated_at": now,
@@ -416,6 +423,7 @@ async def sync_catalog_json(output_dir: str = "catalog"):
         "cursors": new_cursors,
         "lanes": manifest_lanes,
         "actors_file": "actors.json" if actors_data else None,
+        "lanes_en_file": "lanes_en.json" if lanes_en_path.exists() else None,
     }
     with open(out_path / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)

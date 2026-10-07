@@ -450,8 +450,31 @@ class ApiClient {
     for (final item in raw) {
       if (item is! Map) continue;
       final map = Map<String, dynamic>.from(item);
-      final type = map['type']?.toString() ?? (map.containsKey('show') ? 'show' : 'movie');
-      final mediaObj = (type == 'show' ? map['show'] : map['movie']) ?? map;
+      final itemType = map['type']?.toString() ?? '';
+      final isTv = itemType == 'show' ||
+          itemType == 'season' ||
+          itemType == 'episode' ||
+          (map.containsKey('show') && !map.containsKey('movie'));
+      final mediaObj = (isTv ? map['show'] : map['movie']) ?? map;
+
+      String? episodeTag;
+      if (itemType == 'season') {
+        final seasonObj = map['season'] is Map ? Map<String, dynamic>.from(map['season']) : null;
+        final sNum = seasonObj?['number'];
+        episodeTag = sNum != null ? 'Season $sNum' : 'Season';
+      } else if (itemType == 'episode') {
+        final epObj = map['episode'] is Map ? Map<String, dynamic>.from(map['episode']) : null;
+        final sNum = epObj?['season'];
+        final eNum = epObj?['number'];
+        if (sNum != null && eNum != null) {
+          episodeTag = 'S$sNum E$eNum';
+        } else if (epObj?['title'] != null) {
+          episodeTag = epObj!['title'].toString();
+        } else {
+          episodeTag = 'Episode';
+        }
+      }
+
       if (mediaObj is Map) {
         final m = Map<String, dynamic>.from(mediaObj);
         final ids = m['ids'] is Map ? Map<String, dynamic>.from(m['ids']) : {};
@@ -467,7 +490,8 @@ class ApiClient {
           backdropPath: '',
           voteAverage: (m['rating'] as num?)?.toDouble() ?? 0.0,
           originalLanguage: 'en',
-          mediaType: type == 'show' ? 'tv' : 'movie',
+          mediaType: isTv ? 'tv' : 'movie',
+          episodeTag: episodeTag,
         ));
       }
     }
@@ -490,6 +514,7 @@ class ApiClient {
               voteAverage: (data['vote_average'] as num?)?.toDouble() ?? m.voteAverage,
               originalLanguage: data['original_language'] ?? m.originalLanguage,
               mediaType: m.mediaType,
+              episodeTag: m.episodeTag,
             );
           }
         } catch (_) {}
@@ -538,7 +563,7 @@ class ApiClient {
         url = Uri.parse('https://api.trakt.tv/movies/anticipated?page=$page&limit=$limit');
       } else if (lType == 'trakt_list') {
         final listId = cfg['list_id'] ?? '';
-        url = Uri.parse('https://api.trakt.tv/lists/$listId/items/movies,shows?page=$page&limit=$limit&extended=full');
+        url = Uri.parse('https://api.trakt.tv/lists/$listId/items?page=$page&limit=$limit&extended=full');
       }
 
       if (url != null) {
@@ -578,7 +603,7 @@ class ApiClient {
     if (_catalogSourceMode == CatalogSourceMode.cdn) {
       if (hasTraktKey) {
         try {
-          final url = Uri.parse('https://api.trakt.tv/lists/$listId/items/movies,shows?page=$page&limit=$limit&extended=full');
+          final url = Uri.parse('https://api.trakt.tv/lists/$listId/items?page=$page&limit=$limit&extended=full');
           final response = await http.get(url, headers: _buildTraktHeaders()).timeout(const Duration(seconds: 20));
           if (response.statusCode == 200) {
             final List raw = json.decode(response.body);

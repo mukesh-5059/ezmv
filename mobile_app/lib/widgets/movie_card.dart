@@ -98,20 +98,22 @@ class MovieCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                    // Media Type Badge (TV)
-                    if (movie.isTv)
+                    // Media Type / Episode Badge (TV, S1 E16, Season 2)
+                    if (movie.isTv || movie.episodeTag != null)
                       Positioned(
                         top: 6,
                         left: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                           decoration: BoxDecoration(
-                            color: MobileTheme.accent.withValues(alpha: 0.9),
+                            color: movie.episodeTag != null
+                                ? const Color(0xFF4F46E5).withValues(alpha: 0.9)
+                                : MobileTheme.accent.withValues(alpha: 0.9),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: const Text(
-                            'TV',
-                            style: TextStyle(
+                          child: Text(
+                            movie.episodeTag != null ? movie.episodeTag! : 'TV',
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 9,
                               fontWeight: FontWeight.bold,
@@ -135,15 +137,19 @@ class MovieCard extends StatelessWidget {
                 color: MobileTheme.textPrimary,
               ),
             ),
-            // Year / Genre
-            if (movie.year.isNotEmpty)
-              Text(
-                movie.year,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: MobileTheme.textSecondary,
-                ),
+            // Year / Episode Tag
+            Text(
+              movie.episodeTag != null && movie.episodeTag!.isNotEmpty
+                  ? (movie.year.isNotEmpty ? '${movie.year} • ${movie.episodeTag}' : movie.episodeTag!)
+                  : movie.year,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: movie.episodeTag != null ? const Color(0xFFFDE68A) : MobileTheme.textSecondary,
+                fontWeight: movie.episodeTag != null ? FontWeight.w600 : FontWeight.normal,
               ),
+            ),
           ],
         ),
       ),
