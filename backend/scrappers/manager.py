@@ -12,7 +12,7 @@ from backend.services.cache_db import (
 )
 from backend.models import StreamResponse
 from backend.scrappers.base import BaseScraper, MediaItem, StreamSource
-from backend.scrappers.providers import IsaiminiScraper, VidSrcScraper
+from backend.scrappers.providers import IsaiminiScraper, VidSrcScraper, PenguPlayScraper
 from backend.logger import (
     scraper_start_tag,
     scraper_exec_tag,
@@ -73,8 +73,7 @@ class StreamBroadcaster:
 class ScraperManager:
     def __init__(self):
         self.scrapers: list[BaseScraper] = [
-            IsaiminiScraper(),
-            VidSrcScraper(),
+            PenguPlayScraper(),
         ]
         self._in_flight: dict[str, asyncio.Task] = {}
         self._broadcasters: dict[str, StreamBroadcaster] = {}
@@ -243,6 +242,19 @@ class ScraperManager:
 
         all_valid_streams.sort(key=lambda x: x.get("priority", 100))
         logger.info(scraper_done_tag(media.title, len(all_valid_streams)))
+        
+        print(f"\n{'='*75}")
+        print(f" [STREAMS CONSOLE] Found {len(all_valid_streams)} stream(s) for '{media.title}':")
+        print(f"{'='*75}")
+        for idx, s in enumerate(all_valid_streams, 1):
+            prio = s.get("priority", 100)
+            prov = s.get("provider", "Unknown")
+            qual = s.get("quality", "HD")
+            url = s.get("url", "")
+            print(f" [{idx:02d}] (Prio {prio}) {prov} [{qual}]")
+            print(f"      -> {url}")
+        print(f"{'='*75}\n")
+
         return all_valid_streams
 
     async def _execute_resolve_task(

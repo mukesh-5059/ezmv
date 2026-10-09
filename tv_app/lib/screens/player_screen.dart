@@ -119,6 +119,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         bufferSize: 32 * 1024 * 1024,
       ),
     );
+    try {
+      (_player.platform as dynamic)?.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5');
+      (_player.platform as dynamic)?.setProperty('network-timeout', '30');
+    } catch (_) {}
     _videoController = VideoController(
       _player,
       configuration: const VideoControllerConfiguration(
