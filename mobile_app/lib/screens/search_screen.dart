@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import '../widgets/movie_card.dart';
+import '../widgets/movie_grid.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -492,6 +492,138 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  Widget _buildSelectedListHeader() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MobileTheme.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MobileTheme.accent.withValues(alpha: 0.3), width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              InkWell(
+                onTap: _clearSelectedList,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                  decoration: BoxDecoration(
+                    color: Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
+                      SizedBox(width: 4),
+                      Text('All Lists', style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                onTap: _toggleStarredList,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                  decoration: BoxDecoration(
+                    color: _isStarredList ? Colors.amber.withValues(alpha: 0.15) : Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _isStarredList ? Colors.amberAccent.withValues(alpha: 0.5) : Colors.white12,
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isStarredList ? Icons.star_rounded : Icons.star_border_rounded,
+                        size: 15,
+                        color: _isStarredList ? Colors.amberAccent : Colors.white70,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isStarredList ? 'Starred' : 'Star',
+                        style: TextStyle(
+                          color: _isStarredList ? Colors.amberAccent : Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                decoration: BoxDecoration(
+                  color: MobileTheme.accent.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: MobileTheme.accent.withValues(alpha: 0.6),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  '${_selectedList!.itemCount} items',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _selectedList!.name,
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          if (_selectedList!.userName.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text('Curated by @${_selectedList!.userName}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ],
+          if (_selectedList!.description.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            InkWell(
+              onTap: () => setState(() => _isDescExpanded = !_isDescExpanded),
+              borderRadius: BorderRadius.circular(4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _selectedList!.description.trim(),
+                    maxLines: _isDescExpanded ? null : 2,
+                    overflow: _isDescExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.3),
+                  ),
+                  if (_selectedList!.description.trim().length > 80 || _selectedList!.description.contains('\n'))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _isDescExpanded ? 'Show less ▲' : 'Show more ▼',
+                        style: const TextStyle(color: MobileTheme.accent, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   // --- CURATED LISTS TAB ---
   Widget _buildListsTab() {
     // When inside a selected list
@@ -500,195 +632,18 @@ class _SearchScreenState extends State<SearchScreen> {
         return const Center(child: CircularProgressIndicator(color: MobileTheme.accent));
       }
 
-      return CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-        slivers: [
-          // List Header Banner
-          SliverToBoxAdapter(
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: MobileTheme.surfaceElevated,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: MobileTheme.accent.withValues(alpha: 0.3), width: 0.8),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      InkWell(
-                        onTap: _clearSelectedList,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
-                          decoration: BoxDecoration(
-                            color: Colors.white10,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.arrow_back_rounded, size: 14, color: Colors.white70),
-                              SizedBox(width: 4),
-                              Text('All Lists', style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      InkWell(
-                        onTap: _toggleStarredList,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
-                          decoration: BoxDecoration(
-                            color: _isStarredList ? Colors.amber.withValues(alpha: 0.15) : Colors.white10,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _isStarredList ? Colors.amberAccent.withValues(alpha: 0.5) : Colors.white12,
-                              width: 0.8,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _isStarredList ? Icons.star_rounded : Icons.star_border_rounded,
-                                size: 15,
-                                color: _isStarredList ? Colors.amberAccent : Colors.white70,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _isStarredList ? 'Starred' : 'Star',
-                                style: TextStyle(
-                                  color: _isStarredList ? Colors.amberAccent : Colors.white70,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
-                        decoration: BoxDecoration(
-                          color: MobileTheme.accent.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: MobileTheme.accent.withValues(alpha: 0.6),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Text(
-                          '${_selectedList!.itemCount} items',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    _selectedList!.name,
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  if (_selectedList!.userName.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text('Curated by @${_selectedList!.userName}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                  ],
-                  if (_selectedList!.description.trim().isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () => setState(() => _isDescExpanded = !_isDescExpanded),
-                      borderRadius: BorderRadius.circular(4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _selectedList!.description.trim(),
-                            maxLines: _isDescExpanded ? null : 2,
-                            overflow: _isDescExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.3),
-                          ),
-                          if (_selectedList!.description.trim().length > 80 || _selectedList!.description.contains('\n'))
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                _isDescExpanded ? 'Show less ▲' : 'Show more ▼',
-                                style: const TextStyle(color: MobileTheme.accent, fontSize: 11, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-
-          if (_displayMovies.isEmpty)
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: _buildEmptyState(
-                title: 'No Movies in List',
-                subtitle: 'This curated list does not have any items available.',
-              ),
-            )
-          else ...[
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  childAspectRatio: 2 / 3.7,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 12,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) => MovieCard(
-                    movie: _displayMovies[index],
-                    width: double.infinity,
-                    height: 160,
-                  ),
-                  childCount: _displayMovies.length,
-                ),
-              ),
-            ),
-
-            if (_isLoadingMore)
-              const SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
-                    ),
-                  ),
-                ),
-              ),
-
-            if (!_hasMore && _displayMovies.isNotEmpty)
-              SliverToBoxAdapter(
-                child: _buildEndOfPageMarker(
-                  count: _displayMovies.length,
-                  label: _selectedList!.name,
-                ),
-              ),
-          ],
-        ],
+      return MovieGrid(
+        header: _buildSelectedListHeader(),
+        initialMovies: _displayMovies,
+        showFilters: _displayMovies.isNotEmpty,
+        emptyMessage: 'No Movies in List',
+        onFetchPage: (page, {genreId, year}) async {
+          return await ApiClient.getListItems(
+            listId: _selectedList!.id,
+            page: page,
+            limit: 50,
+          );
+        },
       );
     }
 
@@ -851,74 +806,23 @@ class _SearchScreenState extends State<SearchScreen> {
 
   // --- MOVIES TAB ---
   Widget _buildMoviesTab() {
-    if (_directMovies.isEmpty) {
-      if (ApiClient.isServerlessMode && !ApiClient.hasTmdbKey) {
-        return ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            SizedBox(height: MediaQuery.of(context).size.height * 0.15),
-            _buildTmdbKeyRequiredState(),
-          ],
-        );
-      }
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          SizedBox(height: MediaQuery.of(context).size.height * 0.15),
-          _buildEmptyState(
-            title: 'No titles found',
-            subtitle: 'Try searching with different keywords or check spelling.',
-          ),
-        ],
-      );
-    }
-
-    return CustomScrollView(
-      controller: _scrollController,
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              childAspectRatio: 2 / 3.7,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 12,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => MovieCard(
-                movie: _directMovies[index],
-                width: double.infinity,
-                height: 160,
-              ),
-              childCount: _directMovies.length,
-            ),
-          ),
-        ),
-
-        if (_isLoadingMore)
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
-                ),
-              ),
-            ),
-          ),
-
-        if (!_directHasMore && _directMovies.isNotEmpty)
-          SliverToBoxAdapter(
-            child: _buildEndOfPageMarker(
-              count: _directMovies.length,
-              label: 'Movies & Series',
-            ),
-          ),
-      ],
+    return MovieGrid(
+      scrollController: _scrollController,
+      showFilters: true,
+      initialMovies: _directMovies.isNotEmpty ? _directMovies : null,
+      emptyMessage: 'No titles found',
+      onFetchPage: (page, {genreId, year}) async {
+        final query = _searchController.text.trim();
+        if (query.isNotEmpty) {
+          return await ApiClient.searchMovies(query: query, page: page);
+        } else {
+          return await ApiClient.discoverMovies(
+            genreId: genreId,
+            year: year,
+            page: page,
+          );
+        }
+      },
     );
   }
 
@@ -976,53 +880,6 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   // --- EMPTY STATES ---
-  Widget _buildTmdbKeyRequiredState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: MobileTheme.accent.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.vpn_key_rounded, color: MobileTheme.accent, size: 36),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'TMDb Key Required',
-              style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Direct global search and recommendations require a free TMDb API key in Serverless Mode.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: MobileTheme.surfaceElevated,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  side: const BorderSide(color: Colors.white12),
-                ),
-              ),
-              icon: const Icon(Icons.refresh_rounded, size: 18, color: MobileTheme.accent),
-              label: const Text('Reload / Check Key'),
-              onPressed: () => _executeSearch(_searchController.text.trim()),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildTraktKeyRequiredState() {
     return Center(
       child: Padding(

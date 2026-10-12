@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import '../widgets/movie_card.dart';
+import '../widgets/movie_grid.dart';
 
 class WatchlistScreen extends StatefulWidget {
   const WatchlistScreen({super.key});
@@ -74,43 +74,16 @@ class _WatchlistScreenState extends State<WatchlistScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: MobileTheme.accent))
-          : (_watchlist.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.bookmark_outline_rounded, size: 54, color: Colors.white30),
-                      SizedBox(height: 12),
-                      Text('Your Watchlist is empty', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 6),
-                      Text('Bookmark movies and TV shows to watch them later.', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  color: MobileTheme.accent,
-                  backgroundColor: MobileTheme.surfaceElevated,
-                  onRefresh: _loadWatchlist,
-                  child: GridView.builder(
-                    padding: const EdgeInsets.all(16),
-                    physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 2 / 3.7,
-                      crossAxisSpacing: 10,
-                      mainAxisSpacing: 12,
-                    ),
-                    itemCount: _watchlist.length,
-                    itemBuilder: (context, index) {
-                      final movie = _watchlist[index];
-                      return MovieCard(
-                        movie: movie,
-                        width: double.infinity,
-                        height: 160,
-                      );
-                    },
-                  ),
-                )),
+          : RefreshIndicator(
+              color: MobileTheme.accent,
+              backgroundColor: MobileTheme.surfaceElevated,
+              onRefresh: _loadWatchlist,
+              child: MovieGrid(
+                initialMovies: _watchlist,
+                showFilters: _watchlist.isNotEmpty,
+                emptyMessage: 'Your Watchlist is empty',
+              ),
+            ),
     );
   }
 }

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
+import '../screens/lane_grid_screen.dart';
 import '../theme.dart';
 import 'movie_card.dart';
 
 class MovieLane extends StatelessWidget {
   final String title;
   final List<Movie> movies;
+  final String? laneId;
+  final String? language;
   final String? subtitle;
   final VoidCallback? onSeeAll;
   final VoidCallback? onLoadMore;
@@ -18,6 +21,8 @@ class MovieLane extends StatelessWidget {
     super.key,
     required this.title,
     required this.movies,
+    this.laneId,
+    this.language,
     this.subtitle,
     this.onSeeAll,
     this.onLoadMore,
@@ -27,57 +32,81 @@ class MovieLane extends StatelessWidget {
     this.cardHeight = 180,
   });
 
+  void _navigateToGrid(BuildContext context) {
+    if (onSeeAll != null) {
+      onSeeAll!();
+    } else if (laneId != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => LaneGridScreen(
+            title: title,
+            laneId: laneId!,
+            language: language ?? 'en',
+            initialMovies: movies,
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (movies.isEmpty) return const SizedBox.shrink();
 
+    final canOpenGrid = onSeeAll != null || laneId != null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header
+        // Header with title and trailing arrow indicator
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      color: MobileTheme.textPrimary,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  if (subtitle != null && subtitle!.isNotEmpty)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      subtitle!,
+                      title,
                       style: const TextStyle(
-                        fontSize: 12,
-                        color: MobileTheme.textSecondary,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: MobileTheme.textPrimary,
+                        letterSpacing: -0.3,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                ],
-              ),
-              if (onSeeAll != null)
-                GestureDetector(
-                  onTap: onSeeAll,
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+                    if (subtitle != null && subtitle!.isNotEmpty)
                       Text(
-                        'See All',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: MobileTheme.accent,
+                        subtitle!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: MobileTheme.textSecondary,
                         ),
                       ),
-                      Icon(Icons.chevron_right_rounded, size: 16, color: MobileTheme.accent),
-                    ],
+                  ],
+                ),
+              ),
+              if (canOpenGrid)
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => _navigateToGrid(context),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 14,
+                          color: MobileTheme.accent,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
             ],
@@ -88,7 +117,8 @@ class MovieLane extends StatelessWidget {
           height: cardHeight + 42,
           child: NotificationListener<ScrollNotification>(
             onNotification: (notification) {
-              if (notification.metrics.pixels >= notification.metrics.maxScrollExtent - 150) {
+              if (notification.metrics.pixels >=
+                  notification.metrics.maxScrollExtent - 150) {
                 if (hasMore && !isLoadingMore && onLoadMore != null) {
                   onLoadMore!();
                 }
@@ -109,7 +139,10 @@ class MovieLane extends StatelessWidget {
                     child: const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: MobileTheme.accent),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: MobileTheme.accent,
+                      ),
                     ),
                   );
                 }

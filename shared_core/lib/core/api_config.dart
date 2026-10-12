@@ -16,14 +16,14 @@ class ApiConfig {
   static const String defaultCdnBaseUrl = 'https://mukesh-5059.github.io/ezmv/catalog';
   static String _currentCdnBaseUrl = defaultCdnBaseUrl;
 
-  static CatalogSourceMode _catalogSourceMode = CatalogSourceMode.cdn;
+  static CatalogSourceMode _catalogSourceMode = CatalogSourceMode.server;
   static String _tmdbApiKey = '';
   static String _traktClientId = '';
 
   static String get baseUrl => _currentBaseUrl;
   static String get cdnBaseUrl => _currentCdnBaseUrl;
   static CatalogSourceMode get catalogSourceMode => _catalogSourceMode;
-  static bool get isServerlessMode => _catalogSourceMode == CatalogSourceMode.cdn;
+  static bool get isServerlessMode => false;
   static String get tmdbApiKey => _tmdbApiKey;
   static String get traktClientId => _traktClientId;
   static bool get hasTmdbKey => _tmdbApiKey.trim().isNotEmpty;
@@ -58,23 +58,14 @@ class ApiConfig {
       _currentBaseUrl = defaultBaseUrl;
     }
 
-    final savedMode = prefs.getString('catalog_source_mode');
-    if (savedMode == 'server') {
-      _catalogSourceMode = CatalogSourceMode.server;
-    } else {
-      _catalogSourceMode = CatalogSourceMode.cdn;
-    }
+    _catalogSourceMode = CatalogSourceMode.server;
 
     _tmdbApiKey = prefs.getString('tmdb_api_key') ?? '';
     _traktClientId = prefs.getString('trakt_client_id') ?? '';
 
-    if (_catalogSourceMode == CatalogSourceMode.server) {
-      final isReachable = await testConnection();
-      if (!isReachable) {
-        await autoDiscoverAndConnect();
-      }
-    } else {
-      CacheManager.cleanExpired();
+    final isReachable = await testConnection();
+    if (!isReachable) {
+      await autoDiscoverAndConnect();
     }
   }
 

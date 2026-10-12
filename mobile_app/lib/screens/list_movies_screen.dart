@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import '../widgets/movie_card.dart';
+import '../widgets/movie_grid.dart';
 
 class ListMoviesScreen extends StatefulWidget {
   final TraktList list;
@@ -175,211 +175,133 @@ class _ListMoviesScreenState extends State<ListMoviesScreen> {
               color: MobileTheme.accent,
               backgroundColor: MobileTheme.surfaceElevated,
               onRefresh: _loadMovies,
-              child: CustomScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: Container(
-                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: MobileTheme.surfaceElevated,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: MobileTheme.accent.withValues(alpha: 0.3), width: 0.8),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              const Spacer(),
-                              InkWell(
-                                onTap: _toggleStar,
-                                borderRadius: BorderRadius.circular(8),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
-                                  decoration: BoxDecoration(
-                                    color: _isStarred ? Colors.amber.withValues(alpha: 0.15) : Colors.white10,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: _isStarred ? Colors.amberAccent.withValues(alpha: 0.5) : Colors.white12,
-                                      width: 0.8,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        _isStarred ? Icons.star_rounded : Icons.star_border_rounded,
-                                        size: 15,
-                                        color: _isStarred ? Colors.amberAccent : Colors.white70,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        _isStarred ? 'Starred' : 'Star',
-                                        style: TextStyle(
-                                          color: _isStarred ? Colors.amberAccent : Colors.white70,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
-                                decoration: BoxDecoration(
-                                  color: MobileTheme.accent.withValues(alpha: 0.25),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: MobileTheme.accent.withValues(alpha: 0.6),
-                                    width: 0.8,
-                                  ),
-                                ),
-                                child: Text(
-                                  '${widget.list.itemCount} items',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.3,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            widget.list.name,
-                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          if (widget.list.userName.isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text('Curated by @${widget.list.userName}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                          ],
-                          if (widget.list.description.trim().isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            InkWell(
-                              onTap: () => setState(() => _isDescExpanded = !_isDescExpanded),
-                              borderRadius: BorderRadius.circular(4),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    widget.list.description.trim(),
-                                    maxLines: _isDescExpanded ? null : 2,
-                                    overflow: _isDescExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
-                                    style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.3),
-                                  ),
-                                  if (widget.list.description.trim().length > 80 || widget.list.description.contains('\n'))
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Text(
-                                        _isDescExpanded ? 'Show less ▲' : 'Show more ▼',
-                                        style: const TextStyle(color: MobileTheme.accent, fontSize: 11, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
+              child: MovieGrid(
+                header: _buildListHeader(),
+                initialMovies: _movies,
+                showFilters: _movies.isNotEmpty,
+                emptyMessage: 'No titles found in this list.',
+                onFetchPage: (page, {genreId, year}) async {
+                  return await ApiClient.getListItems(
+                    listId: widget.list.id,
+                    page: page,
+                    limit: 50,
+                  );
+                },
+              ),
+            ),
+    );
+  }
+
+  Widget _buildListHeader() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MobileTheme.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MobileTheme.accent.withValues(alpha: 0.3), width: 0.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Spacer(),
+              InkWell(
+                onTap: _toggleStar,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                  decoration: BoxDecoration(
+                    color: _isStarred ? Colors.amber.withValues(alpha: 0.15) : Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _isStarred ? Colors.amberAccent.withValues(alpha: 0.5) : Colors.white12,
+                      width: 0.8,
                     ),
                   ),
-                  if (_movies.isEmpty)
-                    const SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: Center(
-                        child: Text('No titles found in this list.', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isStarred ? Icons.star_rounded : Icons.star_border_rounded,
+                        size: 15,
+                        color: _isStarred ? Colors.amberAccent : Colors.white70,
                       ),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      sliver: SliverGrid(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          childAspectRatio: 2 / 3.7,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 12,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final movie = _movies[index];
-                            return MovieCard(
-                              movie: movie,
-                              width: double.infinity,
-                              height: 160,
-                            );
-                          },
-                          childCount: _movies.length,
+                      const SizedBox(width: 4),
+                      Text(
+                        _isStarred ? 'Starred' : 'Star',
+                        style: TextStyle(
+                          color: _isStarred ? Colors.amberAccent : Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
-                  if (_isLoadingMore)
-                    const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Center(child: CircularProgressIndicator(color: MobileTheme.accent)),
-                      ),
-                    ),
-                  if (!_hasMore && _movies.isNotEmpty)
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                const Expanded(child: Divider(color: Colors.white12, height: 1)),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.check_circle_outline_rounded, color: Colors.white54, size: 14),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'End of ${widget.list.name} (${_movies.length} loaded)',
-                                        style: const TextStyle(
-                                          color: Colors.white60,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Expanded(child: Divider(color: Colors.white12, height: 1)),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            TextButton.icon(
-                              style: TextButton.styleFrom(
-                                foregroundColor: MobileTheme.accent,
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                backgroundColor: MobileTheme.surfaceElevated,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(20),
-                                  side: const BorderSide(color: Colors.white12),
-                                ),
-                              ),
-                              icon: const Icon(Icons.arrow_upward_rounded, size: 15),
-                              label: const Text('Back to Top', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              onPressed: _scrollToTop,
-                            ),
-                          ],
-                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                decoration: BoxDecoration(
+                  color: MobileTheme.accent.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: MobileTheme.accent.withValues(alpha: 0.6),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  '${widget.list.itemCount} items',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            widget.list.name,
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          if (widget.list.userName.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text('Curated by @${widget.list.userName}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ],
+          if (widget.list.description.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            InkWell(
+              onTap: () => setState(() => _isDescExpanded = !_isDescExpanded),
+              borderRadius: BorderRadius.circular(4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.list.description.trim(),
+                    maxLines: _isDescExpanded ? null : 2,
+                    overflow: _isDescExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white60, fontSize: 12, height: 1.3),
+                  ),
+                  if (widget.list.description.trim().length > 80 || widget.list.description.contains('\n'))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        _isDescExpanded ? 'Show less ▲' : 'Show more ▼',
+                        style: const TextStyle(color: MobileTheme.accent, fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
                 ],
               ),
             ),
+          ],
+        ],
+      ),
     );
   }
 }

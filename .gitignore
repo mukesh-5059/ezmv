@@ -6,3 +6,6 @@ backend/data/
 *.db-wal
 *.db-shm
 *.apk
+test_streams.txt
+test_*.txt
+*.log

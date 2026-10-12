@@ -47,11 +47,13 @@ class StreamSelectorBottomSheet extends StatefulWidget {
 }
 
 class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
-  List<Map<String, dynamic>> _streams = [];
+  List<StreamSource> _streamSources = [];
   bool _isLoading = true;
   String _statusMessage = 'Connecting to scrapers...';
   int _cacheExpiresIn = 0;
   Timer? _cacheTimer;
+  String? _selectedQuality;
+  String? _selectedLanguage;
 
   @override
   void initState() {
@@ -71,6 +73,8 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
       _isLoading = true;
       _cacheExpiresIn = 0;
       _statusMessage = 'Connecting to scrapers...';
+      _selectedQuality = null;
+      _selectedLanguage = null;
     });
 
     final response = await ApiClient.getStreamLinksWithProgress(
@@ -89,19 +93,28 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
     );
 
     if (mounted) {
-      final List<Map<String, dynamic>> list = [];
+      final List<StreamSource> list = [];
       if (response['streams'] is List) {
         for (final item in response['streams']) {
           if (item is Map) {
-            list.add(item.cast<String, dynamic>());
+            list.add(StreamSource.fromJson(item.cast<String, dynamic>()));
           }
         }
       }
 
+      list.sort((a, b) {
+        final p = a.priority.compareTo(b.priority);
+        if (p != 0) return p;
+        final bBitrate = b.bitrateKbps ?? 0;
+        final aBitrate = a.bitrateKbps ?? 0;
+        if (bBitrate != aBitrate) return bBitrate.compareTo(aBitrate);
+        return (b.sizeMb ?? 0).compareTo(a.sizeMb ?? 0);
+      });
+
       final ttl = response['cache_expires_in'] as int? ?? 0;
 
       setState(() {
-        _streams = list;
+        _streamSources = list;
         _isLoading = false;
         _cacheExpiresIn = ttl;
         if (list.isEmpty) {
@@ -122,11 +135,18 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
         timer.cancel();
         return;
       }
-      if (_cacheExpiresIn > 0) {
-        setState(() => _cacheExpiresIn--);
-      } else {
-        timer.cancel();
-      }
+      setState(() {
+        if (_cacheExpiresIn > 0) {
+          _cacheExpiresIn--;
+        }
+        for (int i = 0; i < _streamSources.length; i++) {
+          if (_streamSources[i].remainingTtl > 0) {
+            _streamSources[i] = _streamSources[i].copyWith(
+              remainingTtl: _streamSources[i].remainingTtl - 1,
+            );
+          }
+        }
+      });
     });
   }
 
@@ -141,8 +161,9 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
   Color _getQualityColor(String quality) {
     final q = quality.toUpperCase();
     if (q.contains('4K') || q.contains('UHD') || q.contains('2160')) return Colors.amber;
-    if (q.contains('1080')) return MobileTheme.accent;
-    if (q.contains('720')) return Colors.blueAccent;
+    if (q.contains('1080') || q.contains('FHD')) return const Color(0xFF00E676);
+    if (q.contains('720') || q.contains('HD')) return Colors.lightBlueAccent;
+    if (q.contains('480') || q.contains('SD')) return Colors.white60;
     return Colors.grey;
   }
 
@@ -231,7 +252,7 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
           Flexible(
             child: _isLoading
                 ? _buildLoadingState()
-                : (_streams.isEmpty ? _buildEmptyState() : _buildStreamsList()),
+                : (_streamSources.isEmpty ? _buildEmptyState() : _buildStreamsList()),
           ),
         ],
       ),
@@ -294,39 +315,170 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
     );
   }
 
-  Widget _buildStreamsList() {
-    return ListView.separated(
-      padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
-      shrinkWrap: true,
-      physics: const BouncingScrollPhysics(),
-      itemCount: _streams.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final stream = _streams[index];
-        final quality = stream['quality']?.toString() ?? 'Auto';
-        final provider = stream['provider']?.toString() ?? 'Direct Stream';
-        final latency = stream['latency_ms'] as num?;
-        final qColor = _getQualityColor(quality);
+  Widget _buildFilterChips() {
+    final qualities = _streamSources.map((s) => s.quality).toSet().toList();
+    final languages = _streamSources.expand((s) => s.languages).toSet().toList();
 
-        return Material(
-          color: MobileTheme.surfaceElevated,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () => Navigator.pop(context, stream),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
+    if (qualities.length <= 1 && languages.length <= 1) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      height: 32,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          _buildChoiceChip(
+            label: 'All (${_streamSources.length})',
+            isSelected: _selectedQuality == null && _selectedLanguage == null,
+            onTap: () {
+              setState(() {
+                _selectedQuality = null;
+                _selectedLanguage = null;
+              });
+            },
+          ),
+          if (qualities.length > 1) ...[
+            const SizedBox(width: 6),
+            ...qualities.map((q) => Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _buildChoiceChip(
+                    label: q,
+                    isSelected: _selectedQuality == q,
+                    onTap: () {
+                      setState(() {
+                        _selectedQuality = _selectedQuality == q ? null : q;
+                      });
+                    },
+                  ),
+                )),
+          ],
+          if (languages.length > 1) ...[
+            const SizedBox(width: 4),
+            ...languages.map((lang) => Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _buildChoiceChip(
+                    label: lang,
+                    icon: Icons.audiotrack_rounded,
+                    isSelected: _selectedLanguage == lang,
+                    onTap: () {
+                      setState(() {
+                        _selectedLanguage = _selectedLanguage == lang ? null : lang;
+                      });
+                    },
+                  ),
+                )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChoiceChip({
+    required String label,
+    IconData? icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? MobileTheme.accent : MobileTheme.surfaceElevated,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? MobileTheme.accent : Colors.white12,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 12, color: isSelected ? Colors.white : Colors.white70),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : MobileTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetaPill({
+    required IconData icon,
+    required String label,
+    Color color = Colors.white70,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStreamCard(StreamSource stream) {
+    final qColor = _getQualityColor(stream.quality);
+    final isExpired = stream.isExpired;
+
+    return Material(
+      color: MobileTheme.surfaceElevated,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.pop(context, stream.toJson()),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isExpired
+                  ? Colors.redAccent.withValues(alpha: 0.35)
+                  : Colors.white.withValues(alpha: 0.06),
+              width: 1,
+            ),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                     decoration: BoxDecoration(
                       color: qColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: qColor.withValues(alpha: 0.4), width: 1),
                     ),
                     child: Text(
-                      quality.toUpperCase(),
+                      stream.quality.toUpperCase(),
                       style: TextStyle(
                         color: qColor,
                         fontWeight: FontWeight.bold,
@@ -334,34 +486,191 @@ class _StreamSelectorBottomSheetState extends State<StreamSelectorBottomSheet> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          provider,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                        if (latency != null)
-                          Text(
-                            '${latency.toInt()}ms response',
-                            style: const TextStyle(color: Colors.white54, fontSize: 11),
-                          ),
-                      ],
+                  const SizedBox(width: 8),
+                  if (stream.displaySize.isNotEmpty) ...[
+                    _buildMetaPill(
+                      icon: Icons.folder_zip_outlined,
+                      label: stream.displaySize,
                     ),
+                    const SizedBox(width: 6),
+                  ],
+                  if (stream.bitrateStr != null && stream.bitrateStr!.isNotEmpty) ...[
+                    _buildMetaPill(
+                      icon: Icons.speed_rounded,
+                      label: stream.bitrateStr!,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  if (stream.remainingTtl > 0) ...[
+                    _buildMetaPill(
+                      icon: Icons.schedule_rounded,
+                      label: stream.formattedRemainingTtl,
+                      color: stream.remainingTtl < 300 ? Colors.orangeAccent : Colors.white60,
+                    ),
+                  ] else if (isExpired) ...[
+                    _buildMetaPill(
+                      icon: Icons.warning_amber_rounded,
+                      label: 'Expired',
+                      color: Colors.redAccent,
+                    ),
+                  ],
+                  const Spacer(),
+                  Icon(
+                    isExpired ? Icons.refresh_rounded : Icons.play_circle_filled_rounded,
+                    color: isExpired ? Colors.redAccent : MobileTheme.accent,
+                    size: 28,
                   ),
-                  const Icon(Icons.play_circle_filled_rounded, color: MobileTheme.accent, size: 28),
                 ],
               ),
+              if (stream.languages.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.audiotrack_rounded,
+                      size: 13,
+                      color: Colors.white54,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 5,
+                        runSpacing: 4,
+                        children: stream.languages.map((lang) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              lang,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.dns_outlined,
+                    size: 13,
+                    color: MobileTheme.textMuted,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      stream.sourceHierarchy,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: MobileTheme.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (stream.priority <= 10)
+                    Container(
+                      margin: const EdgeInsets.only(left: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'P${stream.priority}',
+                        style: const TextStyle(
+                          color: Colors.amber,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              if (stream.filename != null && stream.filename!.trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  stream.filename!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: MobileTheme.textMuted,
+                    fontSize: 10.5,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStreamsList() {
+    final displayedStreams = _streamSources.where((s) {
+      if (_selectedQuality != null && s.quality != _selectedQuality) {
+        return false;
+      }
+      if (_selectedLanguage != null && !s.languages.contains(_selectedLanguage)) {
+        return false;
+      }
+      return true;
+    }).toList();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildFilterChips(),
+        if (displayedStreams.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Column(
+              children: [
+                const Text(
+                  'No streams match the selected filter',
+                  style: TextStyle(color: MobileTheme.textSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _selectedQuality = null;
+                      _selectedLanguage = null;
+                    });
+                  },
+                  child: const Text('Reset Filters'),
+                ),
+              ],
+            ),
+          )
+        else
+          Flexible(
+            child: ListView.separated(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
+              shrinkWrap: true,
+              physics: const BouncingScrollPhysics(),
+              itemCount: displayedStreams.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                return _buildStreamCard(displayedStreams[index]);
+              },
             ),
           ),
-        );
-      },
+      ],
     );
   }
 }

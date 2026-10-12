@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import '../widgets/movie_card.dart';
+import '../widgets/movie_grid.dart';
 import 'watchlist_screen.dart';
 import 'starred_lists_screen.dart';
 
@@ -176,12 +176,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
               color: MobileTheme.accent,
               backgroundColor: MobileTheme.surfaceElevated,
               onRefresh: _loadData,
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                slivers: [
-                  // Top Red Cards
-                  SliverToBoxAdapter(
-                    child: Padding(
+              child: MovieGrid(
+                header: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Top Red Cards
+                    Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
                       child: Row(
                         children: [
@@ -219,11 +219,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ],
                       ),
                     ),
-                  ),
 
-                  // Section Header: Watch History
-                  SliverToBoxAdapter(
-                    child: Padding(
+                    // Section Header: Watch History
+                    Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Text(
                         'CONTINUE WATCHING & HISTORY${_history.isNotEmpty ? ' (${_history.length})' : ''}',
@@ -235,50 +233,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                       ),
                     ),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 10)),
-
-                  if (_history.isEmpty)
-                    const SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.history_toggle_off_rounded, size: 48, color: Colors.white30),
-                            SizedBox(height: 12),
-                            Text('No history yet', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                            SizedBox(height: 4),
-                            Text('Movies and TV shows you stream will appear here.', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      sliver: SliverGrid(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          childAspectRatio: 2 / 3.7,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 12,
-                        ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final movie = _history[index];
-                            return MovieCard(
-                              movie: movie,
-                              width: double.infinity,
-                              height: 160,
-                            );
-                          },
-                          childCount: _history.length,
-                        ),
-                      ),
-                    ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 24)),
-                ],
+                    const SizedBox(height: 10),
+                  ],
+                ),
+                initialMovies: _history,
+                showFilters: _history.isNotEmpty,
+                emptyMessage: 'No history yet',
               ),
             ),
     );

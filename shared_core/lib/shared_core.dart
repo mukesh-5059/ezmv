@@ -7,6 +7,7 @@ export 'models/filter.model.dart';
 export 'models/movie.model.dart';
 export 'models/movie_details.model.dart';
 export 'models/subtitle.model.dart';
+export 'models/stream_source.model.dart';
 export 'models/trakt_list.model.dart';
 export 'models/tv_episode.model.dart';
 export 'models/tv_season.model.dart';

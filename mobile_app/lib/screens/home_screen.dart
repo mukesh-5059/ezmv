@@ -230,6 +230,8 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.only(top: 8, bottom: 6),
               child: MovieLane(
                 title: lane.title,
+                laneId: lane.id,
+                language: _selectedLanguage,
                 movies: lane.items,
                 hasMore: lane.hasMore,
                 isLoadingMore: _loadingLaneIds.contains(lane.id),
