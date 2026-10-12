@@ -27,3 +27,5 @@ A self-hosted media scrapping / streaming project with a Python backend and Flut
 - **Android TV App**: UI designed for TV remotes with media playback via `media_kit`.
 - **Mobile App**: Work in progress.
 - **Shared Core**: Reusable models, API logic, and watch progress tracking between both clients.
+
+Just use stremio with penguplay or hdhub addon
