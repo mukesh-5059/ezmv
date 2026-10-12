@@ -81,8 +81,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
     try {
-      (_player.platform as dynamic)?.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5');
-      (_player.platform as dynamic)?.setProperty('network-timeout', '30');
+      final p = (_player.platform as dynamic);
+      p?.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_delay_max=10');
+      p?.setProperty('stream-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=10');
+      p?.setProperty('network-timeout', '45');
+      p?.setProperty('demuxer-readahead-secs', '60');
+      p?.setProperty('demuxer-max-bytes', '64MiB');
+      p?.setProperty('demuxer-max-back-bytes', '32MiB');
     } catch (_) {}
 
     _videoController = VideoController(
@@ -96,10 +101,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _initPlayer() async {
+    Timer? errorDebounceTimer;
     _subscriptions.add(_player.stream.error.listen((error) {
-      if (mounted && error.isNotEmpty) {
-        setState(() => _errorMessage = error);
-      }
+      if (!mounted || error.isEmpty) return;
+      errorDebounceTimer?.cancel();
+      errorDebounceTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (mounted && !_player.state.playing && _player.state.buffering) {
+          setState(() => _errorMessage = error);
+        }
+      });
     }));
 
     _subscriptions.add(_player.stream.tracks.listen((tracks) {
@@ -127,7 +137,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final startDuration = widget.initialPositionSeconds > 0
           ? Duration(seconds: widget.initialPositionSeconds)
           : null;
-
       await _player.open(
         Media(
           widget.streamUrl,
