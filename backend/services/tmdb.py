@@ -5,6 +5,7 @@ from pathlib import Path
 from backend.config import settings
 from backend.session import get_session
 from backend.services.cache_db import get_tmdb_cache, set_tmdb_cache
+from backend.services.imdb_ratings import get_imdb_ratings_batch, calculate_weighted_score
 
 logger = logging.getLogger(__name__)
 
@@ -353,17 +354,55 @@ class TMDBClient:
             seen_ids.add((m_id, media_type))
             if not item.get("poster_path"):
                 continue
+
+            char = (item.get("character") or "").lower()
+            if "self" in char:
+                continue
+
             valid_items.append(item)
 
-        def get_popularity_score(x):
-            pop = float(x.get("popularity") or 0.0)
-            votes = int(x.get("vote_count") or 0)
-            avg = float(x.get("vote_average") or 0.0)
-            order = int(x.get("order") if x.get("order") is not None else 10)
+        popular_candidates = [
+            x for x in valid_items
+            if (x.get("order") if x.get("order") is not None else 99) <= 5
+        ]
+        if not popular_candidates:
+            popular_candidates = valid_items
+
+        top_pool = sorted(
+            popular_candidates,
+            key=lambda x: float(x.get("popularity") or 0.0) + int(x.get("vote_count") or 0),
+            reverse=True
+        )[:40]
+
+        movie_detail_tasks = [
+            self.get_movie_details(m["id"]) if m.get("media_type") == "movie" else self.get_tv_details(m["id"])
+            for m in top_pool
+        ]
+        resolved_details = await asyncio.gather(*movie_detail_tasks, return_exceptions=True)
+
+        imdb_map = {}
+        for m, det in zip(top_pool, resolved_details):
+            if isinstance(det, dict):
+                imdb_id = det.get("imdb_id") or (det.get("external_ids") or {}).get("imdb_id")
+                if imdb_id:
+                    imdb_map[m["id"]] = imdb_id
+                    m["imdb_id"] = imdb_id
+
+        imdb_ratings = get_imdb_ratings_batch(list(imdb_map.values()))
+
+        def get_item_score(m):
+            iid = m.get("imdb_id")
+            if iid and iid in imdb_ratings:
+                r, v = imdb_ratings[iid]
+                return calculate_weighted_score(r, v)
+            pop = float(m.get("popularity") or 0.0)
+            votes = int(m.get("vote_count") or 0)
+            avg = float(m.get("vote_average") or 0.0)
+            order = int(m.get("order") if m.get("order") is not None else 10)
             billing_multiplier = 1.3 if order < 4 else 1.0
             return ((pop * 2.5) + (votes * (avg / 5.0))) * billing_multiplier
 
-        popular_sorted = sorted(valid_items, key=get_popularity_score, reverse=True)
+        popular_sorted = sorted(top_pool, key=get_item_score, reverse=True)
 
         def get_date(x):
             return x.get("release_date") or x.get("first_air_date") or ""

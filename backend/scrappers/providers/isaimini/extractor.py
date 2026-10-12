@@ -101,9 +101,13 @@ async def extract_streams_from_resolution(
 
                     if direct_stream_url:
                         results.append(StreamSource(
-                            provider=f"{category} ({quality})",
+                            provider="Isaimini",
                             url=direct_stream_url,
                             quality=quality,
+                            languages=["Tamil"],
+                            source="Isaimini",
+                            host="Moviezda",
+                            priority=15,
                             headers={"User-Agent": DEFAULT_HEADERS["User-Agent"]}
                         ))
                         logger.debug(f"[Isaimini:Extractor] Extracted direct stream ({quality}): {direct_stream_url}")

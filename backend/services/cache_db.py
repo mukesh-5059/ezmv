@@ -41,15 +41,20 @@ def init_cache_db():
             quality TEXT NOT NULL,
             url TEXT NOT NULL,
             headers_json TEXT,
+            metadata_json TEXT,
             priority INTEGER DEFAULT 100,
             created_at INTEGER NOT NULL,
             expires_at INTEGER NOT NULL,
             ttl INTEGER NOT NULL,
             season INTEGER NOT NULL DEFAULT 0,
             episode INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (tmdb_id, scraper_id, quality, season, episode)
+            PRIMARY KEY (tmdb_id, scraper_id, url, season, episode)
         );
         """)
+        try:
+            conn.execute("ALTER TABLE stream_cache ADD COLUMN metadata_json TEXT;")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stream_lookup ON stream_cache(tmdb_id, season, episode, expires_at);")
         conn.commit()
     finally:
@@ -143,7 +148,7 @@ def get_cached_streams(
     try:
         with get_db(commit=False) as conn:
             query = """
-            SELECT tmdb_id, scraper_id, provider, quality, url, headers_json, priority, created_at, expires_at, ttl, season, episode
+            SELECT tmdb_id, scraper_id, provider, quality, url, headers_json, metadata_json, priority, created_at, expires_at, ttl, season, episode
             FROM stream_cache
             WHERE tmdb_id = ?
               AND season = ?
@@ -161,6 +166,7 @@ def get_cached_streams(
             results = []
             for row in rows:
                 headers = json.loads(row["headers_json"]) if row["headers_json"] else {}
+                meta = json.loads(row["metadata_json"]) if "metadata_json" in row.keys() and row["metadata_json"] else {}
                 remaining_ttl = max(0, row["expires_at"] - now)
                 results.append({
                     "url": row["url"],
@@ -173,6 +179,14 @@ def get_cached_streams(
                     "expires_at": row["expires_at"],
                     "ttl": row["ttl"],
                     "remaining_ttl": remaining_ttl,
+                    "languages": meta.get("languages", []),
+                    "size_mb": meta.get("size_mb"),
+                    "formatted_size": meta.get("formatted_size"),
+                    "bitrate_kbps": meta.get("bitrate_kbps"),
+                    "bitrate_str": meta.get("bitrate_str"),
+                    "source": meta.get("source"),
+                    "host": meta.get("host"),
+                    "filename": meta.get("filename"),
                 })
             if results:
                 logger.info(cache_stream_hit_tag(tmdb_id, safe_season, safe_episode, len(results)))
@@ -199,18 +213,30 @@ def save_cached_streams(
                 ttl = s.get("ttl") or 86400
                 expires_at = s.get("expires_at") or (now + ttl)
                 headers_json = json.dumps(s.get("headers", {}))
+                meta = {
+                    "languages": s.get("languages", []),
+                    "size_mb": s.get("size_mb"),
+                    "formatted_size": s.get("formatted_size"),
+                    "bitrate_kbps": s.get("bitrate_kbps"),
+                    "bitrate_str": s.get("bitrate_str"),
+                    "source": s.get("source"),
+                    "host": s.get("host"),
+                    "filename": s.get("filename"),
+                }
+                metadata_json = json.dumps(meta)
                 raw_prov = s.get("provider", "direct")
                 scraper_id = (s.get("scraper_id") or raw_prov.split(" ")[0]).lower().strip("()")
                 conn.execute(
                     """
                     INSERT INTO stream_cache (
-                        tmdb_id, scraper_id, provider, quality, url, headers_json, priority, created_at, expires_at, ttl, season, episode
+                        tmdb_id, scraper_id, provider, quality, url, headers_json, metadata_json, priority, created_at, expires_at, ttl, season, episode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(tmdb_id, scraper_id, quality, season, episode) DO UPDATE SET
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tmdb_id, scraper_id, url, season, episode) DO UPDATE SET
                         provider = excluded.provider,
-                        url = excluded.url,
+                        quality = excluded.quality,
                         headers_json = excluded.headers_json,
+                        metadata_json = excluded.metadata_json,
                         priority = excluded.priority,
                         created_at = excluded.created_at,
                         expires_at = excluded.expires_at,
@@ -223,6 +249,7 @@ def save_cached_streams(
                         s.get("quality", "HD"),
                         s.get("url", ""),
                         headers_json,
+                        metadata_json,
                         s.get("priority", 100),
                         now,
                         expires_at,

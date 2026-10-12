@@ -16,7 +16,7 @@ def get_session() -> AsyncSession:
             CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query",
             CurlOpt.IPRESOLVE: 1,
         }
-        _session = AsyncSession(curl_options=curl_opts, loop=current_loop)
+        _session = AsyncSession(curl_options=curl_opts, impersonate="chrome120", loop=current_loop)
     return _session
 
 async def init_session():
@@ -27,7 +27,7 @@ async def init_session():
             CurlOpt.DOH_URL: b"https://1.1.1.1/dns-query",
             CurlOpt.IPRESOLVE: 1,
         }
-        _session = AsyncSession(curl_options=curl_opts, loop=current_loop)
+        _session = AsyncSession(curl_options=curl_opts, impersonate="chrome120", loop=current_loop)
 
 async def close_session():
     """

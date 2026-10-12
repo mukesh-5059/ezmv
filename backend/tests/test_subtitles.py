@@ -35,6 +35,7 @@ class TestSubtitlesService(unittest.IsolatedAsyncioTestCase):
         mock_session.get = AsyncMock(return_value=mock_response)
 
         with patch("backend.services.subtitles.get_session", return_value=mock_session), \
+             patch("backend.services.subtitles.get_tmdb_cache", return_value=None), \
              patch.object(service, "_get_imdb_id", AsyncMock(return_value="tt1234567")):
             res = await service.get_subtitles(tmdb_id=123, media_type="movie")
 

@@ -159,11 +159,23 @@ class MovieDetails(BaseModel):
 class StreamSource(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    quality: str = "HD"
     url: str
-    type: str = "direct"
-    provider: str = ""
+    quality: str = "HD"
+    languages: list[str] = Field(default_factory=list)
     size_mb: float | None = None
+    formatted_size: str | None = None
+    bitrate_kbps: int | None = None
+    bitrate_str: str | None = None
+    provider: str = ""
+    source: str | None = None
+    host: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    priority: int = 100
+    created_at: int | None = None
+    expires_at: int | None = None
+    ttl: int | None = None
+    remaining_ttl: int = 0
+    filename: str | None = None
 
 
 class StreamResponse(BaseModel):
