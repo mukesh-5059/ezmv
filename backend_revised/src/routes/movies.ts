@@ -1,5 +1,12 @@
 import { Hono } from 'hono';
-import { Bindings, MovieDetailsResponse, CastMember, GenreItem, TvSeasonItem } from '../types';
+import {
+  Bindings,
+  MovieDetailsResponse,
+  MovieSummaryResponse,
+  CastMember,
+  GenreItem,
+  TvSeasonItem,
+} from '../types';
 import { TmdbService } from '../services/tmdb';
 
 export const moviesRouter = new Hono<{ Bindings: Bindings }>();
@@ -7,6 +14,8 @@ export const moviesRouter = new Hono<{ Bindings: Bindings }>();
 moviesRouter.get('/:media_type/:id', async (c) => {
   const mediaTypeParam = c.req.param('media_type').toLowerCase();
   const idParam = c.req.param('id');
+  const isConcise =
+    c.req.query('concise') === 'true' || c.req.query('short') === 'true';
 
   if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv') {
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
@@ -17,7 +26,7 @@ moviesRouter.get('/:media_type/:id', async (c) => {
 
   let tmdbResult;
   try {
-    tmdbResult = await tmdbService.getDetails(mediaType, idParam);
+    tmdbResult = await tmdbService.getDetails(mediaType, idParam, isConcise);
   } catch (err: any) {
     return c.json({ error: 'Failed to fetch upstream details', details: err.message }, 502);
   }
@@ -35,7 +44,7 @@ moviesRouter.get('/:media_type/:id', async (c) => {
   let imdbId = rawData.imdb_id || rawData.external_ids?.imdb_id || null;
 
   // 2. Fetch authoritative rating & votes from D1
-  let voteAverage = Number(rawData.vote_average || 0);
+  let rating = Number(rawData.vote_average || 0);
   let voteCount = Number(rawData.vote_count || 0);
 
   if (imdbId) {
@@ -46,12 +55,36 @@ moviesRouter.get('/:media_type/:id', async (c) => {
       .first<{ rating: number; votes: number }>();
 
     if (d1Rating && d1Rating.rating != null) {
-      voteAverage = d1Rating.rating;
+      rating = d1Rating.rating;
       voteCount = d1Rating.votes || 0;
     }
   }
 
-  // 3. Format Cast
+  // 3. Return lightweight summary if ?concise=true or ?short=true
+  if (isConcise) {
+    const genreIds =
+      rawData.genre_ids ||
+      (Array.isArray(rawData.genres) ? rawData.genres.map((g: any) => g.id) : []);
+
+    const summaryPayload: MovieSummaryResponse = {
+      tmdb_id: rawData.id,
+      imdb_id: imdbId,
+      title: rawData.title || rawData.name || '',
+      name: rawData.name,
+      overview: rawData.overview || '',
+      release_date: rawData.release_date || rawData.first_air_date || '',
+      first_air_date: rawData.first_air_date,
+      poster_path: rawData.poster_path || '',
+      backdrop_path: rawData.backdrop_path || '',
+      rating,
+      vote_count: voteCount,
+      media_type: mediaType,
+      genre_ids: genreIds,
+    };
+    return c.json(summaryPayload);
+  }
+
+  // 4. Format Full Details (Cast, Genres, Seasons, Runtime)
   const rawCast = rawData.credits?.cast || [];
   const cast: CastMember[] = rawCast.slice(0, 30).map((c: any) => ({
     id: c.id,
@@ -60,13 +93,11 @@ moviesRouter.get('/:media_type/:id', async (c) => {
     profile_path: c.profile_path || null,
   }));
 
-  // 4. Format Genres
   const genres: GenreItem[] = (rawData.genres || []).map((g: any) => ({
     id: g.id,
     name: g.name || '',
   }));
 
-  // 5. Format Seasons (TV)
   let seasons: TvSeasonItem[] | undefined;
   if (mediaType === 'tv' && Array.isArray(rawData.seasons)) {
     seasons = rawData.seasons.map((s: any) => ({
@@ -80,7 +111,6 @@ moviesRouter.get('/:media_type/:id', async (c) => {
     }));
   }
 
-  // 6. Compute Runtime
   let runtime: number | null = rawData.runtime || null;
   if (!runtime && Array.isArray(rawData.episode_run_time) && rawData.episode_run_time.length > 0) {
     runtime = rawData.episode_run_time[0];
@@ -96,9 +126,8 @@ moviesRouter.get('/:media_type/:id', async (c) => {
     first_air_date: rawData.first_air_date,
     poster_path: rawData.poster_path || '',
     backdrop_path: rawData.backdrop_path || '',
-    vote_average: voteAverage,
+    rating,
     vote_count: voteCount,
-    rating: voteAverage,
     runtime: runtime,
     tagline: rawData.tagline || null,
     media_type: mediaType,

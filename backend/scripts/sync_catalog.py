@@ -6,6 +6,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import time
@@ -99,9 +100,11 @@ async def fetch_graphql_lane(
     limit: int = 50,
     after: str | None = None,
 ) -> tuple[list[dict], str | None]:
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     constraints = {
         "titleTypeConstraint": {"anyTitleTypeIds": ["movie"]},
         "languageConstraint": {"anyPrimaryLanguages": ["ta"]},
+        "releaseDateConstraint": {"releaseDateRange": {"end": today_str}},
     }
     if extra_constraints:
         constraints.update(extra_constraints)

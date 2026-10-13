@@ -26,12 +26,22 @@ export class TmdbService {
     return headers;
   }
 
-  async getDetails(mediaType: 'movie' | 'tv', tmdbId: number | string): Promise<TmdbResult | null> {
-    const cacheKeyUrl = `https://cache.local/tmdb/${mediaType}/${tmdbId}?append=credits,external_ids,videos`;
+  async getDetails(
+    mediaType: 'movie' | 'tv',
+    tmdbId: number | string,
+    concise: boolean = false
+  ): Promise<TmdbResult | null> {
+    const appends: string[] = [];
+    if (!concise) appends.push('credits');
+    if (mediaType === 'tv') appends.push('external_ids');
+
+    const appendParam = appends.length > 0 ? `?append_to_response=${appends.join(',')}` : '';
+    const cacheKeyUrl = `https://cache.local/tmdb/${mediaType}/${tmdbId}${concise ? '?concise=true' : appendParam}`;
+
     const cacheKey = new Request(cacheKeyUrl);
     const cache = caches.default;
 
-    // 1. Check Cloudflare Cache API for existing TMDb response
+    // 1. Check Cloudflare Cache API
     const cachedResponse = await cache.match(cacheKey);
     if (cachedResponse) {
       try {
@@ -47,9 +57,10 @@ export class TmdbService {
     }
 
     // 2. Fetch fresh from TMDb
-    let url = `${this.baseUrl}/${mediaType}/${tmdbId}?append_to_response=credits,external_ids,videos`;
+    let url = `${this.baseUrl}/${mediaType}/${tmdbId}${appendParam}`;
+
     if (!this.readToken && this.apiKey) {
-      url += `&api_key=${this.apiKey}`;
+      url += (url.includes('?') ? '&' : '?') + `api_key=${this.apiKey}`;
     }
 
     const response = await fetch(url, {
@@ -67,7 +78,7 @@ export class TmdbService {
     const hasPoster = Boolean(data.poster_path);
     const hasBackdrop = Boolean(data.backdrop_path);
     const hasOverview = Boolean(data.overview && data.overview.trim().length > 10);
-    const hasCast = Boolean(data.credits?.cast && data.credits.cast.length > 0);
+    const hasCast = concise ? true : Boolean(data.credits?.cast && data.credits.cast.length > 0);
 
     const isComplete = hasPoster && hasBackdrop && hasOverview && hasCast;
     const ttlSeconds = isComplete ? 172800 : 43200; // 48h vs 12h

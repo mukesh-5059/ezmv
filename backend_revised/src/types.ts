@@ -30,7 +30,7 @@ export interface TvSeasonItem {
   overview?: string | null;
 }
 
-export interface MovieDetailsResponse {
+export interface MovieSummaryResponse {
   tmdb_id: number;
   imdb_id?: string | null;
   title: string;
@@ -40,12 +40,15 @@ export interface MovieDetailsResponse {
   first_air_date?: string;
   poster_path: string;
   backdrop_path: string;
-  vote_average: number;
+  rating: number;
   vote_count: number;
-  rating?: number;
+  media_type: 'movie' | 'tv';
+  genre_ids?: number[];
+}
+
+export interface MovieDetailsResponse extends MovieSummaryResponse {
   runtime?: number | null;
   tagline?: string | null;
-  media_type: 'movie' | 'tv';
   number_of_seasons?: number;
   number_of_episodes?: number;
   genres: GenreItem[];
