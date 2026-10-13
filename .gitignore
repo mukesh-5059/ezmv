@@ -9,3 +9,6 @@ backend/data/
 test_streams.txt
 test_*.txt
 *.log
+node_modules/
+.wrangler/
+.dev.vars

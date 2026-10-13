@@ -1,0 +1,36 @@
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+
+export type Bindings = {
+  DB: D1Database;
+};
+
+const app = new Hono<{ Bindings: Bindings }>();
+
+app.use('*', cors());
+
+// Root health check probed by DiscoveryService and TV app
+app.get('/', (c) => {
+  return c.json({
+    status: 'online',
+    message: 'Movie Streaming Backend API is running.',
+  });
+});
+
+// Diagnostic route to test D1 connectivity and IMDb ratings lookup
+app.get('/api/v1/imdb/:id', async (c) => {
+  const imdbId = c.req.param('id');
+  const result = await c.env.DB.prepare(
+    'SELECT imdb_id, rating, votes FROM imdb_ratings WHERE imdb_id = ?'
+  )
+    .bind(imdbId)
+    .first();
+
+  if (!result) {
+    return c.json({ error: 'Title not found' }, 404);
+  }
+
+  return c.json(result);
+});
+
+export default app;
