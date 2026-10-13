@@ -1,9 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-
-export type Bindings = {
-  DB: D1Database;
-};
+import { Bindings } from './types';
+import { moviesRouter } from './routes/movies';
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -16,6 +14,9 @@ app.get('/', (c) => {
     message: 'Movie Streaming Backend API is running.',
   });
 });
+
+// Mount routes
+app.route('/api/v1/movies', moviesRouter);
 
 // Diagnostic route to test D1 connectivity and IMDb ratings lookup
 app.get('/api/v1/imdb/:id', async (c) => {
