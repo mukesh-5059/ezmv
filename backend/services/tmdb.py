@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from backend.config import settings
 from backend.session import get_session
@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 EXCLUDED_ADULT_KEYWORD_IDS = "18321,155477,239225,190370,156470,224636,10714,596,207317,227652,298835"
+EXCLUDED_NONFICTION_GENRES = {10764, 10767, 10763}  # Reality, Talk, News
 
 
 class TMDBClient:
@@ -84,7 +85,7 @@ class TMDBClient:
                 page=page,
             )
 
-        cache_key = f"search_movie:{clean_q}_{year}_{language}_{page}"
+        cache_key = f"search_movie_v3:{clean_q}_{year}_{language}_{page}"
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
             return cached
@@ -108,16 +109,13 @@ class TMDBClient:
             resp.raise_for_status()
             results = resp.json().get("results", [])
 
-            today_str = date.today().isoformat()
-            filtered = [
-                m for m in results
-                if m.get("release_date") and m.get("release_date") <= today_str
-            ]
             if language == "anime":
-                filtered = [
-                    m for m in filtered
+                results = [
+                    m for m in results
                     if m.get("original_language") == "ja" or 16 in m.get("genre_ids", [])
                 ]
+
+            filtered = await self.filter_and_enrich_imdb(results)
 
             if len(clean_q) >= 2 and len(filtered) > 0:
                 set_tmdb_cache(cache_key, filtered, ttl_seconds=86400)
@@ -212,6 +210,64 @@ class TMDBClient:
             logger.error(f"TMDB trending failed for window '{time_window}': {e}")
             return []
 
+    async def filter_and_enrich_imdb(self, movies: list[dict]) -> list[dict]:
+        if not movies:
+            return []
+        tasks = [
+            self.get_movie_details(m["id"]) if m.get("media_type") != "tv" else self.get_tv_details(m["id"])
+            for m in movies
+        ]
+        details_list = await asyncio.gather(*tasks, return_exceptions=True)
+
+        candidates = []
+        imdb_ids = []
+        for m, det in zip(movies, details_list):
+            if not isinstance(det, dict):
+                continue
+
+            gids = set(m.get("genre_ids") or []) | set(
+                g["id"] for g in det.get("genres", []) if isinstance(g, dict) and "id" in g
+            )
+            if gids & EXCLUDED_NONFICTION_GENRES:
+                continue
+
+            iid = det.get("imdb_id") or (det.get("external_ids") or {}).get("imdb_id")
+            if not iid:
+                continue
+
+            m["imdb_id"] = iid
+            candidates.append(m)
+            imdb_ids.append(iid)
+
+        ratings_map = get_imdb_ratings_batch(imdb_ids)
+        today = date.today()
+        today_str = today.isoformat()
+        seven_days_ago = (today - timedelta(days=7)).isoformat()
+
+        valid = []
+        for m in candidates:
+            iid = m["imdb_id"]
+            rel_date = m.get("release_date") or m.get("first_air_date") or ""
+
+            if iid in ratings_map:
+                m["vote_average"] = ratings_map[iid][0]
+                m["vote_count"] = ratings_map[iid][1]
+                votes = ratings_map[iid][1]
+            else:
+                votes = 0
+
+            if not rel_date or rel_date > today_str:
+                keep = True
+            elif rel_date >= seven_days_ago:
+                keep = (votes >= 5) if iid in ratings_map else True
+            else:
+                keep = votes >= 50
+
+            if keep:
+                valid.append(m)
+
+        return valid
+
     async def discover_movies(
         self,
         language: str | None = None,
@@ -223,7 +279,7 @@ class TMDBClient:
         sort_by: str | None = None,
         vote_count_gte: int | None = None,
     ) -> list[dict]:
-        cache_key = f"discover:{language}_{year}_{year_min}_{year_max}_{genre}_{sort_by}_{vote_count_gte}_{page}"
+        cache_key = f"discover_v3:{language}_{year}_{year_min}_{year_max}_{genre}_{sort_by}_{vote_count_gte}_{page}"
         cached = get_tmdb_cache(cache_key)
         if cached is not None:
             return cached
@@ -280,6 +336,7 @@ class TMDBClient:
             resp = await client.get(url, headers=self.headers, params=params, impersonate="chrome", timeout=20.0)
             resp.raise_for_status()
             results = resp.json().get("results", [])
+            results = await self.filter_and_enrich_imdb(results)
 
             set_tmdb_cache(cache_key, results, ttl_seconds=86400)
             return results
@@ -357,6 +414,10 @@ class TMDBClient:
 
             char = (item.get("character") or "").lower()
             if "self" in char:
+                continue
+
+            gids = set(item.get("genre_ids") or [])
+            if gids & EXCLUDED_NONFICTION_GENRES:
                 continue
 
             valid_items.append(item)

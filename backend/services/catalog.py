@@ -5,7 +5,7 @@ from backend.models import MovieSummary
 
 LANES_CONFIG = {
     "trending": {
-        "title": "New & Trending Tamil",
+        "title": "Trending Tamil",
         "tail_order": "le.last_seen DESC, le.previous_rank ASC",
     },
     "comedy": {
@@ -132,15 +132,19 @@ class CatalogService:
                 items.append(d)
             return items
 
+    def get_lane_count(self, lane_id: str) -> int:
+        with self._get_connection() as conn:
+            count_row = conn.execute(
+                "SELECT COUNT(*) AS total FROM lane_entries WHERE lane_id = ?;",
+                (lane_id,),
+            ).fetchone()
+            return count_row["total"] if count_row else 0
+
     def get_available_lanes(self) -> list[dict]:
         lanes = []
         with self._get_connection() as conn:
             for lane_id, cfg in LANES_CONFIG.items():
-                count_row = conn.execute(
-                    "SELECT COUNT(*) AS total FROM lane_entries WHERE lane_id = ?;",
-                    (lane_id,),
-                ).fetchone()
-                total = count_row["total"] if count_row else 0
+                total = self.get_lane_count(lane_id)
                 lanes.append({
                     "lane_id": lane_id,
                     "title": cfg["title"],

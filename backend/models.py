@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class MovieSummary(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -8,8 +8,8 @@ class MovieSummary(BaseModel):
     original_title: str = ""
     overview: str = ""
     release_date: str = ""
-    poster_path: str = ""
-    backdrop_path: str = ""
+    poster_path: str | None = None
+    backdrop_path: str | None = None
     vote_average: float = 0.0
     original_language: str = "ta"
     media_type: str = "movie"
@@ -36,12 +36,15 @@ class MovieSummary(BaseModel):
 
     @classmethod
     def from_tmdb(cls, item: dict, media_type: str = "movie") -> "MovieSummary":
+        title_val = item.get("title") if media_type == "movie" else item.get("name")
+        orig_title_val = item.get("original_title") if media_type == "movie" else item.get("original_name")
+        rel_date_val = item.get("release_date") if media_type == "movie" else item.get("first_air_date")
         return cls(
             tmdb_id=item.get("id") or 0,
-            title=item.get("title") if media_type == "movie" else (item.get("name") or ""),
-            original_title=item.get("original_title") if media_type == "movie" else (item.get("original_name") or ""),
+            title=title_val or "",
+            original_title=orig_title_val or "",
             overview=item.get("overview") or "",
-            release_date=item.get("release_date") if media_type == "movie" else (item.get("first_air_date") or ""),
+            release_date=rel_date_val or "",
             poster_path=item.get("poster_path") or "",
             backdrop_path=item.get("backdrop_path") or "",
             vote_average=float(item.get("vote_average") or 0.0),
@@ -96,8 +99,8 @@ class MovieDetails(BaseModel):
     imdb_id: str | None = None
     overview: str = ""
     release_date: str = ""
-    poster_path: str = ""
-    backdrop_path: str = ""
+    poster_path: str | None = None
+    backdrop_path: str | None = None
     vote_average: float = 0.0
     vote_count: int = 0
     genres: list[dict] = Field(default_factory=list)
@@ -113,14 +116,18 @@ class MovieDetails(BaseModel):
     @classmethod
     def from_tmdb(cls, details: dict, media_type: str = "movie") -> "MovieDetails":
         data = dict(details)
-        external_ids = data.get("external_ids", {})
+        external_ids = data.get("external_ids", {}) or {}
         imdb_id = data.get("imdb_id") or external_ids.get("imdb_id")
         data["tmdb_id"] = data.get("id") or 0
         data["imdb_id"] = imdb_id
         is_tv = media_type == "tv" or "first_air_date" in data or "number_of_seasons" in data
         data["media_type"] = "tv" if is_tv else "movie"
-        data["title"] = (data.get("name") or data.get("title") or "") if is_tv else (data.get("title") or "")
-        data["release_date"] = (data.get("first_air_date") or data.get("release_date") or "") if is_tv else (data.get("release_date") or "")
+        data["title"] = ((data.get("name") or data.get("title")) if is_tv else data.get("title")) or ""
+        data["release_date"] = ((data.get("first_air_date") or data.get("release_date")) if is_tv else data.get("release_date")) or ""
+        data["overview"] = data.get("overview") or ""
+        data["poster_path"] = data.get("poster_path")
+        data["backdrop_path"] = data.get("backdrop_path")
+        data["tagline"] = data.get("tagline")
         data["external_ids"] = external_ids
 
         raw_seasons = data.get("seasons", [])
@@ -234,11 +241,44 @@ class DashboardResponse(BaseModel):
 class LaneMoviesResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    id: str
-    page: int
+    id: str | None = None
+    page: int = 1
     has_more: bool = False
     next_page: int | None = None
+    total_pages: int | None = None
     items: list[MovieSummary] = Field(default_factory=list)
+    results: list[MovieSummary] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_items_and_results(cls, data: any) -> any:
+        if isinstance(data, dict):
+            if "items" in data and "results" not in data:
+                data["results"] = data["items"]
+            elif "results" in data and "items" not in data:
+                data["items"] = data["results"]
+        return data
+
+
+class PaginatedMovieResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    page: int = 1
+    has_more: bool = False
+    next_page: int | None = None
+    total_pages: int | None = None
+    items: list[MovieSummary] = Field(default_factory=list)
+    results: list[MovieSummary] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_items_and_results(cls, data: any) -> any:
+        if isinstance(data, dict):
+            if "items" in data and "results" not in data:
+                data["results"] = data["items"]
+            elif "results" in data and "items" not in data:
+                data["items"] = data["results"]
+        return data
 
 
 class FilterOption(BaseModel):

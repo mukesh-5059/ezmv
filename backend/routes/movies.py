@@ -8,6 +8,7 @@ from backend.models import (
     DashboardLane,
     DashboardResponse,
     LaneMoviesResponse,
+    PaginatedMovieResponse,
     FilterOption,
     FiltersResponse,
     TraktListSummary,
@@ -68,8 +69,25 @@ async def get_dashboard(
     lanes: list[DashboardLane] = []
 
     if safe_lang.startswith("ta"):
+        raw_new = await tmdb_client.discover_movies(
+            language="ta",
+            sort_by="primary_release_date.desc",
+            page=1,
+        )
+        new_items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_new]
+        has_more_new = len(new_items) >= 20
+        lanes.append(
+            DashboardLane(
+                id="new",
+                title="New Releases",
+                items=new_items,
+                has_more=has_more_new,
+                next_page=2 if has_more_new else None,
+            )
+        )
+
         tamil_configs = [
-            ("trending", "New & Trending Tamil"),
+            ("trending", "Trending Tamil"),
             ("box_office", "Record-Breaking Box Office"),
             ("top_rated", "All-Time Most Watched"),
             ("comedy", "Popular Tamil Comedy"),
@@ -124,31 +142,93 @@ async def get_dashboard_lane(
     language: str = Query("ta", description="Language code: ta or en"),
     page: int = Query(1, ge=1, description="Page number to fetch"),
     limit: int = Query(20, ge=1, le=50, description="Items per page"),
+    genre: int | str | None = Query(None, description="Genre ID to filter by"),
+    year: int | None = Query(None, description="Release year to filter by"),
 ):
     safe_lang = language.strip().lower() if isinstance(language, str) else "ta"
     safe_page = page if isinstance(page, int) and page >= 1 else 1
     safe_limit = limit if isinstance(limit, int) and 1 <= limit <= 50 else 20
+    safe_genre = genre if isinstance(genre, (int, str)) and str(genre).lower() != "all" and str(genre) != "0" else None
+    safe_year = year if isinstance(year, int) else None
     offset = (safe_page - 1) * safe_limit
 
-    if safe_lang.startswith("ta") and lane_id in ["trending", "box_office", "top_rated", "comedy"]:
-        raw_items = catalog_service.get_lane_movies(lane_id, limit=safe_limit, offset=offset)
-        items = [MovieSummary.from_catalog(r) for r in raw_items]
-        has_more = len(items) == safe_limit
+    if safe_lang.startswith("ta") and lane_id == "new":
+        raw_items = await tmdb_client.discover_movies(
+            language="ta",
+            genre=safe_genre,
+            year=safe_year,
+            sort_by="primary_release_date.desc",
+            page=safe_page,
+        )
+        items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]
+        has_more = len(items) >= safe_limit
         return LaneMoviesResponse(
             id=lane_id,
             page=safe_page,
             has_more=has_more,
             next_page=(safe_page + 1) if has_more else None,
+            total_pages=None,
             items=items,
+            results=items,
         )
 
-    # Dynamic Trakt English lanes pagination
+    if safe_lang.startswith("ta") and lane_id in ["trending", "box_office", "top_rated", "comedy"]:
+        if safe_genre is not None or safe_year is not None:
+            sort_map = {
+                "trending": "popularity.desc",
+                "top_rated": "vote_average.desc",
+                "box_office": "revenue.desc",
+                "comedy": "popularity.desc",
+            }
+            sort_by = sort_map.get(lane_id, "popularity.desc")
+            target_genre = safe_genre
+            if lane_id == "comedy" and not target_genre:
+                target_genre = 35
+            raw_items = await tmdb_client.discover_movies(
+                language="ta",
+                genre=target_genre,
+                year=safe_year,
+                sort_by=sort_by,
+                page=safe_page,
+            )
+            items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]
+            has_more = len(items) >= safe_limit
+            return LaneMoviesResponse(
+                id=lane_id,
+                page=safe_page,
+                has_more=has_more,
+                next_page=(safe_page + 1) if has_more else None,
+                total_pages=None,
+                items=items,
+                results=items,
+            )
+
+        raw_items = catalog_service.get_lane_movies(lane_id, limit=safe_limit, offset=offset)
+        items = [MovieSummary.from_catalog(r) for r in raw_items]
+        total = catalog_service.get_lane_count(lane_id)
+        total_pages = (total + safe_limit - 1) // safe_limit if total > 0 else 1
+        has_more = safe_page < total_pages and len(items) == safe_limit
+        return LaneMoviesResponse(
+            id=lane_id,
+            page=safe_page,
+            has_more=has_more,
+            next_page=(safe_page + 1) if has_more else None,
+            total_pages=total_pages,
+            items=items,
+            results=items,
+        )
+
     en_configs = _load_lanes_en_config()
     matched_cfg = next((c for c in en_configs if c.get("id") == lane_id), None)
-    if matched_cfg:
+    if matched_cfg and safe_genre is None and safe_year is None:
         items = await _fetch_trakt_lane_items(matched_cfg, page=safe_page, limit=safe_limit)
     else:
-        raw_items = await tmdb_client.discover_movies(language=safe_lang, page=safe_page)
+        raw_items = await tmdb_client.discover_movies(
+            language=safe_lang,
+            genre=safe_genre,
+            year=safe_year,
+            page=safe_page,
+        )
         items = [MovieSummary.from_tmdb(m, media_type="movie") for m in raw_items]
 
     has_more = len(items) >= safe_limit
@@ -157,7 +237,9 @@ async def get_dashboard_lane(
         page=safe_page,
         has_more=has_more,
         next_page=(safe_page + 1) if has_more else None,
+        total_pages=None,
         items=items,
+        results=items,
     )
 
 
@@ -207,8 +289,8 @@ async def get_filters():
     )
 
 
-@router.get("/search")
-@router.get("/discover")
+@router.get("/search", response_model=PaginatedMovieResponse)
+@router.get("/discover", response_model=PaginatedMovieResponse)
 async def search_or_discover(
     query: str | None = Query(None, description="The title of the movie to search for (optional)"),
     language: str | None = Query(None, description="Language code to filter by"),
@@ -237,16 +319,15 @@ async def search_or_discover(
             limit=20,
         )
         if trakt_results:
-            return {"results": trakt_results}
-
-        # Fallback to TMDb search
-        results = await tmdb_client.search_movie(
-            query=safe_query,
-            year=safe_year,
-            language=safe_lang,
-            page=safe_page,
-        )
-        return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in results]}
+            items = trakt_results
+        else:
+            results = await tmdb_client.search_movie(
+                query=safe_query,
+                year=safe_year,
+                language=safe_lang,
+                page=safe_page,
+            )
+            items = [MovieSummary.from_tmdb(item, media_type="movie") for item in results]
     else:
         results = await tmdb_client.discover_movies(
             language=safe_lang,
@@ -257,7 +338,17 @@ async def search_or_discover(
             sort_by=safe_sort_by,
             page=safe_page,
         )
-        return {"results": [MovieSummary.from_tmdb(item, media_type="movie") for item in results]}
+        items = [MovieSummary.from_tmdb(item, media_type="movie") for item in results]
+
+    has_more = len(items) >= 20
+    return PaginatedMovieResponse(
+        page=safe_page,
+        has_more=has_more,
+        next_page=(safe_page + 1) if has_more else None,
+        total_pages=None,
+        items=items,
+        results=items,
+    )
 
 
 @router.get("/search/lists")
@@ -277,7 +368,7 @@ async def search_lists_endpoint(
     return {"results": lists}
 
 
-@router.get("/lists/{list_id}/items")
+@router.get("/lists/{list_id}/items", response_model=PaginatedMovieResponse)
 async def get_list_items_endpoint(
     list_id: str,
     page: int = Query(1, ge=1, description="Page number to fetch"),
@@ -287,7 +378,15 @@ async def get_list_items_endpoint(
     safe_limit = limit if isinstance(limit, int) and 1 <= limit <= 50 else 20
 
     items = await trakt_client.get_list_items(list_id=list_id, page=safe_page, limit=safe_limit)
-    return {"results": items}
+    has_more = len(items) >= safe_limit
+    return PaginatedMovieResponse(
+        page=safe_page,
+        has_more=has_more,
+        next_page=(safe_page + 1) if has_more else None,
+        total_pages=None,
+        items=items,
+        results=items,
+    )
 
 
 @router.get("/tv/{tmdb_id}/season/{season_number}", response_model=TvSeason)
@@ -381,21 +480,26 @@ async def get_details(
     media_type: str = "movie",
 ):
     clean_type = (media_type or "movie").strip().lower()
+    details = None
     if clean_type == "tv":
         details = await tmdb_client.get_tv_details(tmdb_id)
-        if details:
-            return MovieDetails.from_tmdb(details, media_type="tv")
-        # Fallback to movie
-        details = await tmdb_client.get_movie_details(tmdb_id)
-        if details:
-            return MovieDetails.from_tmdb(details, media_type="movie")
+        if not details:
+            details = await tmdb_client.get_movie_details(tmdb_id)
+            clean_type = "movie"
     else:
         details = await tmdb_client.get_movie_details(tmdb_id)
-        if details:
-            return MovieDetails.from_tmdb(details, media_type="movie")
-        # Fallback to tv
-        details = await tmdb_client.get_tv_details(tmdb_id)
-        if details:
-            return MovieDetails.from_tmdb(details, media_type="tv")
+        if not details:
+            details = await tmdb_client.get_tv_details(tmdb_id)
+            clean_type = "tv"
 
-    raise HTTPException(status_code=404, detail="Media not found on TMDB.")
+    if not details:
+        raise HTTPException(status_code=404, detail="Media not found on TMDB.")
+
+    model = MovieDetails.from_tmdb(details, media_type=clean_type)
+    if model.imdb_id:
+        from backend.services.imdb_ratings import get_imdb_rating
+        rating_tuple = get_imdb_rating(model.imdb_id)
+        if rating_tuple:
+            model.vote_average = rating_tuple[0]
+            model.vote_count = rating_tuple[1]
+    return model
