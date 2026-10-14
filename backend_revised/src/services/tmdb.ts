@@ -1,8 +1,7 @@
 import { Bindings } from '../types';
 
-export interface TmdbResult {
+export interface TmdbFetchResult {
   data: any;
-  cached: boolean;
   ttlSeconds: number;
 }
 
@@ -26,47 +25,23 @@ export class TmdbService {
     return headers;
   }
 
-  async getDetails(
+  async fetchDetails(
     mediaType: 'movie' | 'tv',
     tmdbId: number | string,
     concise: boolean = false
-  ): Promise<TmdbResult | null> {
+  ): Promise<TmdbFetchResult | null> {
     const appends: string[] = [];
     if (!concise) appends.push('credits');
     if (mediaType === 'tv') appends.push('external_ids');
 
     const appendParam = appends.length > 0 ? `?append_to_response=${appends.join(',')}` : '';
-    const cacheKeyUrl = `https://cache.local/tmdb/${mediaType}/${tmdbId}${concise ? '?concise=true' : appendParam}`;
-
-    const cacheKey = new Request(cacheKeyUrl);
-    const cache = caches.default;
-
-    // 1. Check Cloudflare Cache API
-    const cachedResponse = await cache.match(cacheKey);
-    if (cachedResponse) {
-      try {
-        const data = await cachedResponse.json();
-        const ttlHeader = cachedResponse.headers.get('X-Cache-TTL') || '172800s';
-        const ttl = parseInt(ttlHeader, 10) || 172800;
-        return {
-          data,
-          cached: true,
-          ttlSeconds: ttl,
-        };
-      } catch (_) {}
-    }
-
-    // 2. Fetch fresh from TMDb
     let url = `${this.baseUrl}/${mediaType}/${tmdbId}${appendParam}`;
 
     if (!this.readToken && this.apiKey) {
       url += (url.includes('?') ? '&' : '?') + `api_key=${this.apiKey}`;
     }
 
-    const response = await fetch(url, {
-      headers: this.getHeaders(),
-    });
-
+    const response = await fetch(url, { headers: this.getHeaders() });
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error(`TMDb API returned status ${response.status}`);
@@ -74,7 +49,7 @@ export class TmdbService {
 
     const data: any = await response.json();
 
-    // 3. Compute dynamic TTL (48 hours if complete, 12 hours if incomplete/upcoming)
+    // 48 hours if complete, 12 hours if incomplete/upcoming
     const hasPoster = Boolean(data.poster_path);
     const hasBackdrop = Boolean(data.backdrop_path);
     const hasOverview = Boolean(data.overview && data.overview.trim().length > 10);
@@ -83,21 +58,47 @@ export class TmdbService {
     const isComplete = hasPoster && hasBackdrop && hasOverview && hasCast;
     const ttlSeconds = isComplete ? 172800 : 43200; // 48h vs 12h
 
-    // 4. Store in Cache API
-    const cacheInit: ResponseInit = {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${ttlSeconds}`,
-        'X-Cache-TTL': `${ttlSeconds}s`,
-      },
-    };
+    return { data, ttlSeconds };
+  }
 
-    await cache.put(cacheKey, new Response(JSON.stringify(data), cacheInit));
+  async fetchTvSeason(
+    tmdbId: number | string,
+    seasonNumber: number | string
+  ): Promise<TmdbFetchResult | null> {
+    let url = `${this.baseUrl}/tv/${tmdbId}/season/${seasonNumber}`;
+    if (!this.readToken && this.apiKey) {
+      url += `?api_key=${this.apiKey}`;
+    }
 
-    return {
-      data,
-      cached: false,
-      ttlSeconds,
-    };
+    const response = await fetch(url, { headers: this.getHeaders() });
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      throw new Error(`TMDb API returned status ${response.status}`);
+    }
+
+    const data: any = await response.json();
+
+    // Ongoing/Recent: has future episode, un-aired episode, or aired in last 30 days -> 24h (86,400s)
+    // Concluded: all episodes aired > 30 days ago -> 30 days (2,592,000s)
+    let isOngoing = false;
+    const now = Date.now();
+    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+    if (Array.isArray(data.episodes) && data.episodes.length > 0) {
+      for (const ep of data.episodes) {
+        if (!ep.air_date) {
+          isOngoing = true;
+          break;
+        }
+        const airTime = new Date(ep.air_date).getTime();
+        if (airTime >= thirtyDaysAgo) {
+          isOngoing = true;
+          break;
+        }
+      }
+    }
+
+    const ttlSeconds = isOngoing ? 86400 : 2592000; // 24h vs 30d
+    return { data, ttlSeconds };
   }
 }

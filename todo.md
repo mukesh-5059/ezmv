@@ -96,3 +96,7 @@
     - **Media Type Fallbacks**: Remove cross-media guessing in `get_details` (e.g. falling back to Movie when TV fails, or vice versa); require explicit `media_type` and return clean 404 if not found.
     - **Client-Side Metadata Fallbacks**: Remove `fallbackMovie` injections and mock metadata generation in `shared_core` (`MediaService`).
     - **Catalog & Stream Fallbacks**: Eliminate mock/static fallback catalogs; return verified real-time data or explicit empty states instead of masked fallback responses.
+
+## 12. Backend Production Hardening
+- [ ] **Remove Debug & Diagnostic Headers**:
+  - Strip custom diagnostic headers (`X-Cache-Status`, `X-Cache-TTL`) across all routes in `backend_revised` before production release.

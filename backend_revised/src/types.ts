@@ -4,7 +4,6 @@ export type Bindings = {
   ReadAccessToken?: string;
   TMDB_API_KEY?: string;
   TMDB_READ_ACCESS_TOKEN?: string;
-  TRAKT_CLIENT_ID?: string;
   PENGUPLAY_MANIFEST_URL?: string;
 };
 
@@ -28,16 +27,15 @@ export interface TvSeasonItem {
   poster_path?: string | null;
   air_date?: string | null;
   overview?: string | null;
+  rating?: number;
 }
 
 export interface MovieSummaryResponse {
   tmdb_id: number;
   imdb_id?: string | null;
   title: string;
-  name?: string;
   overview: string;
   release_date: string;
-  first_air_date?: string;
   poster_path: string;
   backdrop_path: string;
   rating: number;
@@ -54,4 +52,21 @@ export interface MovieDetailsResponse extends MovieSummaryResponse {
   genres: GenreItem[];
   cast: CastMember[];
   seasons?: TvSeasonItem[];
+}
+
+export interface TvEpisode {
+  id: number;
+  episode_number: number;
+  name: string;
+  overview: string;
+  still_path?: string | null;
+  air_date?: string | null;
+  rating: number;
+  runtime?: number | null;
+  upcoming?: boolean;
+}
+
+export interface TvSeasonDetailsResponse {
+  season_number: number;
+  episodes: TvEpisode[];
 }
