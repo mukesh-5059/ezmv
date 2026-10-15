@@ -191,10 +191,6 @@ moviesRouter.get('/:media_type/:id', async (c) => {
       season_number: s.season_number,
       name: s.name || `Season ${s.season_number}`,
       episode_count: s.episode_count || 0,
-      poster_path: s.poster_path || null,
-      air_date: s.air_date || null,
-      overview: s.overview || null,
-      rating: s.vote_average != null ? Number(s.vote_average) : undefined,
     }));
   }
 

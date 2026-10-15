@@ -34,5 +34,5 @@ Zero-bloat, direct-to-stream streaming application. Unlike ad-heavy or bloated p
 ## Product Principles
 
 1. **Frictionless Playback**: A user clicking "Play" wants to watch content immediately; multiple stream URLs are an implementation detail, not a chore for the user.
-2. **Signal Over Noise**: Display only the metadata that helps the user pick a stream (Quality, Size, Audio Language); evict internal technical jargon (hashes, scrapers, TTLs, URLs).
+2. **Signal Over Noise**: Display only the metadata that helps the user pick a stream (Quality, Size, Audio Language, Speed + Source Tier); evict internal technical jargon (hashes, scrapers, TTLs, URLs).
 3. **Ergonomic Adaptation**: Design for the input mechanism first (D-pad remote focus vs. thumb tap).

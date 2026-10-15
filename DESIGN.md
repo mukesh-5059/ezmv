@@ -138,6 +138,8 @@ Dual-mode responsive architecture based on input mechanism and viewing distance:
   - 40dp outer screen margins (overscan safe zone).
   - Two-Pane Master-Detail layout for series details: Fixed 35% left rail for high-density episode navigation, 65% right viewport for sticky cinematic preview (16:9 still, runtime, IMDb rating, synopsis, cast).
   - Pinned season tab bar that stays locked in view during episode navigation.
+  - **The Single-Season Rule**: If `number_of_seasons == 1`, hide the season tab bar completely and navigate directly to the episode list.
+  - Seasons function strictly as navigation tabs without season-level posters, ratings, overviews, or air dates.
   - Zero vertical canvas shifting during episode traversal.
 
 ## Elevation & Depth
@@ -181,6 +183,17 @@ Surfaces are strictly flat at rest. Depth is achieved tonally through contrast d
 - **Style:** Compact container, 4px radius, 1.5px vertical by 5px horizontal padding.
 - **Color:** Semi-transparent black (`rgba(0,0,0,0.75)`) or surface elevation with crisp white/gold typography.
 
+### Stream Source Picker Item
+- **Shape:** Rounded container (8px radius).
+- **At Rest:** Smoked Zinc (`#1C1D24`), 1px white border at 10% opacity, 12px vertical by 16px horizontal padding.
+- **Focused / Selected:** 3px solid Stark White border on TV (or Crimson fill on mobile), soft ambient glow.
+- **Content Tokens (Strictly 4):**
+  1. **Resolution** (`[4K]`, `[1080P]`, `[720P]` in bold micro-pill)
+  2. **File Size** (`[2.4 GB]`)
+  3. **Audio Languages** (`[Tamil • English]`)
+  4. **Speed + Source Tier** (`[⚡ Fast • PenguPlay]`, `[🌐 Direct • HdHub]`)
+- **Prohibitions:** Strictly zero scene filenames, torrent hashes, scraper debug keys, or cache TTL countdowns.
+
 ### Video Player HUD
 - **Style:** Deep gradient vignette over video layer.
 - **Controls:** Minimal scrubber bar in Cinematic Crimson, prominent current timestamp, quick audio language switcher, and secondary `[Switch Source]` button.
@@ -189,6 +202,8 @@ Surfaces are strictly flat at rest. Depth is achieved tonally through contrast d
 
 ### Do:
 - **Do** start video playback within 1 click when user taps "Play" or an episode tile, running stream evaluation silently in the background.
+- **Do** format stream source choices with the 4 standard tokens (Resolution, File Size, Audio Languages, and Speed + Source tier e.g. `⚡ Fast • PenguPlay`).
+- **Do** auto-hide the season tab selector for single-season shows or miniseries.
 - **Do** wrap episode and movie titles across 2 full lines to eliminate premature ellipsis truncation.
 - **Do** maintain a locked Two-Pane layout on TV so scrolling through episodes never disorients the user by scrolling the entire page.
 - **Do** use 3px solid borders with soft halos for focused TV remote elements so users never lose their D-pad focus position.

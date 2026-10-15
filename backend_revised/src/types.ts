@@ -24,10 +24,6 @@ export interface TvSeasonItem {
   season_number: number;
   name: string;
   episode_count: number;
-  poster_path?: string | null;
-  air_date?: string | null;
-  overview?: string | null;
-  rating?: number;
 }
 
 export interface MovieSummaryResponse {
