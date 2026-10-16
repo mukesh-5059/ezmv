@@ -5,6 +5,8 @@ export type Bindings = {
   TMDB_API_KEY?: string;
   TMDB_READ_ACCESS_TOKEN?: string;
   PENGUPLAY_MANIFEST_URL?: string;
+  TURSO_DATABASE_URL?: string;
+  TURSO_AUTH_TOKEN?: string;
 };
 
 export interface GenreItem {

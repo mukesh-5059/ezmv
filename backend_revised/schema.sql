@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS movies (
     last_updated INTEGER
 );
 
+CREATE INDEX IF NOT EXISTS idx_movies_tmdb_id ON movies(tmdb_id);
+
 CREATE TABLE IF NOT EXISTS lane_entries (
     lane_id TEXT,
     imdb_id TEXT,

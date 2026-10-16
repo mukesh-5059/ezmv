@@ -12,6 +12,7 @@ import logging
 import time
 from backend.session import init_session, close_session, get_session
 from backend.services.tmdb import tmdb_client
+from backend.services.cache_db import init_cache_db
 
 logger = logging.getLogger(__name__)
 
@@ -439,6 +440,7 @@ async def main():
     parser.add_argument("--export-dir", type=str, default="catalog", help="Directory to export JSON files")
     args = parser.parse_args()
 
+    init_cache_db()
     await init_session()
     print(f"=== Starting 100% JSON Catalog Pipeline (Output: {args.export_dir}) ===")
     await sync_catalog_json(args.export_dir)

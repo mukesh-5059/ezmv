@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { TmdbService } from '../services/tmdb';
 import { CacheService } from '../services/cache';
+import { TursoService } from '../services/turso';
 
 export const moviesRouter = new Hono<{ Bindings: Bindings }>();
 
@@ -136,11 +137,27 @@ moviesRouter.get('/:media_type/:id', async (c) => {
     return c.json(cached);
   }
 
+  // Fast-path: Check Turso v_catalog directly for concise movie summaries
+  if (isConcise && mediaType === 'movie' && c.env.TURSO_DATABASE_URL && c.env.TURSO_AUTH_TOKEN) {
+    const t0 = Date.now();
+    const turso = new TursoService(c.env.TURSO_DATABASE_URL, c.env.TURSO_AUTH_TOKEN);
+    const catalogMovie = await turso.getCatalogMovie(idParam);
+    if (catalogMovie) {
+      console.log(`[Turso Fast-Path] HIT for ${idParam} (${Date.now() - t0}ms)`);
+      await cacheService.set(cacheKey, catalogMovie, 1296000);
+      return c.json(catalogMovie);
+    }
+    console.log(`[Turso Fast-Path] MISS for ${idParam} (${Date.now() - t0}ms)`);
+  }
+
+  const tmdbStart = Date.now();
   const tmdbService = new TmdbService(c.env);
   let tmdbResult;
   try {
     tmdbResult = await tmdbService.fetchDetails(mediaType, idParam, isConcise);
+    console.log(`[TMDb Fetch] DONE in ${Date.now() - tmdbStart}ms`);
   } catch (err: any) {
+    console.error(`[TMDb Fetch] FAILED in ${Date.now() - tmdbStart}ms:`, err.message);
     return c.json({ error: 'Failed to fetch upstream details', details: err.message }, 502);
   }
 
@@ -158,15 +175,50 @@ moviesRouter.get('/:media_type/:id', async (c) => {
   let voteCount = Number(rawData.vote_count || 0);
 
   if (imdbId) {
-    const d1Rating = await c.env.DB.prepare(
-      'SELECT rating, votes FROM imdb_ratings WHERE imdb_id = ?'
-    )
-      .bind(imdbId)
-      .first<{ rating: number; votes: number }>();
+    if (c.env.TURSO_DATABASE_URL && c.env.TURSO_AUTH_TOKEN) {
+      const turso = new TursoService(c.env.TURSO_DATABASE_URL, c.env.TURSO_AUTH_TOKEN);
+      const tRating = Date.now();
+      const tursoRating = await turso.getRating(imdbId);
+      console.log(`[Turso Rating] Fetched ${imdbId} in ${Date.now() - tRating}ms`);
+      if (tursoRating && tursoRating.rating != null) {
+        rating = tursoRating.rating;
+        voteCount = tursoRating.votes || 0;
+      }
 
-    if (d1Rating && d1Rating.rating != null) {
-      rating = d1Rating.rating;
-      voteCount = d1Rating.votes || 0;
+      // Async write-through to Turso movies table in background
+      if (mediaType === 'movie') {
+        c.executionCtx.waitUntil(
+          (async () => {
+            const startBg = Date.now();
+            console.log(`[Background Write] START upserting ${imdbId} (tmdb: ${rawData.id})`);
+            try {
+              await turso.upsertMovie({
+                imdb_id: imdbId,
+                tmdb_id: rawData.id,
+                title: rawData.title || rawData.name || '',
+                release_date: rawData.release_date || null,
+                poster_path: rawData.poster_path || null,
+                backdrop_path: rawData.backdrop_path || null,
+                overview: rawData.overview || '',
+              });
+              console.log(`[Background Write] DONE upserting ${imdbId} (${Date.now() - startBg}ms)`);
+            } catch (err: any) {
+              console.error(`[Background Write] FAILED for ${imdbId}:`, err.message);
+            }
+          })()
+        );
+      }
+    } else if (c.env.DB) {
+      const d1Rating = await c.env.DB.prepare(
+        'SELECT rating, votes FROM imdb_ratings WHERE imdb_id = ?'
+      )
+        .bind(imdbId)
+        .first<{ rating: number; votes: number }>();
+
+      if (d1Rating && d1Rating.rating != null) {
+        rating = d1Rating.rating;
+        voteCount = d1Rating.votes || 0;
+      }
     }
   }
 
