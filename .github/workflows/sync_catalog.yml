@@ -34,10 +34,27 @@ jobs:
           restore-keys: |
             catalog-json-
 
+      - name: Restore IMDb Ratings Baseline
+        uses: actions/cache@v4
+        with:
+          path: .cache/imdb
+          key: imdb-ratings-baseline-${{ github.run_id }}
+          restore-keys: |
+            imdb-ratings-baseline-
+
+      - name: Sync IMDb Ratings Diff to Database
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          python backend_revised/scripts/sync_ratings_diff.py
+
       - name: Run IMDb sync, metadata enrichment & JSON exporter
         env:
           ReadAccessToken: ${{ secrets.READ_ACCESS_TOKEN || secrets.TMDB_READ_ACCESS_TOKEN || secrets.READACCESSTOKEN }}
           ApiKey: ${{ secrets.TMDB_API_KEY || secrets.APIKEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
           python backend/scripts/sync_catalog.py --export-dir catalog
 
