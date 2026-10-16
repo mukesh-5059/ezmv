@@ -101,4 +101,21 @@ export class TmdbService {
     const ttlSeconds = isOngoing ? 86400 : 2592000; // 24h vs 30d
     return { data, ttlSeconds };
   }
+
+  async fetchPerson(personId: number | string): Promise<TmdbFetchResult | null> {
+    let url = `${this.baseUrl}/person/${personId}`;
+    if (!this.readToken && this.apiKey) {
+      url += `?api_key=${this.apiKey}`;
+    }
+
+    const response = await fetch(url, { headers: this.getHeaders() });
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      throw new Error(`TMDb API returned status ${response.status}`);
+    }
+
+    const data: any = await response.json();
+    const ttlSeconds = 604800;
+    return { data, ttlSeconds };
+  }
 }

@@ -12,3 +12,7 @@ test_*.txt
 node_modules/
 .wrangler/
 .dev.vars
+build/
+**/build/
+.dart_tool/
+**/.dart_tool/

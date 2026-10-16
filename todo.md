@@ -19,6 +19,8 @@
   - Measure real-time download throughput and chunk latency during initial candidate stream probing in `media_kit`.
   - Compare measured bandwidth against candidate stream `bitrate_kbps` / file size to evaluate buffer health and select optimal stream quality automatically.
   - Expose live playback speed indicators (e.g. `14.2 MB/s`, estimated buffer runway) in the player UI.
+- [ ] **Embedded Subtitle Track Selection**:
+  - Support discovery and selection of internal/embedded subtitle tracks (muxed inside MP4/MKV video containers) alongside external OpenSubtitles VTT/SRT tracks in the player HUD.
 
 ## 3. Route & API Architecture
 - [ ] **Unify `/search` and `/discover` Endpoints**:

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { Bindings } from './types';
 import { moviesRouter } from './routes/movies';
+import { subtitlesRouter } from './routes/subtitles';
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -17,6 +18,7 @@ app.get('/', (c) => {
 
 // Mount routes
 app.route('/api/v1/movies', moviesRouter);
+app.route('/api/v1/subtitles', subtitlesRouter);
 
 // Diagnostic route to test D1 connectivity and IMDb ratings lookup
 app.get('/api/v1/imdb/:id', async (c) => {

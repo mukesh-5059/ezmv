@@ -8,19 +8,18 @@ export type Bindings = {
 };
 
 export interface GenreItem {
-  id: number;
+  tmdb_id: number;
   name: string;
 }
 
 export interface CastMember {
-  id: number;
+  tmdb_id: number;
   name: string;
   character: string;
   profile_path?: string | null;
 }
 
 export interface TvSeasonItem {
-  id: number;
   season_number: number;
   name: string;
   episode_count: number;
@@ -51,7 +50,6 @@ export interface MovieDetailsResponse extends MovieSummaryResponse {
 }
 
 export interface TvEpisode {
-  id: number;
   episode_number: number;
   name: string;
   overview: string;
@@ -65,4 +63,18 @@ export interface TvEpisode {
 export interface TvSeasonDetailsResponse {
   season_number: number;
   episodes: TvEpisode[];
+}
+
+export interface PersonDetailsResponse {
+  tmdb_id: number;
+  name: string;
+  biography: string;
+  profile_path: string | null;
+}
+
+export interface SubtitleTrack {
+  name: string;
+  language: string;
+  url: string;
+  popularity: number;
 }

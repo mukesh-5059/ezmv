@@ -8,6 +8,7 @@ import {
   TvSeasonItem,
   TvEpisode,
   TvSeasonDetailsResponse,
+  PersonDetailsResponse,
 } from '../types';
 import { TmdbService } from '../services/tmdb';
 import { CacheService } from '../services/cache';
@@ -31,10 +32,7 @@ moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
 
   const cached = await cacheService.get<TvSeasonDetailsResponse>(cacheKey);
   if (cached) {
-    c.header('X-Cache-Status', 'HIT');
-    c.header('X-Cache-TTL', `${cached.ttlSeconds}s`);
-    c.header('Cache-Control', `public, max-age=${cached.ttlSeconds}`);
-    return c.json(cached.data);
+    return c.json(cached);
   }
 
   const tmdbService = new TmdbService(c.env);
@@ -56,7 +54,6 @@ moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
   const episodes: TvEpisode[] = rawEpisodes.map((ep: any) => {
     const isUpcoming = !ep.air_date || new Date(ep.air_date).getTime() > now;
     const item: TvEpisode = {
-      id: ep.id || 0,
       episode_number: ep.episode_number || 0,
       name: ep.name || '',
       overview: ep.overview || '',
@@ -77,11 +74,45 @@ moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
   };
 
   await cacheService.set(cacheKey, payload, seasonResult.ttlSeconds);
+  return c.json(payload);
+});
 
-  c.header('X-Cache-Status', 'MISS');
-  c.header('X-Cache-TTL', `${seasonResult.ttlSeconds}s`);
-  c.header('Cache-Control', `public, max-age=${seasonResult.ttlSeconds}`);
+// GET /api/v1/movies/person/:id
+moviesRouter.get('/person/:id', async (c) => {
+  const personId = c.req.param('id');
+  if (!personId || isNaN(Number(personId))) {
+    return c.json({ error: 'Invalid person_id' }, 400);
+  }
 
+  const cacheKey = `https://cache.local/api/v1/movies/person/${personId}`;
+  const cacheService = new CacheService();
+
+  const cached = await cacheService.get<PersonDetailsResponse>(cacheKey);
+  if (cached) {
+    return c.json(cached);
+  }
+
+  const tmdbService = new TmdbService(c.env);
+  let personResult;
+  try {
+    personResult = await tmdbService.fetchPerson(personId);
+  } catch (err: any) {
+    return c.json({ error: 'Failed to fetch person details', details: err.message }, 502);
+  }
+
+  if (!personResult || !personResult.data) {
+    return c.json({ error: `Person ${personId} not found on TMDb` }, 404);
+  }
+
+  const raw = personResult.data;
+  const payload: PersonDetailsResponse = {
+    tmdb_id: raw.id,
+    name: raw.name || '',
+    biography: raw.biography || '',
+    profile_path: raw.profile_path || null,
+  };
+
+  await cacheService.set(cacheKey, payload, personResult.ttlSeconds);
   return c.json(payload);
 });
 
@@ -102,10 +133,7 @@ moviesRouter.get('/:media_type/:id', async (c) => {
 
   const cached = await cacheService.get<MovieDetailsResponse | MovieSummaryResponse>(cacheKey);
   if (cached) {
-    c.header('X-Cache-Status', 'HIT');
-    c.header('X-Cache-TTL', `${cached.ttlSeconds}s`);
-    c.header('Cache-Control', `public, max-age=${cached.ttlSeconds}`);
-    return c.json(cached.data);
+    return c.json(cached);
   }
 
   const tmdbService = new TmdbService(c.env);
@@ -163,31 +191,26 @@ moviesRouter.get('/:media_type/:id', async (c) => {
     };
 
     await cacheService.set(cacheKey, summaryPayload, tmdbResult.ttlSeconds);
-
-    c.header('X-Cache-Status', 'MISS');
-    c.header('X-Cache-TTL', `${tmdbResult.ttlSeconds}s`);
-    c.header('Cache-Control', `public, max-age=${tmdbResult.ttlSeconds}`);
     return c.json(summaryPayload);
   }
 
   // 4. Format Full Details (Cast, Genres, Seasons, Runtime)
   const rawCast = rawData.credits?.cast || [];
   const cast: CastMember[] = rawCast.slice(0, 30).map((member: any) => ({
-    id: member.id,
+    tmdb_id: member.id,
     name: member.name || '',
     character: member.character || '',
     profile_path: member.profile_path || null,
   }));
 
   const genres: GenreItem[] = (rawData.genres || []).map((g: any) => ({
-    id: g.id,
+    tmdb_id: g.id,
     name: g.name || '',
   }));
 
   let seasons: TvSeasonItem[] | undefined;
   if (mediaType === 'tv' && Array.isArray(rawData.seasons)) {
     seasons = rawData.seasons.map((s: any) => ({
-      id: s.id,
       season_number: s.season_number,
       name: s.name || `Season ${s.season_number}`,
       episode_count: s.episode_count || 0,
@@ -220,9 +243,5 @@ moviesRouter.get('/:media_type/:id', async (c) => {
   };
 
   await cacheService.set(cacheKey, responsePayload, tmdbResult.ttlSeconds);
-
-  c.header('X-Cache-Status', 'MISS');
-  c.header('X-Cache-TTL', `${tmdbResult.ttlSeconds}s`);
-  c.header('Cache-Control', `public, max-age=${tmdbResult.ttlSeconds}`);
   return c.json(responsePayload);
 });
