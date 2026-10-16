@@ -147,8 +147,11 @@ def sync_diff(db_path: Path | None = None):
     for tconst in new_ids:
         rating, votes = current[tconst]
         year, genres = basics_info.get(tconst, (None, None))
-        year_str = str(year) if year is not None else "NULL"
-        genres_str = f"'{genres.replace(\"'\", \"''\")}'" if genres else "NULL"
+        if genres:
+            escaped_genres = genres.replace("'", "''")
+            genres_str = f"'{escaped_genres}'"
+        else:
+            genres_str = "NULL"
         sql_statements.append(
             f"INSERT INTO imdb_titles (imdb_id, rating, votes, year, genres) "
             f"VALUES ('{tconst}', {rating}, {votes}, {year_str}, {genres_str}) "
