@@ -1,16 +1,24 @@
 export type Bindings = {
   DB: D1Database;
-  ApiKey?: string;
-  ReadAccessToken?: string;
+  MDBLIST_API_KEY?: string;
+  TRAKT_CLIENT_ID?: string;
   TMDB_API_KEY?: string;
   TMDB_READ_ACCESS_TOKEN?: string;
-  PENGUPLAY_MANIFEST_URL?: string;
-  TURSO_DATABASE_URL?: string;
-  TURSO_AUTH_TOKEN?: string;
+};
+
+export interface RequestTrace {
+  cache?: string;
+  d1?: string;
+  mdblist?: string;
+  trakt?: string;
+}
+
+export type Variables = {
+  trace: RequestTrace;
 };
 
 export interface GenreItem {
-  tmdb_id: number;
+  mdb_id: number;
   name: string;
 }
 
@@ -19,17 +27,12 @@ export interface CastMember {
   name: string;
   character: string;
   profile_path?: string | null;
+  order?: number;
 }
 
-export interface TvSeasonItem {
-  season_number: number;
-  name: string;
-  episode_count: number;
-}
-
-export interface MovieSummaryResponse {
+export interface MovieSummary {
+  imdb_id: string;
   tmdb_id: number;
-  imdb_id?: string | null;
   title: string;
   overview: string;
   release_date: string;
@@ -38,40 +41,14 @@ export interface MovieSummaryResponse {
   rating: number;
   vote_count: number;
   media_type: 'movie' | 'tv';
-  genre_ids?: number[];
+  genre_ids: number[];
 }
 
-export interface MovieDetailsResponse extends MovieSummaryResponse {
+export interface MovieDetails extends MovieSummary {
   runtime?: number | null;
-  tagline?: string | null;
-  number_of_seasons?: number;
-  number_of_episodes?: number;
   genres: GenreItem[];
-  cast: CastMember[];
-  seasons?: TvSeasonItem[];
-}
-
-export interface TvEpisode {
-  episode_number: number;
-  name: string;
-  overview: string;
-  still_path?: string | null;
-  air_date?: string | null;
-  rating: number;
-  runtime?: number | null;
-  upcoming?: boolean;
-}
-
-export interface TvSeasonDetailsResponse {
-  season_number: number;
-  episodes: TvEpisode[];
-}
-
-export interface PersonDetailsResponse {
-  tmdb_id: number;
-  name: string;
-  biography: string;
-  profile_path: string | null;
+  cast?: CastMember[];
+  seasons?: any[];
 }
 
 export interface SubtitleTrack {
@@ -79,4 +56,77 @@ export interface SubtitleTrack {
   language: string;
   url: string;
   popularity: number;
+}
+
+// MDBList Raw Response Types
+export interface MdblistRating {
+  source: string;
+  value: number;
+  votes?: number;
+}
+
+export interface MdblistGenre {
+  id: number;
+  title: string;
+}
+
+export interface MdblistItem {
+  id?: number;
+  imdbid?: string;
+  tmdbid?: number;
+  ids?: {
+    imdb?: string;
+    tmdb?: number;
+    trakt?: number;
+  };
+  title?: string;
+  year?: number;
+  released?: string;
+  released_digital?: string;
+  description?: string;
+  runtime?: number;
+  score?: number;
+  type?: 'movie' | 'show';
+  poster?: string;
+  backdrop?: string;
+  ratings?: MdblistRating[];
+  genres?: MdblistGenre[];
+}
+
+// Trakt Search Types
+export interface TraktSearchItem {
+  type: string;
+  score?: number;
+  movie?: {
+    title: string;
+    year?: number;
+    ids: {
+      trakt?: number;
+      slug?: string;
+      imdb?: string;
+      tmdb?: number;
+    };
+  };
+  show?: {
+    title: string;
+    year?: number;
+    ids: {
+      trakt?: number;
+      slug?: string;
+      imdb?: string;
+      tmdb?: number;
+    };
+  };
+}
+
+export interface TraktSearchResponse {
+  imdb_ids: string[];
+  page: number;
+  total_pages: number;
+  total_items: number;
+}
+
+export interface LaneConfig {
+  id: string;
+  title: string;
 }

@@ -1,299 +1,46 @@
 import { Hono } from 'hono';
-import {
-  Bindings,
-  MovieDetailsResponse,
-  MovieSummaryResponse,
-  CastMember,
-  GenreItem,
-  TvSeasonItem,
-  TvEpisode,
-  TvSeasonDetailsResponse,
-  PersonDetailsResponse,
-} from '../types';
-import { TmdbService } from '../services/tmdb';
+import { Bindings, MovieDetails, Variables } from '../types';
+import { CatalogService } from '../services/catalog';
 import { CacheService } from '../services/cache';
-import { TursoService } from '../services/turso';
 
-export const moviesRouter = new Hono<{ Bindings: Bindings }>();
-
-// GET /api/v1/movies/tv/:id/season/:season_number
-moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
-  const tmdbId = c.req.param('id');
-  const seasonNumber = c.req.param('season_number');
-
-  if (!tmdbId || isNaN(Number(tmdbId))) {
-    return c.json({ error: 'Invalid TV show tmdb_id' }, 400);
-  }
-  if (seasonNumber === undefined || isNaN(Number(seasonNumber))) {
-    return c.json({ error: 'Invalid season_number' }, 400);
-  }
-
-  const cacheKey = `https://cache.local/api/v1/movies/tv/${tmdbId}/season/${seasonNumber}`;
-  const cacheService = new CacheService();
-
-  const cached = await cacheService.get<TvSeasonDetailsResponse>(cacheKey);
-  if (cached) {
-    return c.json(cached);
-  }
-
-  const tmdbService = new TmdbService(c.env);
-  let seasonResult;
-  try {
-    seasonResult = await tmdbService.fetchTvSeason(tmdbId, seasonNumber);
-  } catch (err: any) {
-    return c.json({ error: 'Failed to fetch season details', details: err.message }, 502);
-  }
-
-  if (!seasonResult || !seasonResult.data) {
-    return c.json({ error: `Season ${seasonNumber} not found on TMDb` }, 404);
-  }
-
-  const raw = seasonResult.data;
-  const rawEpisodes = Array.isArray(raw.episodes) ? raw.episodes : [];
-
-  const now = Date.now();
-  const episodes: TvEpisode[] = rawEpisodes.map((ep: any) => {
-    const isUpcoming = !ep.air_date || new Date(ep.air_date).getTime() > now;
-    const item: TvEpisode = {
-      episode_number: ep.episode_number || 0,
-      name: ep.name || '',
-      overview: ep.overview || '',
-      still_path: ep.still_path || null,
-      air_date: ep.air_date || null,
-      rating: Number(ep.vote_average || 0),
-      runtime: ep.runtime || null,
-    };
-    if (isUpcoming) {
-      item.upcoming = true;
-    }
-    return item;
-  });
-
-  const payload: TvSeasonDetailsResponse = {
-    season_number: raw.season_number ?? Number(seasonNumber),
-    episodes,
-  };
-
-  await cacheService.set(cacheKey, payload, seasonResult.ttlSeconds);
-  return c.json(payload);
-});
-
-// GET /api/v1/movies/person/:id
-moviesRouter.get('/person/:id', async (c) => {
-  const personId = c.req.param('id');
-  if (!personId || isNaN(Number(personId))) {
-    return c.json({ error: 'Invalid person_id' }, 400);
-  }
-
-  const cacheKey = `https://cache.local/api/v1/movies/person/${personId}`;
-  const cacheService = new CacheService();
-
-  const cached = await cacheService.get<PersonDetailsResponse>(cacheKey);
-  if (cached) {
-    return c.json(cached);
-  }
-
-  const tmdbService = new TmdbService(c.env);
-  let personResult;
-  try {
-    personResult = await tmdbService.fetchPerson(personId);
-  } catch (err: any) {
-    return c.json({ error: 'Failed to fetch person details', details: err.message }, 502);
-  }
-
-  if (!personResult || !personResult.data) {
-    return c.json({ error: `Person ${personId} not found on TMDb` }, 404);
-  }
-
-  const raw = personResult.data;
-  const payload: PersonDetailsResponse = {
-    tmdb_id: raw.id,
-    name: raw.name || '',
-    biography: raw.biography || '',
-    profile_path: raw.profile_path || null,
-  };
-
-  await cacheService.set(cacheKey, payload, personResult.ttlSeconds);
-  return c.json(payload);
-});
+export const moviesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 // GET /api/v1/movies/:media_type/:id
 moviesRouter.get('/:media_type/:id', async (c) => {
   const mediaTypeParam = c.req.param('media_type').toLowerCase();
-  const idParam = c.req.param('id');
-  const isConcise =
-    c.req.query('concise') === 'true' || c.req.query('short') === 'true';
+  const imdbId = c.req.param('id').trim();
 
   if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv') {
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
   }
 
-  const mediaType: 'movie' | 'tv' = mediaTypeParam as 'movie' | 'tv';
-  const cacheKey = `https://cache.local/api/v1/movies/${mediaType}/${idParam}${isConcise ? '?concise=true' : ''}`;
+  if (!imdbId.startsWith('tt')) {
+    return c.json({ error: 'Invalid id parameter (must start with "tt").' }, 400);
+  }
+
+  const origin = new URL(c.req.url).origin;
+  const cacheKey = `${origin}/api/v1/movies/${mediaTypeParam}/${imdbId}`;
   const cacheService = new CacheService();
 
-  const cached = await cacheService.get<MovieDetailsResponse | MovieSummaryResponse>(cacheKey);
+  const trace = c.get('trace');
+  const tCache = Date.now();
+  const cached = await cacheService.get<MovieDetails>(cacheKey);
+  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
+
   if (cached) {
+    c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');
     return c.json(cached);
   }
 
-  // Fast-path: Check Turso v_catalog directly for concise movie summaries
-  if (isConcise && mediaType === 'movie' && c.env.TURSO_DATABASE_URL && c.env.TURSO_AUTH_TOKEN) {
-    const t0 = Date.now();
-    const turso = new TursoService(c.env.TURSO_DATABASE_URL, c.env.TURSO_AUTH_TOKEN);
-    const catalogMovie = await turso.getCatalogMovie(idParam);
-    if (catalogMovie) {
-      console.log(`[Turso Fast-Path] HIT for ${idParam} (${Date.now() - t0}ms)`);
-      await cacheService.set(cacheKey, catalogMovie, 1296000);
-      return c.json(catalogMovie);
-    }
-    console.log(`[Turso Fast-Path] MISS for ${idParam} (${Date.now() - t0}ms)`);
+  const catalog = new CatalogService(c.env);
+  const movieDetails = await catalog.getSingleMovie(imdbId);
+
+  if (!movieDetails) {
+    return c.json({ error: 'Movie not found' }, 404);
   }
 
-  const tmdbStart = Date.now();
-  const tmdbService = new TmdbService(c.env);
-  let tmdbResult;
-  try {
-    tmdbResult = await tmdbService.fetchDetails(mediaType, idParam, isConcise);
-    console.log(`[TMDb Fetch] DONE in ${Date.now() - tmdbStart}ms`);
-  } catch (err: any) {
-    console.error(`[TMDb Fetch] FAILED in ${Date.now() - tmdbStart}ms:`, err.message);
-    return c.json({ error: 'Failed to fetch upstream details', details: err.message }, 502);
-  }
+  await cacheService.set(cacheKey, movieDetails, 86400);
+  c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');
 
-  if (!tmdbResult || !tmdbResult.data) {
-    return c.json({ error: 'Title not found' }, 404);
-  }
-
-  const rawData = tmdbResult.data;
-
-  // 1. Extract IMDb ID
-  let imdbId = rawData.imdb_id || rawData.external_ids?.imdb_id || null;
-
-  // 2. Fetch authoritative rating & votes from D1
-  let rating = Number(rawData.vote_average || 0);
-  let voteCount = Number(rawData.vote_count || 0);
-
-  if (imdbId) {
-    if (c.env.TURSO_DATABASE_URL && c.env.TURSO_AUTH_TOKEN) {
-      const turso = new TursoService(c.env.TURSO_DATABASE_URL, c.env.TURSO_AUTH_TOKEN);
-      const tRating = Date.now();
-      const tursoRating = await turso.getRating(imdbId);
-      console.log(`[Turso Rating] Fetched ${imdbId} in ${Date.now() - tRating}ms`);
-      if (tursoRating && tursoRating.rating != null) {
-        rating = tursoRating.rating;
-        voteCount = tursoRating.votes || 0;
-      }
-
-      // Async write-through to Turso movies table in background
-      if (mediaType === 'movie') {
-        c.executionCtx.waitUntil(
-          (async () => {
-            const startBg = Date.now();
-            console.log(`[Background Write] START upserting ${imdbId} (tmdb: ${rawData.id})`);
-            try {
-              await turso.upsertMovie({
-                imdb_id: imdbId,
-                tmdb_id: rawData.id,
-                title: rawData.title || rawData.name || '',
-                release_date: rawData.release_date || null,
-                poster_path: rawData.poster_path || null,
-                backdrop_path: rawData.backdrop_path || null,
-                overview: rawData.overview || '',
-              });
-              console.log(`[Background Write] DONE upserting ${imdbId} (${Date.now() - startBg}ms)`);
-            } catch (err: any) {
-              console.error(`[Background Write] FAILED for ${imdbId}:`, err.message);
-            }
-          })()
-        );
-      }
-    } else if (c.env.DB) {
-      const d1Rating = await c.env.DB.prepare(
-        'SELECT rating, votes FROM imdb_ratings WHERE imdb_id = ?'
-      )
-        .bind(imdbId)
-        .first<{ rating: number; votes: number }>();
-
-      if (d1Rating && d1Rating.rating != null) {
-        rating = d1Rating.rating;
-        voteCount = d1Rating.votes || 0;
-      }
-    }
-  }
-
-  // 3. Return lightweight summary if ?concise=true or ?short=true
-  if (isConcise) {
-    const genreIds =
-      rawData.genre_ids ||
-      (Array.isArray(rawData.genres) ? rawData.genres.map((g: any) => g.id) : []);
-
-    const summaryPayload: MovieSummaryResponse = {
-      tmdb_id: rawData.id,
-      imdb_id: imdbId,
-      title: rawData.title || rawData.name || '',
-      overview: rawData.overview || '',
-      release_date: rawData.release_date || rawData.first_air_date || '',
-      poster_path: rawData.poster_path || '',
-      backdrop_path: rawData.backdrop_path || '',
-      rating,
-      vote_count: voteCount,
-      media_type: mediaType,
-      genre_ids: genreIds,
-    };
-
-    await cacheService.set(cacheKey, summaryPayload, tmdbResult.ttlSeconds);
-    return c.json(summaryPayload);
-  }
-
-  // 4. Format Full Details (Cast, Genres, Seasons, Runtime)
-  const rawCast = rawData.credits?.cast || [];
-  const cast: CastMember[] = rawCast.slice(0, 30).map((member: any) => ({
-    tmdb_id: member.id,
-    name: member.name || '',
-    character: member.character || '',
-    profile_path: member.profile_path || null,
-  }));
-
-  const genres: GenreItem[] = (rawData.genres || []).map((g: any) => ({
-    tmdb_id: g.id,
-    name: g.name || '',
-  }));
-
-  let seasons: TvSeasonItem[] | undefined;
-  if (mediaType === 'tv' && Array.isArray(rawData.seasons)) {
-    seasons = rawData.seasons.map((s: any) => ({
-      season_number: s.season_number,
-      name: s.name || `Season ${s.season_number}`,
-      episode_count: s.episode_count || 0,
-    }));
-  }
-
-  let runtime: number | null = rawData.runtime || null;
-  if (!runtime && Array.isArray(rawData.episode_run_time) && rawData.episode_run_time.length > 0) {
-    runtime = rawData.episode_run_time[0];
-  }
-
-  const responsePayload: MovieDetailsResponse = {
-    tmdb_id: rawData.id,
-    imdb_id: imdbId,
-    title: rawData.title || rawData.name || '',
-    overview: rawData.overview || '',
-    release_date: rawData.release_date || rawData.first_air_date || '',
-    poster_path: rawData.poster_path || '',
-    backdrop_path: rawData.backdrop_path || '',
-    rating,
-    vote_count: voteCount,
-    runtime,
-    tagline: rawData.tagline || null,
-    media_type: mediaType,
-    number_of_seasons: rawData.number_of_seasons || seasons?.length,
-    number_of_episodes: rawData.number_of_episodes || 0,
-    genres,
-    cast,
-    seasons,
-  };
-
-  await cacheService.set(cacheKey, responsePayload, tmdbResult.ttlSeconds);
-  return c.json(responsePayload);
+  return c.json(movieDetails);
 });

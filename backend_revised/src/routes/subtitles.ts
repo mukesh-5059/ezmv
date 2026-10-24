@@ -1,19 +1,17 @@
 import { Hono } from 'hono';
-import { Bindings, SubtitleTrack } from '../types';
-import { TmdbService } from '../services/tmdb';
+import { Bindings, SubtitleTrack, Variables } from '../types';
 import { CacheService } from '../services/cache';
 
-export const subtitlesRouter = new Hono<{ Bindings: Bindings }>();
+export const subtitlesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 const langNames = new Intl.DisplayNames(['en'], { type: 'language' });
 
 subtitlesRouter.get('/', async (c) => {
-  const tmdbIdParam = c.req.query('tmdb_id');
-  if (!tmdbIdParam || isNaN(Number(tmdbIdParam))) {
-    return c.json({ error: 'Missing or invalid tmdb_id parameter' }, 400);
+  const imdbId = c.req.query('imdb_id')?.trim();
+  if (!imdbId || !imdbId.startsWith('tt')) {
+    return c.json({ error: 'Missing or invalid imdb_id parameter (must start with "tt")' }, 400);
   }
 
-  const tmdbId = Number(tmdbIdParam);
   const mediaTypeParam = (c.req.query('media_type') || 'movie').toLowerCase();
   if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv') {
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
@@ -24,11 +22,21 @@ subtitlesRouter.get('/', async (c) => {
   const episodeParam = c.req.query('episode');
   const season = seasonParam ? Number(seasonParam) : undefined;
   const episode = episodeParam ? Number(episodeParam) : undefined;
+
+  if (mediaType === 'tv' && (season === undefined || episode === undefined || isNaN(season) || isNaN(episode))) {
+    return c.json({ error: 'For tv media_type, both "season" and "episode" parameters are required.' }, 400);
+  }
+
   const langFilter = c.req.query('language')?.trim().toLowerCase();
 
-  const cacheKey = `https://cache.local/api/v1/subtitles/${tmdbId}/${mediaType}/${season || 0}/${episode || 0}`;
+  const origin = new URL(c.req.url).origin;
+  const cacheKey = `${origin}/api/v1/subtitles/${imdbId}/${mediaType}/${season || 0}/${episode || 0}`;
   const cacheService = new CacheService();
+
+  const trace = c.get('trace');
+  const tCache = Date.now();
   const cached = await cacheService.get<SubtitleTrack[]>(cacheKey);
+  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
   if (cached) {
     let responseData = cached;
     if (langFilter) {
@@ -37,27 +45,6 @@ subtitlesRouter.get('/', async (c) => {
       );
     }
     return c.json(responseData);
-  }
-
-  let imdbId = c.req.query('imdb_id')?.trim();
-  if (!imdbId || !imdbId.startsWith('tt')) {
-    const tmdbService = new TmdbService(c.env);
-    try {
-      const tmdbResult = await tmdbService.fetchDetails(mediaType, tmdbId, true);
-      if (tmdbResult && tmdbResult.data) {
-        imdbId =
-          tmdbResult.data.imdb_id ||
-          tmdbResult.data.external_ids?.imdb_id ||
-          null;
-      }
-    } catch (err: any) {
-      throw new Error(`Failed resolving IMDb ID: ${err.message}`);
-    }
-  }
-
-  if (!imdbId) {
-    await cacheService.set(cacheKey, [], 86400);
-    return c.json([]);
   }
 
   let stremioUrl: string;

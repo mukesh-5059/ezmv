@@ -9,14 +9,10 @@ export class CacheService {
     try {
       const cacheKey = new Request(keyUrl);
       const cached = await this.cache.match(cacheKey);
-      if (!cached) {
-        console.log(`[Cache MISS] ${keyUrl}`);
-        return null;
-      }
-
-      console.log(`[Cache HIT] ${keyUrl}`);
+      if (!cached) return null;
       return (await cached.json()) as T;
-    } catch (_) {
+    } catch (err: any) {
+      console.warn(`[Cache MATCH ERROR] ${keyUrl}:`, err.message);
       return null;
     }
   }
@@ -31,18 +27,18 @@ export class CacheService {
         },
       };
       await this.cache.put(cacheKey, new Response(JSON.stringify(data), cacheInit));
-      console.log(`[Cache SET] ${keyUrl} (TTL: ${ttlSeconds}s)`);
-    } catch (_) {}
+    } catch (err: any) {
+      console.warn(`[Cache PUT ERROR] ${keyUrl}:`, err.message);
+    }
   }
 
   async delete(keyUrl: string): Promise<boolean> {
     try {
       const cacheKey = new Request(keyUrl);
-      const deleted = await this.cache.delete(cacheKey);
-      console.log(`[Cache DEL] ${keyUrl} (deleted: ${deleted})`);
-      return deleted;
+      return await this.cache.delete(cacheKey);
     } catch (_) {
       return false;
     }
   }
 }
+

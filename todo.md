@@ -31,9 +31,9 @@
 - [ ] **Move IMDb Rating Enrichment to GitHub Workflow**:
   - Create a recurring GitHub Actions workflow (`.github/workflows/sync_imdb_ratings.yml`) to download `title.ratings.tsv.gz` from IMDb datasets on schedule.
   - Automate ingestion and deployment without consuming local host resources or manual execution.
-- [ ] **Store IMDb Ratings in Cloud DB**:
-  - Migrate ratings from local disk SQLite (`catalog.db`) to a managed/serverless cloud database (e.g. Turso / libSQL, Supabase Postgres, Neon, or Cloudflare D1).
-  - Enable cloud-deployed backend instances to read ratings fast via connection pool or read-replica without bundling a 1.7M-row local database file.
+- [x] **Store IMDb Ratings in Cloudflare D1 Database**:
+  - Migrated ratings and titles to Cloudflare D1 (`movies-catalog`), replacing local disk SQLite.
+  - Enabled Cloudflare Workers fast-path queries directly against `v_catalog` view.
 - [ ] **IMDb Rating Fetch for All Movies**:
   - Uniformly enrich ratings and vote counts across:
     - Trakt lists and collections.
@@ -44,6 +44,9 @@
   - Add `vote_count: int = 0` to [`MovieSummary`](file:///home/mukes/dev/movies/backend/models.py).
   - Populate `vote_count` across all summary constructors (`from_tmdb`, `from_catalog`).
   - Update frontend movie models and card widgets to render formatted vote counts (e.g. `★ 8.2 (1.2k)`).
+- [x] **Support TV Series in Cloudflare D1 Database**:
+  - Added `media_type` (`'movie' | 'tv'`) column to `movies` and wired into `v_catalog` view.
+  - Enabled fast-path lookups and async write-through for TV series concise summaries in `backend_revised`.
 
 ## 5. Pagination & Result Boundaries
 - [ ] **Add End of Results Marker & Upstream Page Awareness**:

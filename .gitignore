@@ -19,3 +19,9 @@ build/
 *.tsv.gz
 .cache/
 *.zip
+**/batches/
+catalog/
+*.sql
+seed_state.json
+dist/
+**/dist/
