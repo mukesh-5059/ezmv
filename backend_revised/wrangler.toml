@@ -6,4 +6,4 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "movies-catalog"
-database_id = "local-db"
+database_id = "ce5096c4-ec8a-463d-890e-493c92d5f580"

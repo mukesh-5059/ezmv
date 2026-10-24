@@ -79,24 +79,19 @@ class IsaiminiScraper(BaseScraper):
                     if on_progress:
                         on_progress("path", f"Movie directory (cached): {movie_page_url}")
 
-            # 2. Check local catalog cache for this year
+            # 2. Check local catalog cache for this year (strict match only)
+            # TODO: Overhaul title matcher with proper fuzzy scoring & confidence thresholds
             if not movie_page_url and media.year:
                 local_entries = get_catalog_by_year(media.year)
                 if local_entries:
                     local_candidates = find_candidates_in_entries(local_entries, target_tokens, base_url)
                     strict_local = [c for c in local_candidates if c["is_strict"]]
-                    best = None
                     if strict_local:
                         strict_local.sort(key=lambda c: (c["extra_tokens"], c["page"]))
                         best = strict_local[0]
-                    elif local_candidates:
-                        local_candidates.sort(key=lambda c: (-c["overlap"], c["extra_tokens"], c["page"]))
-                        best = local_candidates[0]
-
-                    if best:
                         movie_page_url = best["url"]
                         found_page = best["page"]
-                        logger.info(f"[{self.name}] Found match in local catalog for '{media.title}' (Page {found_page}): {movie_page_url}")
+                        logger.info(f"[{self.name}] Found strict match in local catalog for '{media.title}' (Page {found_page}): {movie_page_url}")
                         if on_progress:
                             on_progress("path", f"Movie directory (local catalog): {movie_page_url}")
                         if media.tmdb_id:
@@ -157,15 +152,17 @@ class IsaiminiScraper(BaseScraper):
 
                         if batch_found:
                             strict_candidates = [c for c in all_candidates if c["is_strict"]]
-                            if strict_candidates or all_candidates:
+                            if strict_candidates:
                                 break
 
                 strict_candidates = [c for c in all_candidates if c["is_strict"]]
+                is_strict_match = False
                 if strict_candidates:
                     strict_candidates.sort(key=lambda c: (c["extra_tokens"], c["page"]))
                     best = strict_candidates[0]
                     movie_page_url = best["url"]
                     found_page = best["page"]
+                    is_strict_match = True
                     logger.info(f"[{self.name}] Best strict match for '{media.title}' on Page {found_page}: {movie_page_url}")
                 elif all_candidates:
                     all_candidates.sort(key=lambda c: (-c["overlap"], c["extra_tokens"], c["page"]))
@@ -178,8 +175,9 @@ class IsaiminiScraper(BaseScraper):
                     logger.info(f"[{self.name}] Movie directory (newly found): {movie_page_url}")
                     if on_progress:
                         on_progress("path", f"Movie directory (newly found): {movie_page_url}")
-                    parsed_path = urlparse(movie_page_url).path
-                    save_cached_movie_path(media.tmdb_id, parsed_path, page=found_page)
+                    if is_strict_match:
+                        parsed_path = urlparse(movie_page_url).path
+                        save_cached_movie_path(media.tmdb_id, parsed_path, page=found_page)
 
             if not movie_page_url:
                 logger.info(f"[{self.name}] Movie '{media.title}' ({media.year}) not found in directory.")

@@ -40,6 +40,7 @@ def extract_and_save_all_movies_from_soup(soup: BeautifulSoup, year: int, page_n
         save_catalog_entries(entries)
     return entries
 
+# TODO: Overhaul title matcher with fuzzy scoring (e.g., Levenshtein/token sort), confidence thresholds, and strict/fallback separation
 def find_candidates_in_entries(entries: list[dict], target_tokens: set[str], base_url: str) -> list[dict]:
     candidates = []
     alpha_target = {t for t in target_tokens if not t.isdigit()}
