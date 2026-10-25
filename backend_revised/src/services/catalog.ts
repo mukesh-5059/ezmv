@@ -1,4 +1,4 @@
-import { Bindings, MovieDetails, MovieSummary, MdblistItem, GenreItem } from '../types';
+import { Bindings, MovieDetails, MovieSummary, MdblistItem, GenreItem, RequestTrace } from '../types';
 import { MdblistService } from './mdblist';
 
 export class CatalogService {
@@ -13,7 +13,7 @@ export class CatalogService {
   }
 
   // Resolve multiple movie IDs: checks D1 first, batches missing to MDBList, upserts D1, returns in requested order
-  async resolveMovies(imdbIds: string[]): Promise<MovieSummary[]> {
+  async resolveMovies(imdbIds: string[], trace?: RequestTrace): Promise<MovieSummary[]> {
     if (!imdbIds.length) return [];
 
     const now = Math.floor(Date.now() / 1000);
@@ -25,6 +25,7 @@ export class CatalogService {
 
     const cleanIds = imdbIds.filter(Boolean);
 
+    const tD1 = Date.now();
     if (this.db && cleanIds.length > 0) {
       const placeholders = cleanIds.map(() => '?').join(',');
       const query = `SELECT * FROM v_movies WHERE imdb_id IN (${placeholders})`;
@@ -39,6 +40,10 @@ export class CatalogService {
         if (summary.imdb_id) lookup.set(summary.imdb_id, summary);
       }
     }
+    const d1ReadDuration = Date.now() - tD1;
+    if (trace) {
+      trace.add(`d1_read: HIT ${lookup.size}/${cleanIds.length} in ${d1ReadDuration}ms`);
+    }
 
     // Identify which requested items are missing or stale
     for (const id of cleanIds) {
@@ -49,9 +54,14 @@ export class CatalogService {
 
     // 2. Batch fetch missing items from MDBList
     if (missingIds.length > 0) {
+      const tMdb = Date.now();
       const fetchedItems = await this.mdblist.batchMovies(missingIds);
+      if (trace) trace.add(`mdblist: FETCH ${Date.now() - tMdb}ms (${fetchedItems.length} items)`);
+
       if (fetchedItems.length > 0 && this.db) {
+        const tUpsert = Date.now();
         await this.upsertBatch(fetchedItems);
+        if (trace) trace.add(`d1_upsert: ${Date.now() - tUpsert}ms`);
 
         // Populate lookup map with fresh items
         for (const item of fetchedItems) {
@@ -139,7 +149,7 @@ export class CatalogService {
   }
 
   // Get lane items from D1, resolving missing/stale entries via MDBList on demand
-  async getLaneItems(laneId: string, limit = 100, offset = 0): Promise<MovieSummary[]> {
+  async getLaneItems(laneId: string, limit = 100, offset = 0, trace?: RequestTrace): Promise<MovieSummary[]> {
     if (!this.db) return [];
 
     const rows = await this.db
@@ -150,7 +160,7 @@ export class CatalogService {
     if (!rows.results?.length) return [];
 
     const imdbIds = rows.results.map((r) => r.imdb_id);
-    return this.resolveMovies(imdbIds);
+    return this.resolveMovies(imdbIds, trace);
   }
 
   // Bulk upsert into movies and ratings tables

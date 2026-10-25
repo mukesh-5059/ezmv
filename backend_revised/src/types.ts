@@ -7,10 +7,8 @@ export type Bindings = {
 };
 
 export interface RequestTrace {
-  cache?: string;
-  d1?: string;
-  mdblist?: string;
-  trakt?: string;
+  steps: string[];
+  add: (step: string) => void;
 }
 
 export type Variables = {

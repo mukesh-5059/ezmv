@@ -36,7 +36,7 @@ subtitlesRouter.get('/', async (c) => {
   const trace = c.get('trace');
   const tCache = Date.now();
   const cached = await cacheService.get<SubtitleTrack[]>(cacheKey);
-  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
+  if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
   if (cached) {
     let responseData = cached;
     if (langFilter) {

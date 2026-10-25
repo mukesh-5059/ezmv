@@ -16,7 +16,7 @@ dashboardRouter.get('/', async (c) => {
   const trace = c.get('trace');
   const tCache = Date.now();
   const cached = await cacheService.get<any>(cacheKey);
-  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
+  if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
     return c.json(cached, 200, {
@@ -25,19 +25,20 @@ dashboardRouter.get('/', async (c) => {
   }
 
   const catalog = new CatalogService(c.env);
-  const lanesOutput: { id: string; title: string; items: MovieSummary[]; has_more: boolean; next_page: number | null }[] = [];
-
-  for (const lane of TAMIL_LANES) {
-    const movies = await catalog.getLaneItems(lane.id, 100, 0);
-
-    lanesOutput.push({
-      id: lane.id,
-      title: lane.title,
-      items: movies,
-      has_more: movies.length >= 100,
-      next_page: movies.length >= 100 ? 2 : null,
-    });
-  }
+  const tCatalog = Date.now();
+  const lanesOutput = await Promise.all(
+    TAMIL_LANES.map(async (lane) => {
+      const movies = await catalog.getLaneItems(lane.id, 100, 0);
+      return {
+        id: lane.id,
+        title: lane.title,
+        items: movies,
+        has_more: movies.length >= 100,
+        next_page: movies.length >= 100 ? 2 : null,
+      };
+    })
+  );
+  if (trace) trace.add(`d1: RESOLVE 6 LANES in ${Date.now() - tCatalog}ms`);
 
   const responsePayload = { lanes: lanesOutput };
   await cacheService.set(cacheKey, responsePayload, 43200); // 12 hours cache
@@ -61,7 +62,7 @@ dashboardRouter.get('/lane', async (c) => {
   const trace = c.get('trace');
   const tCache = Date.now();
   const cached = await cacheService.get<any>(cacheKey);
-  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
+  if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
     return c.json(cached, 200, {
@@ -70,9 +71,7 @@ dashboardRouter.get('/lane', async (c) => {
   }
 
   const catalog = new CatalogService(c.env);
-  const tCatalog = Date.now();
-  const items = await catalog.getLaneItems(laneId, PAGE_SIZE, offset);
-  if (trace) trace.d1 = `RESOLVE ${Date.now() - tCatalog}ms`;
+  const items = await catalog.getLaneItems(laneId, PAGE_SIZE, offset, trace);
   const hasMore = items.length >= PAGE_SIZE;
 
   const responsePayload = {
