@@ -73,6 +73,12 @@ export class MdblistService {
 
   // Utilities to parse MDBList item into standard format
   static parseRating(item: MdblistItem): number {
+    if (Array.isArray(item.ratings)) {
+      const imdb = item.ratings.find((r) => r.source === 'imdb' && typeof r.value === 'number');
+      if (imdb && typeof imdb.value === 'number') return Number(imdb.value.toFixed(1));
+      const tmdb = item.ratings.find((r) => r.source === 'tmdb' && typeof r.value === 'number');
+      if (tmdb && typeof tmdb.value === 'number') return Number((tmdb.value / 10).toFixed(1));
+    }
     if (typeof item.score === 'number' && item.score > 0) {
       return Number((item.score / 10).toFixed(1));
     }
@@ -80,7 +86,12 @@ export class MdblistService {
   }
 
   static parseVotes(item: MdblistItem): number {
-    if (!Array.isArray(item.ratings)) return 0;
-    return item.ratings.reduce((sum, r) => sum + (r.votes || 0), 0);
+    if (Array.isArray(item.ratings)) {
+      const imdb = item.ratings.find((r) => r.source === 'imdb' && typeof r.votes === 'number');
+      if (imdb && typeof imdb.votes === 'number') return imdb.votes;
+      const tmdb = item.ratings.find((r) => r.source === 'tmdb' && typeof r.votes === 'number');
+      if (tmdb && typeof tmdb.votes === 'number') return tmdb.votes;
+    }
+    return 0;
   }
 }
