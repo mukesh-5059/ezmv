@@ -2,15 +2,17 @@ import { Hono } from 'hono';
 import { Bindings, MovieSummary, Variables } from '../types';
 import { CatalogService } from '../services/catalog';
 import { CacheService } from '../services/cache';
-import { MdblistService } from '../services/mdblist';
-import { TAMIL_LANES } from '../config/lanes';
+import { DASHBOARDS } from '../config/lanes';
 
 export const dashboardRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// GET /api/v1/dashboard (Returns all homepage lanes)
-dashboardRouter.get('/', async (c) => {
+// GET /api/v1/dashboard/:dashboard_id (Returns all homepage lanes for dashboard)
+dashboardRouter.get('/:dashboard_id', async (c) => {
+  const dashboard = DASHBOARDS[c.req.param('dashboard_id')?.toLowerCase()];
+  if (!dashboard) return c.notFound();
+
   const origin = new URL(c.req.url).origin;
-  const cacheKey = `${origin}/api/v1/dashboard`;
+  const cacheKey = `${origin}/api/v1/dashboard/${dashboard.id}`;
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
@@ -27,7 +29,7 @@ dashboardRouter.get('/', async (c) => {
   const catalog = new CatalogService(c.env);
   const tCatalog = Date.now();
   const lanesOutput = await Promise.all(
-    TAMIL_LANES.map(async (lane) => {
+    dashboard.lanes.map(async (lane) => {
       const movies = await catalog.getLaneItems(lane.id, 100, 0);
       return {
         id: lane.id,
@@ -38,25 +40,34 @@ dashboardRouter.get('/', async (c) => {
       };
     })
   );
-  if (trace) trace.add(`d1: RESOLVE 6 LANES in ${Date.now() - tCatalog}ms`);
+  if (trace) trace.add(`d1: RESOLVE ${dashboard.lanes.length} LANES in ${Date.now() - tCatalog}ms`);
 
-  const responsePayload = { lanes: lanesOutput };
-  await cacheService.set(cacheKey, responsePayload, 43200); // 12 hours cache
+  const responsePayload = {
+    id: dashboard.id,
+    title: dashboard.title,
+    lanes: lanesOutput,
+  };
+  await cacheService.set(cacheKey, responsePayload, 43200);
 
   return c.json(responsePayload, 200, {
     'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
   });
 });
 
-// GET /api/v1/dashboard/lane (Paginates individual lane, fixed 100 items per page)
-dashboardRouter.get('/lane', async (c) => {
-  const laneId = c.req.query('lane_id') || 'trending';
+// GET /api/v1/dashboard/:dashboard_id/lanes/:lane_id (Paginates individual lane, fixed 100 items per page)
+dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
+  const dashboard = DASHBOARDS[c.req.param('dashboard_id')?.toLowerCase()];
+  const laneId = c.req.param('lane_id')?.toLowerCase();
+  const lane = dashboard?.lanes.find((l) => l.id === laneId);
+
+  if (!lane) return c.notFound();
+
   const page = Math.max(1, Number(c.req.query('page') || 1));
   const PAGE_SIZE = 100;
   const offset = (page - 1) * PAGE_SIZE;
 
   const origin = new URL(c.req.url).origin;
-  const cacheKey = `${origin}/api/v1/dashboard/lane?lane_id=${laneId}&page=${page}`;
+  const cacheKey = `${origin}/api/v1/dashboard/${dashboard.id}/lanes/${laneId}?page=${page}`;
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
@@ -75,13 +86,16 @@ dashboardRouter.get('/lane', async (c) => {
   const hasMore = items.length >= PAGE_SIZE;
 
   const responsePayload = {
+    id: lane.id,
+    title: lane.title,
+    page,
     items,
     has_more: hasMore,
     next_page: hasMore ? page + 1 : null,
   };
 
   if (items.length > 0) {
-    await cacheService.set(cacheKey, responsePayload, 43200); // 12 hours cache
+    await cacheService.set(cacheKey, responsePayload, 43200);
   }
 
   return c.json(responsePayload, 200, {
