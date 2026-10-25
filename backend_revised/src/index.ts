@@ -16,18 +16,20 @@ app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const target = url.pathname + url.search;
 
+  const traceSteps: string[] = [];
   c.set('trace', {
-    cache: 'SKIP',
-    d1: 'SKIP',
-    mdblist: 'SKIP',
-    trakt: 'SKIP',
+    steps: traceSteps,
+    add(step: string) {
+      traceSteps.push(step);
+    },
   });
 
   await next();
 
   const total = Date.now() - start;
-  const trace = c.get('trace') || { cache: 'SKIP', d1: 'SKIP', mdblist: 'SKIP', trakt: 'SKIP' };
-  console.log(`[${c.res.status}] ${c.req.method} ${target} | total: ${total}ms [cache: ${trace.cache} | d1: ${trace.d1} | mdblist: ${trace.mdblist} | trakt: ${trace.trakt}]`);
+  const trace = c.get('trace');
+  const traceOutput = trace && trace.steps.length > 0 ? ` [${trace.steps.join(' -> ')}]` : '';
+  console.log(`[${c.res.status}] ${c.req.method} ${target} | total: ${total}ms${traceOutput}`);
 });
 
 // Root health check

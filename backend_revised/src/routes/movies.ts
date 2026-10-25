@@ -25,7 +25,7 @@ moviesRouter.get('/:media_type/:id', async (c) => {
   const trace = c.get('trace');
   const tCache = Date.now();
   const cached = await cacheService.get<MovieDetails>(cacheKey);
-  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
+  if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
     c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');

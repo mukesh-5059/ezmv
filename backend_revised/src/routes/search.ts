@@ -23,7 +23,7 @@ searchRouter.get('/', async (c) => {
   const trace = c.get('trace');
   const tCache = Date.now();
   const cached = await cacheService.get<any>(cacheKey);
-  if (trace) trace.cache = cached ? `HIT ${Date.now() - tCache}ms` : `MISS ${Date.now() - tCache}ms`;
+  if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
     return c.json(cached, 200, {
@@ -35,7 +35,7 @@ searchRouter.get('/', async (c) => {
   const trakt = new TraktService(c.env.TRAKT_CLIENT_ID);
   const tTrakt = Date.now();
   const traktResult = await trakt.search(query, page, PAGE_SIZE);
-  if (trace) trace.trakt = `DONE ${Date.now() - tTrakt}ms (${traktResult.imdb_ids.length} items)`;
+  if (trace) trace.add(`trakt: DONE ${Date.now() - tTrakt}ms (${traktResult.imdb_ids.length} items)`);
 
   if (!traktResult.imdb_ids.length) {
     const emptyPayload = {
@@ -51,9 +51,7 @@ searchRouter.get('/', async (c) => {
 
   // 2. Resolve metadata & ratings via D1 + MDBList batch using IMDb IDs
   const catalog = new CatalogService(c.env);
-  const tCatalog = Date.now();
-  const movies = await catalog.resolveMovies(traktResult.imdb_ids);
-  if (trace) trace.d1 = `RESOLVE ${Date.now() - tCatalog}ms`;
+  const movies = await catalog.resolveMovies(traktResult.imdb_ids, trace);
 
   const hasMore = page < traktResult.total_pages;
   const responsePayload = {
