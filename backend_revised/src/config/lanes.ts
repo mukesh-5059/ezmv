@@ -1,5 +1,11 @@
 import { LaneConfig } from '../types';
 
+export interface DashboardConfig {
+  id: string;
+  title: string;
+  lanes: LaneConfig[];
+}
+
 export const TAMIL_LANES: LaneConfig[] = [
   {
     id: 'trending',
@@ -26,3 +32,11 @@ export const TAMIL_LANES: LaneConfig[] = [
     title: 'South Indian Blockbusters',
   },
 ];
+
+export const DASHBOARDS: Record<string, DashboardConfig> = {
+  tamil: {
+    id: 'tamil',
+    title: 'Tamil Cinema',
+    lanes: TAMIL_LANES,
+  },
+};
