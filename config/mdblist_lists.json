@@ -1,0 +1,70 @@
+{
+  "lists": [
+    {
+      "id": 218335,
+      "name": "Tamil Movies",
+      "slug": "tamil-movies",
+      "creator": "amrav87",
+      "total_items": 6665,
+      "dynamic": true,
+      "refresh_frequency": "daily",
+      "covered_languages": ["ta"],
+      "lanes_powered": [
+        {
+          "lane_id": "trending",
+          "title": "Trending Now",
+          "filter": "language != 'en'",
+          "sort": "imdbpopular",
+          "order": "asc"
+        },
+        {
+          "lane_id": "new_releases",
+          "title": "New in Theaters",
+          "filter": "language == 'ta' AND release_date <= today",
+          "sort": "released",
+          "order": "desc"
+        },
+        {
+          "lane_id": "new_ott",
+          "title": "New on OTT",
+          "filter": "language != 'en'",
+          "sort": "releasedigital",
+          "order": "desc"
+        },
+        {
+          "lane_id": "top_rated",
+          "title": "All-Time Masterpieces",
+          "filter": "language != 'en' AND rating >= 7.0 AND imdb_votes >= 5000",
+          "sort": "letterrating",
+          "order": "desc"
+        },
+        {
+          "lane_id": "comedy",
+          "title": "Popular Comedy",
+          "filter": "language != 'en' AND genre == 'comedy'",
+          "sort": "imdbpopular",
+          "order": "asc"
+        }
+      ]
+    },
+    {
+      "id": 76398,
+      "name": "South Indian Movies",
+      "slug": "south-indian-movies",
+      "creator": "satzisa",
+      "total_items": 14984,
+      "dynamic": true,
+      "refresh_frequency": "daily",
+      "covered_languages": ["kn", "te", "ml", "ta"],
+      "lanes_powered": [
+        {
+          "lane_id": "pan_india",
+          "title": "South Indian Blockbusters",
+          "filter": "none (multi-industry hits: KGF, RRR, Baahubali, Kantara, Pushpa)",
+          "sort": "imdbvotes",
+          "order": "desc"
+        }
+      ]
+    }
+  ]
+}
