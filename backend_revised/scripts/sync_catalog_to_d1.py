@@ -17,6 +17,51 @@ import urllib.request
 
 MDBLIST_BASE_URL = "https://api.mdblist.com"
 
+ANYTHING_TO_GENRE_SLUGS = {
+    "action": ["action"],
+    "adventure": ["adventure"],
+    "animation": ["animation"],
+    "anime": ["anime"],
+    "biography": ["biography"],
+    "comedy": ["comedy"],
+    "crime": ["crime"],
+    "documentary": ["documentary"],
+    "drama": ["drama"],
+    "family": ["family"],
+    "fantasy": ["fantasy"],
+    "history": ["history"],
+    "horror": ["horror"],
+    "music": ["music"],
+    "musical": ["music"],
+    "mystery": ["mystery"],
+    "romance": ["romance"],
+    "sci-fi": ["sci-fi"],
+    "science fiction": ["sci-fi"],
+    "science-fiction": ["sci-fi"],
+    "sci fi": ["sci-fi"],
+    "sport": ["sport"],
+    "sports": ["sport"],
+    "sporting event": ["sport"],
+    "sporting-event": ["sport"],
+    "thriller": ["thriller"],
+    "suspense": ["thriller"],
+    "war": ["war"],
+    "western": ["western"],
+    # Compound TV genres
+    "action & adventure": ["action", "adventure"],
+    "action-&-adventure": ["action", "adventure"],
+    "sci-fi & fantasy": ["sci-fi", "fantasy"],
+    "sci-fi-&-fantasy": ["sci-fi", "fantasy"],
+    "war & politics": ["war"],
+    "war-&-politics": ["war"],
+}
+
+def normalize_genre_slugs(raw: str) -> list[str]:
+    key = raw.strip().lower()
+    if key in ANYTHING_TO_GENRE_SLUGS:
+        return ANYTHING_TO_GENRE_SLUGS[key]
+    return [key.replace(" ", "-")]
+
 LANES_CONFIG = [
     {
         "lane_id": "trending",
@@ -192,8 +237,17 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
                 runtime_sql = str(int(runtime)) if runtime else "NULL"
 
                 raw_genres = item.get("genres", [])
-                genres_list = [{"id": 0, "name": g} for g in raw_genres if isinstance(g, str)]
-                genres_sql = escape_sql(json.dumps(genres_list))
+                seen_genres = set()
+                slugs = []
+                for g in raw_genres:
+                    raw_str = g if isinstance(g, str) else (g.get("name") or g.get("title") or g.get("slug") or "")
+                    if not raw_str or not isinstance(raw_str, str):
+                        continue
+                    for slug in normalize_genre_slugs(raw_str):
+                        if slug and slug not in seen_genres:
+                            seen_genres.add(slug)
+                            slugs.append(slug)
+                genres_sql = escape_sql(json.dumps(slugs))
 
                 movie_stmt = (
                     f"INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, updated_at) "
@@ -210,11 +264,11 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
                 )
                 statements.append(movie_stmt)
 
-                # Primary IMDb rating & votes (fallback to TMDb if absent)
+                # Primary IMDb rating & votes (fallback to MDBList score if absent)
                 imdb_r = next((r for r in item.get("ratings", []) if r.get("source") == "imdb"), {})
-                tmdb_r = next((r for r in item.get("ratings", []) if r.get("source") == "tmdb"), {})
-                rating = float(imdb_r.get("value") or (tmdb_r.get("value") / 10.0 if tmdb_r.get("value") else 0.0))
-                votes = int(imdb_r.get("votes") or tmdb_r.get("votes") or 0)
+                score = item.get("score")
+                rating = float(imdb_r.get("value") or (score / 10.0 if score else 0.0))
+                votes = int(imdb_r.get("votes") or 0)
 
                 rating_stmt = (
                     f"INSERT INTO ratings (imdb_id, rating, votes, updated_at) "

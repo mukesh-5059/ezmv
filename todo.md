@@ -20,6 +20,11 @@
 - [x] **Support TV Series in Cloudflare D1 Database**:
   - Added `media_type` (`'movie' | 'tv'`) column to `movies` and wired into `v_catalog` view.
   - Enabled fast-path lookups and async write-through for TV series concise summaries in `backend_revised`.
+- [x] **Unified 4-Filter & 4-Sort Across Lanes & Search**:
+  - Implemented 4 filter dimensions (`genre`, `year` / decade shortcuts `2020s`/`2010s`/`2000s`/`90s`/`classic`, `min_rating`, `language`) and 5 sort orders (`popular`, `top_rated`, `newest`, `oldest`, `title`).
+  - Added D1 SQL filtering & dynamic `ORDER BY` for lane pagination in [`catalog.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/catalog.ts).
+  - Integrated upstream search filtering and in-memory rating/year post-filtering with cache key serialization in [`search.ts`](file:///home/mukes/dev/movies/backend_revised/src/routes/search.ts).
+  - Completely purged abandoned person/actor routes and files.
 
 ---
 
@@ -35,7 +40,7 @@
   - Remove duplicate floating action button implementations from [`search_screen.dart`](file:///home/mukes/dev/movies/mobile_app/lib/screens/search_screen.dart) and [`list_movies_screen.dart`](file:///home/mukes/dev/movies/mobile_app/lib/screens/list_movies_screen.dart).
 - [ ] **Anime-Specific Homepage Dashboard**:
   - Add dedicated Anime dashboard view / lanes (e.g. "Trending Anime", "Top Airing Series", "All-Time Classic Movies", "Shonen & Action").
-  - Filter using TMDb animation genre (`genre_id: 16`) + Japanese language (`ja`), or dedicated Trakt anime collections.
+  - Leverage AniList GraphQL API (100% free, no key, 90 req/min) for clean seasonal/cour groupings without TMDb multi-season fragmentation.
 - [ ] **Multi-Audio Track Selection & Support**:
   - Audio track switcher in the video player for streams containing multiple embedded audio channels (e.g. Tamil, English, Hindi dubs).
   - Accurate language tagging and stream track enumeration from demuxer metadata.
@@ -63,6 +68,15 @@
 - [ ] **Unify `/search` and `/discover` Endpoints**:
   - Merge the dual route aliases (`@router.get("/search")` and `@router.get("/discover")`) into a single consolidated browsing/search endpoint (e.g. `/api/v1/movies/catalog` or unified `/search`).
   - Standardize request query schema across text query, genre IDs, year filters, and sort orders.
+- [ ] **Direct Single Movie Resolution Without D1**:
+  - Look into resolving single movies directly without requiring a D1 entry.
+- [ ] **Explore Query Request Caching**:
+  - Explore caching requests with query parameters (similar to the search endpoint caching pattern).
+- [ ] **Improve Ratings and Votes Resolution in MDBList**:
+  - Try to improve ratings and votes resolution in `mdblist.ts`.
+- [ ] **Separate Lanes Config from Code and Make Dynamic**:
+  - Separate lanes config from code and make it dynamic (e.g. database-driven or external config).
+
 
 ### 4. Response Schema & Compatibility Cleanup
 - [ ] **Remove Backward Compatibility in Paginated Responses**:

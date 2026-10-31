@@ -1,4 +1,5 @@
-import { TraktSearchItem, TraktSearchResponse } from '../types';
+import { SearchFilters } from '../types/api';
+import { TraktSearchItem, TraktSearchResponse } from '../types/upstream';
 
 export class TraktService {
   private clientId: string;
@@ -8,7 +9,12 @@ export class TraktService {
     this.clientId = clientId || '';
   }
 
-  async search(query: string, page = 1, limit = 100): Promise<TraktSearchResponse> {
+  async search(
+    query: string,
+    page = 1,
+    limit = 100,
+    filters?: SearchFilters
+  ): Promise<TraktSearchResponse> {
     const cleanQuery = query.trim();
     const emptyResponse: TraktSearchResponse = {
       imdb_ids: [],
@@ -19,7 +25,20 @@ export class TraktService {
 
     if (!cleanQuery || !this.clientId) return emptyResponse;
 
-    const url = `${this.baseUrl}/search/movie,show?query=${encodeURIComponent(cleanQuery)}&page=${page}&limit=${limit}`;
+    let endpointType = 'movie,show';
+    if (filters?.media_type === 'movie') {
+      endpointType = 'movie';
+    } else if (filters?.media_type === 'tv') {
+      endpointType = 'show';
+    }
+
+    let url = `${this.baseUrl}/search/${endpointType}?query=${encodeURIComponent(cleanQuery)}&page=${page}&limit=${limit}`;
+    if (filters?.genre) {
+      url += `&genres=${encodeURIComponent(filters.genre)}`;
+    }
+    if (filters?.year) {
+      url += `&years=${encodeURIComponent(String(filters.year))}`;
+    }
 
     try {
       const resp = await fetch(url, {

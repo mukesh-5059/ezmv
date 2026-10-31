@@ -1,5 +1,7 @@
-import { Bindings, MovieDetails, MovieSummary, MdblistItem, GenreItem, RequestTrace } from '../types';
+import { Bindings, MovieDetails, MovieSummary, Genre, RequestTrace } from '../types/api';
+import { MdblistItem } from '../types/upstream';
 import { MdblistService } from './mdblist';
+import { resolveGenres } from '../config/genres';
 
 export class CatalogService {
   private db: D1Database;
@@ -13,7 +15,7 @@ export class CatalogService {
   }
 
   // Resolve multiple movie IDs: checks D1 first, batches missing to MDBList, upserts D1, returns in requested order
-  async resolveMovies(imdbIds: string[], trace?: RequestTrace): Promise<MovieSummary[]> {
+  async resolveMovies(imdbIds: string[], trace?: RequestTrace, mediaType: 'all' | 'movie' | 'tv' = 'all'): Promise<MovieSummary[]> {
     if (!imdbIds.length) return [];
 
     const now = Math.floor(Date.now() / 1000);
@@ -36,7 +38,7 @@ export class CatalogService {
         const isRatingStale = !row.ratings_updated_at || row.ratings_updated_at < staleRatingThreshold;
         if (isRatingStale) continue; // treat as needing refresh
 
-        const summary = this.rowToMovieSummary(row);
+        const summary = rowToMovieSummary(row);
         if (summary.imdb_id) lookup.set(summary.imdb_id, summary);
       }
     }
@@ -55,7 +57,7 @@ export class CatalogService {
     // 2. Batch fetch missing items from MDBList
     if (missingIds.length > 0) {
       const tMdb = Date.now();
-      const fetchedItems = await this.mdblist.batchMovies(missingIds);
+      const fetchedItems = await this.mdblist.batchMovies(missingIds, mediaType);
       if (trace) trace.add(`mdblist: FETCH ${Date.now() - tMdb}ms (${fetchedItems.length} items)`);
 
       if (fetchedItems.length > 0 && this.db) {
@@ -85,27 +87,16 @@ export class CatalogService {
 
   // Single movie details lookup: strictly D1 summary + TMDb for cast & extra details. Zero fallbacks.
   async getSingleMovie(imdbId: string): Promise<MovieDetails | null> {
-    if (!this.db) return null;
-
     const row = await this.db
       .prepare('SELECT * FROM v_movies WHERE imdb_id = ? LIMIT 1')
       .bind(imdbId)
       .first<any>();
 
-    if (!row || !row.title) {
-      return null;
-    }
-
-    let genres: GenreItem[] = [];
-    try {
-      const parsed = typeof row.genres === 'string' ? JSON.parse(row.genres) : [];
-      genres = parsed.map((g: any) => ({ mdb_id: g.id, name: g.title || g.name || '' }));
-    } catch (_) {}
+    if (!row) return null;
 
     const details: MovieDetails = {
-      ...this.rowToMovieSummary(row),
+      ...rowToMovieSummary(row),
       runtime: row.runtime || null,
-      genres,
       cast: [],
       seasons: [],
     };
@@ -148,45 +139,19 @@ export class CatalogService {
     return details;
   }
 
-  // Get lane items from D1, resolving missing/stale entries via MDBList on demand
-  async getLaneItems(laneId: string, limit = 100, offset = 0, trace?: RequestTrace): Promise<MovieSummary[]> {
-    if (!this.db) return [];
-
-    const rows = await this.db
-      .prepare('SELECT imdb_id FROM lane_entries WHERE lane_id = ? ORDER BY rank ASC LIMIT ? OFFSET ?')
-      .bind(laneId, limit, offset)
-      .all<{ imdb_id: string }>();
-
-    if (!rows.results?.length) return [];
-
-    const imdbIds = rows.results.map((r) => r.imdb_id);
-    return this.resolveMovies(imdbIds, trace);
-  }
 
   // Bulk upsert into movies and ratings tables
   private async upsertBatch(items: MdblistItem[]): Promise<void> {
-    if (!this.db || !items.length) return;
+    if (!items.length) return;
     const now = Math.floor(Date.now() / 1000);
-
     const statements: D1PreparedStatement[] = [];
 
     for (const item of items) {
-      const imdbId = item.ids?.imdb || item.imdbid;
-      if (!imdbId) continue;
+      const summary = this.mdblistItemToSummary(item);
+      if (!summary.imdb_id) continue;
 
-      const tmdbId = item.ids?.tmdb || item.tmdbid || null;
-      const mediaType = item.type === 'show' ? 'tv' : 'movie';
-      const title = item.title || 'Unknown';
-      const year = item.year || (item.released ? Number(item.released.slice(0, 4)) : null);
-      const releaseDate = item.released || (year ? `${year}-01-01` : '');
-      const posterPath = item.poster || '';
-      const backdropPath = item.backdrop || '';
-      const overview = item.description || '';
-      const runtime = item.runtime || null;
-      const genresJson = JSON.stringify(item.genres || []);
-
-      const rating = MdblistService.parseRating(item);
-      const votes = MdblistService.parseVotes(item);
+      const year = summary.release_date ? Number(summary.release_date.slice(0, 4)) : null;
+      const genresJson = JSON.stringify(summary.genres.map((g) => g.slug));
 
       // Metadata upsert
       statements.push(
@@ -205,7 +170,20 @@ export class CatalogService {
             runtime = COALESCE(excluded.runtime, movies.runtime),
             genres = excluded.genres,
             updated_at = excluded.updated_at
-        `).bind(imdbId, tmdbId, mediaType, title, year, releaseDate, posterPath, backdropPath, overview, runtime, genresJson, now)
+        `).bind(
+          summary.imdb_id,
+          summary.tmdb_id || null,
+          summary.media_type,
+          summary.title || 'Unknown',
+          year,
+          summary.release_date,
+          summary.poster_path,
+          summary.backdrop_path,
+          summary.overview,
+          item.runtime || null,
+          genresJson,
+          now
+        )
       );
 
       // Rating upsert
@@ -217,7 +195,7 @@ export class CatalogService {
             rating = excluded.rating,
             votes = excluded.votes,
             updated_at = excluded.updated_at
-        `).bind(imdbId, rating, votes, now)
+        `).bind(summary.imdb_id, summary.rating, summary.vote_count, now)
       );
     }
 
@@ -226,32 +204,20 @@ export class CatalogService {
     }
   }
 
-  // Row mappings
-  private rowToMovieSummary(row: any): MovieSummary {
-    let genreIds: number[] = [];
-    try {
-      const parsed = typeof row.genres === 'string' ? JSON.parse(row.genres) : [];
-      genreIds = parsed.map((g: any) => g.id).filter((id: any): id is number => typeof id === 'number');
-    } catch (_) {}
-
-    return {
-      imdb_id: row.imdb_id,
-      tmdb_id: row.tmdb_id || 0,
-      title: row.title || '',
-      overview: row.overview || '',
-      release_date: row.release_date || '',
-      poster_path: row.poster_path || '',
-      backdrop_path: row.backdrop_path || '',
-      rating: Number(row.rating || 0),
-      vote_count: Number(row.votes || 0),
-      media_type: row.media_type || 'movie',
-      genre_ids: genreIds,
-    };
-  }
-
-
   private mdblistItemToSummary(item: MdblistItem): MovieSummary {
-    const genreIds = (item.genres || []).map((g) => g.id);
+    const rawGenres = item.genres || [];
+    const seen = new Set<string>();
+    const genres: Genre[] = [];
+    for (const g of rawGenres) {
+      const rawStr = typeof g === 'string' ? g : String(g?.name || g?.title || g?.slug || '');
+      if (!rawStr.trim()) continue;
+      for (const resolved of resolveGenres(rawStr)) {
+        if (!seen.has(resolved.slug)) {
+          seen.add(resolved.slug);
+          genres.push(resolved);
+        }
+      }
+    }
     const year = item.year || (item.released ? Number(item.released.slice(0, 4)) : 0);
 
     return {
@@ -265,7 +231,27 @@ export class CatalogService {
       rating: MdblistService.parseRating(item),
       vote_count: MdblistService.parseVotes(item),
       media_type: item.type === 'show' ? 'tv' : 'movie',
-      genre_ids: genreIds,
+      genres,
     };
   }
+}
+
+// Map D1 row to MovieSummary
+export function rowToMovieSummary(row: any): MovieSummary {
+  const slugs: string[] = row.genres ? JSON.parse(row.genres) : [];
+  const genres: Genre[] = slugs.flatMap(resolveGenres);
+
+  return {
+    imdb_id: row.imdb_id,
+    tmdb_id: row.tmdb_id || 0,
+    title: row.title || '',
+    overview: row.overview || '',
+    release_date: row.release_date || '',
+    poster_path: row.poster_path || '',
+    backdrop_path: row.backdrop_path || '',
+    rating: row.rating,
+    vote_count: row.votes,
+    media_type: row.media_type,
+    genres,
+  };
 }
