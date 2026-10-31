@@ -59,13 +59,13 @@ export class LanesService {
     }
 
     if (filters.min_rating !== undefined && filters.min_rating > 0) {
-      conditions.push('m.rating >= ?');
+      conditions.push('m.rating_score >= ?');
       params.push(filters.min_rating);
     }
 
     let orderBy = 'l.rank ASC';
     if (filters.sort_by === 'top_rated') {
-      orderBy = 'm.rating DESC, m.votes DESC';
+      orderBy = 'm.rating_score DESC, m.votes DESC';
     } else if (filters.sort_by === 'newest') {
       orderBy = 'm.release_date DESC';
     } else if (filters.sort_by === 'oldest') {

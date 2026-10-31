@@ -25,6 +25,14 @@
   - Added D1 SQL filtering & dynamic `ORDER BY` for lane pagination in [`catalog.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/catalog.ts).
   - Integrated upstream search filtering and in-memory rating/year post-filtering with cache key serialization in [`search.ts`](file:///home/mukes/dev/movies/backend_revised/src/routes/search.ts).
   - Completely purged abandoned person/actor routes and files.
+- [x] **Unify `/search` and `/discover` Endpoints**:
+  - Eliminated legacy dual `/search` and `/discover` aliases in `backend_revised`.
+  - Consolidated browsing and search into `/api/v1/search` with standardized query schema (`media_type`, canonical `genre` slug, `year`, `min_rating`).
+- [x] **Improve Ratings and Votes Resolution in MDBList**:
+  - Implemented multi-source composite calculation (`computeRating`) with adaptive weight redistribution.
+  - Added single `ratings` JSON column to persist raw source metadata while keeping precomputed `rating_score` and `votes` for fast D1 SQL sorting and filtering.
+  - Synchronized calculation across Worker runtime and Python D1 sync script.
+
 
 ---
 
@@ -65,17 +73,14 @@
   - Add English dashboard configuration to `lanes.ts` and sync catalog to D1.
 - [ ] **Curated & Trakt Lists Migration**:
   - Port `/lists/{list_id}/items` to `backend_revised` with upstream `page >= total_pages` checks from Trakt headers.
-- [ ] **Unify `/search` and `/discover` Endpoints**:
-  - Merge the dual route aliases (`@router.get("/search")` and `@router.get("/discover")`) into a single consolidated browsing/search endpoint (e.g. `/api/v1/movies/catalog` or unified `/search`).
-  - Standardize request query schema across text query, genre IDs, year filters, and sort orders.
 - [ ] **Direct Single Movie Resolution Without D1**:
   - Look into resolving single movies directly without requiring a D1 entry.
 - [ ] **Explore Query Request Caching**:
   - Explore caching requests with query parameters (similar to the search endpoint caching pattern).
-- [ ] **Improve Ratings and Votes Resolution in MDBList**:
-  - Try to improve ratings and votes resolution in `mdblist.ts`.
 - [ ] **Separate Lanes Config from Code and Make Dynamic**:
   - Separate lanes config from code and make it dynamic (e.g. database-driven or external config).
+- [ ] **Separate Vote Weightage and Min Vote Config from Code**:
+  - Move `SOURCE_WEIGHTS` and `MIN_VOTES` configurations out of service and sync code into a dedicated, shared configuration file or external config.
 
 
 ### 4. Response Schema & Compatibility Cleanup

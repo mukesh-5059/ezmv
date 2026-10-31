@@ -66,7 +66,7 @@ searchRouter.get('/', async (c) => {
 
   let processedMovies = movies;
   if (min_rating !== undefined && min_rating > 0) {
-    processedMovies = processedMovies.filter((m) => m.rating >= min_rating);
+    processedMovies = processedMovies.filter((m) => m.rating_score >= min_rating);
   }
 
   const hasMore = page < traktResult.total_pages;

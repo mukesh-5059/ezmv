@@ -28,7 +28,8 @@ CREATE INDEX IF NOT EXISTS idx_movies_tmdb_id ON movies(tmdb_id);
 -- 3. Dynamic Ratings (TTL: 24–48 hours)
 CREATE TABLE IF NOT EXISTS ratings (
     imdb_id TEXT PRIMARY KEY,
-    rating REAL NOT NULL DEFAULT 0,
+    ratings TEXT,
+    rating_score REAL NOT NULL DEFAULT 0,
     votes INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
 );
@@ -42,8 +43,9 @@ SELECT
     m.title,
     m.year,
     m.release_date,
-    COALESCE(r.rating, 0) AS rating,
+    COALESCE(r.rating_score, 0) AS rating_score,
     COALESCE(r.votes, 0) AS votes,
+    r.ratings,
     m.poster_path,
     m.backdrop_path,
     m.overview,

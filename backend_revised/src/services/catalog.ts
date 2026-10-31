@@ -186,16 +186,19 @@ export class CatalogService {
         )
       );
 
+      const comp = MdblistService.computeRating(item);
+
       // Rating upsert
       statements.push(
         this.db.prepare(`
-          INSERT INTO ratings (imdb_id, rating, votes, updated_at)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO ratings (imdb_id, ratings, rating_score, votes, updated_at)
+          VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(imdb_id) DO UPDATE SET
-            rating = excluded.rating,
+            ratings = excluded.ratings,
+            rating_score = excluded.rating_score,
             votes = excluded.votes,
             updated_at = excluded.updated_at
-        `).bind(summary.imdb_id, summary.rating, summary.vote_count, now)
+        `).bind(summary.imdb_id, comp.ratingsJson, comp.rating_score, comp.votes, now)
       );
     }
 
@@ -219,6 +222,7 @@ export class CatalogService {
       }
     }
     const year = item.year || (item.released ? Number(item.released.slice(0, 4)) : 0);
+    const comp = MdblistService.computeRating(item);
 
     return {
       imdb_id: item.ids?.imdb || item.imdbid || '',
@@ -228,8 +232,8 @@ export class CatalogService {
       release_date: item.released || (year ? `${year}-01-01` : ''),
       poster_path: item.poster || '',
       backdrop_path: item.backdrop || '',
-      rating: MdblistService.parseRating(item),
-      vote_count: MdblistService.parseVotes(item),
+      rating_score: comp.rating_score,
+      vote_count: comp.votes,
       media_type: item.type === 'show' ? 'tv' : 'movie',
       genres,
     };
@@ -249,7 +253,7 @@ export function rowToMovieSummary(row: any): MovieSummary {
     release_date: row.release_date || '',
     poster_path: row.poster_path || '',
     backdrop_path: row.backdrop_path || '',
-    rating: row.rating,
+    rating_score: row.rating_score ?? 0,
     vote_count: row.votes,
     media_type: row.media_type,
     genres,

@@ -62,6 +62,78 @@ def normalize_genre_slugs(raw: str) -> list[str]:
         return ANYTHING_TO_GENRE_SLUGS[key]
     return [key.replace(" ", "-")]
 
+MIN_VOTES = {
+    "imdb": 100,
+    "letterboxd": 50,
+    "tomatoes": 10,
+    "popcorn": 50,
+    "tomatoesaudience": 50,
+    "tmdb": 20,
+    "metacritic": 5,
+    "trakt": 20,
+}
+
+SOURCE_WEIGHTS = {
+    "imdb": 0.30,
+    "letterboxd": 0.25,
+    "tomatoes": 0.15,
+    "popcorn": 0.10,
+    "tomatoesaudience": 0.10,
+    "tmdb": 0.10,
+    "metacritic": 0.05,
+    "trakt": 0.05,
+}
+
+def compute_composite_rating(item: dict) -> tuple[float, int, str]:
+    raw_ratings = item.get("ratings") or []
+    weighted_sum = 0.0
+    total_weight = 0.0
+    total_votes = 0
+    cleaned_ratings = []
+
+    for r in raw_ratings:
+        src = r.get("source")
+        if not src:
+            continue
+        val = r.get("value")
+        score = r.get("score")
+        votes = int(r.get("votes") or 0)
+        cleaned_ratings.append({
+            "source": src,
+            "value": val,
+            "score": score,
+            "votes": votes,
+        })
+
+        weight = SOURCE_WEIGHTS.get(src)
+        if not weight:
+            continue
+
+        min_votes = MIN_VOTES.get(src, 0)
+        if votes < min_votes:
+            continue
+
+        normalized = None
+        if score is not None and isinstance(score, (int, float)):
+            normalized = score / 10.0
+
+        if normalized is not None:
+            weighted_sum += normalized * weight
+            total_weight += weight
+            total_votes += votes
+
+    ratings_json = json.dumps(cleaned_ratings)
+
+    if total_weight > 0:
+        composite_rating = round(weighted_sum / total_weight, 1)
+        return composite_rating, total_votes, ratings_json
+
+    fallback_score = item.get("score_average")
+    if fallback_score is not None and isinstance(fallback_score, (int, float)) and fallback_score > 0:
+        return round(fallback_score / 10.0, 1), 0, ratings_json
+
+    return 0.0, 0, ratings_json
+
 LANES_CONFIG = [
     {
         "lane_id": "trending",
@@ -175,13 +247,10 @@ def fetch_lane_movies(api_key: str, cfg: dict) -> list[dict]:
     if min_rating is not None or min_votes is not None:
         filtered = []
         for m in movies:
-            lr = next((r.get("value") for r in m.get("ratings", []) if r.get("source") == "letterboxd" and r.get("value")), None)
-            ir = next((r.get("value") for r in m.get("ratings", []) if r.get("source") == "imdb" and r.get("value")), None)
-            val = lr if lr is not None else ir
-            votes = next((r.get("votes") for r in m.get("ratings", []) if r.get("source") == "imdb" and r.get("votes")), 0)
-            if min_rating is not None and (val is None or val < min_rating):
+            rating_score, votes, _ = compute_composite_rating(m)
+            if min_rating is not None and rating_score < min_rating:
                 continue
-            if min_votes is not None and (votes is None or votes < min_votes):
+            if min_votes is not None and votes < min_votes:
                 continue
             filtered.append(m)
         movies = filtered
@@ -189,10 +258,39 @@ def fetch_lane_movies(api_key: str, cfg: dict) -> list[dict]:
     return movies
 
 
+def fetch_batch_details(api_key: str, imdb_ids: list[str]) -> dict[str, dict]:
+    """Batch-fetches full multi-source ratings (Letterboxd, RT, Trakt, Metacritic) from MDBList."""
+    lookup = {}
+    if not imdb_ids:
+        return lookup
+
+    url = f"{MDBLIST_BASE_URL}/imdb/movie/?apikey={api_key}"
+    chunk_size = 100
+    for i in range(0, len(imdb_ids), chunk_size):
+        chunk = imdb_ids[i:i + chunk_size]
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps({"ids": chunk}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "MDBListSync/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as res:
+                items = json.loads(res.read().decode("utf-8"))
+                for item in items:
+                    iid = item.get("imdbid") or item.get("ids", {}).get("imdb")
+                    if iid:
+                        lookup[iid] = item
+        except Exception as e:
+            print(f"  [Warning] Batch ratings fetch failed for chunk {i//chunk_size + 1}: {e}")
+    return lookup
+
+
 def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
     now = int(time.time())
     statements: list[str] = []
     seen_movies: set[str] = set()
+    lanes_data: list[tuple[str, list[dict]]] = []
+    all_unique_ids: set[str] = set()
 
     print(f"[MDBList Sync] Syncing {len(LANES_CONFIG)} lanes to D1 SQL...")
 
@@ -214,10 +312,21 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
         if not valid_movies:
             continue
 
+        lanes_data.append((lane_id, valid_movies))
+        for m in valid_movies:
+            iid = m.get("imdb_id") or m.get("ids", {}).get("imdb")
+            if iid:
+                all_unique_ids.add(iid)
+
+    print(f"  -> Fetching full multi-source ratings for {len(all_unique_ids)} unique titles via MDBList batch...")
+    batch_details = fetch_batch_details(api_key, list(all_unique_ids))
+
+    for lane_id, valid_movies in lanes_data:
         statements.append(f"DELETE FROM lane_entries WHERE lane_id = '{lane_id}';")
 
         for rank, item in enumerate(valid_movies, start=1):
             imdb_id = item.get("imdb_id") or item.get("ids", {}).get("imdb")
+            full_item = {**item, **batch_details.get(imdb_id, {})}
 
             # 1. Movie & Ratings metadata (upsert once per unique movie)
             if imdb_id not in seen_movies:
@@ -264,17 +373,16 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
                 )
                 statements.append(movie_stmt)
 
-                # Primary IMDb rating & votes (fallback to MDBList score if absent)
-                imdb_r = next((r for r in item.get("ratings", []) if r.get("source") == "imdb"), {})
-                score = item.get("score")
-                rating = float(imdb_r.get("value") or (score / 10.0 if score else 0.0))
-                votes = int(imdb_r.get("votes") or 0)
+                # Composite multi-source rating & votes with raw JSON
+                rating_score, votes, ratings_json = compute_composite_rating(full_item)
+                ratings_sql = escape_sql(ratings_json)
 
                 rating_stmt = (
-                    f"INSERT INTO ratings (imdb_id, rating, votes, updated_at) "
-                    f"VALUES ('{imdb_id}', {rating}, {votes}, {now}) "
+                    f"INSERT INTO ratings (imdb_id, ratings, rating_score, votes, updated_at) "
+                    f"VALUES ('{imdb_id}', {ratings_sql}, {rating_score}, {votes}, {now}) "
                     f"ON CONFLICT(imdb_id) DO UPDATE SET "
-                    f"rating = excluded.rating, "
+                    f"ratings = excluded.ratings, "
+                    f"rating_score = excluded.rating_score, "
                     f"votes = excluded.votes, "
                     f"updated_at = excluded.updated_at;"
                 )

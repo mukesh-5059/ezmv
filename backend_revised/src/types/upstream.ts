@@ -1,8 +1,15 @@
 // MDBList Raw Response Types
 export interface MdblistRating {
   source: string;
-  value: number;
+  value?: number; //raw rating
+  score?: number; //normalized rating
   votes?: number;
+}
+
+export interface CompositeRating {
+  rating_score: number;
+  votes: number;
+  ratingsJson: string;
 }
 
 export interface MdblistGenre {
@@ -27,7 +34,7 @@ export interface MdblistItem {
   released_digital?: string;
   description?: string;
   runtime?: number;
-  score?: number;
+  score_average?: number;
   type?: 'movie' | 'show';
   poster?: string;
   backdrop?: string;

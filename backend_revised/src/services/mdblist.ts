@@ -1,4 +1,4 @@
-import { MdblistItem } from '../types/upstream';
+import { CompositeRating, MdblistItem, MdblistRating } from '../types/upstream';
 
 export class MdblistService {
   private apiKey: string;
@@ -73,22 +73,79 @@ export class MdblistService {
   }
 
   // Utilities to parse MDBList item into standard format
-  static parseRating(item: MdblistItem): number {
-    if (Array.isArray(item.ratings)) {
-      const imdb = item.ratings.find((r) => r.source === 'imdb' && typeof r.value === 'number');
-      if (imdb) return Number(imdb.value.toFixed(1));
-    }
-    if (typeof item.score === 'number' && item.score > 0) {
-      return Number((item.score / 10).toFixed(1));
-    }
-    return 0;
-  }
+  static computeRating(item: MdblistItem): CompositeRating {
+    const rawRatings = Array.isArray(item.ratings) ? item.ratings : [];
+    let weightedSum = 0;
+    let totalWeight = 0;
+    let totalVotes = 0;
+    const cleanedRatings: MdblistRating[] = [];
 
-  static parseVotes(item: MdblistItem): number {
-    if (Array.isArray(item.ratings)) {
-      const imdb = item.ratings.find((r) => r.source === 'imdb' && typeof r.votes === 'number');
-      if (imdb?.votes !== undefined) return imdb.votes;
+    for (const r of rawRatings) {
+      if (!r || !r.source) continue;
+      cleanedRatings.push({
+        source: r.source,
+        value: r.value,
+        score: r.score,
+        votes: r.votes || 0,
+      });
+
+      const weight = SOURCE_WEIGHTS[r.source];
+      if (!weight) continue;
+
+      const minVotes = MIN_VOTES[r.source] ?? 0;
+      const votes = r.votes || 0;
+      if (votes < minVotes) continue;
+
+      let normalized: number | null = null;
+      if (typeof r.score === 'number') {
+        normalized = r.score / 10;
+      }
+
+      if (normalized !== null) {
+        weightedSum += normalized * weight;
+        totalWeight += weight;
+        totalVotes += votes;
+      }
     }
-    return 0;
+
+    const ratingsJson = JSON.stringify(cleanedRatings);
+
+    if (totalWeight > 0) {
+      const rating_score = Number((weightedSum / totalWeight).toFixed(1));
+      return { rating_score, votes: totalVotes, ratingsJson };
+    }
+
+    const fallbackScore = item.score_average;
+    if (typeof fallbackScore === 'number' && fallbackScore > 0) {
+      return {
+        rating_score: Number((fallbackScore / 10).toFixed(1)),
+        votes: 0,
+        ratingsJson,
+      };
+    }
+
+    return { rating_score: 0, votes: 0, ratingsJson };
   }
 }
+
+export const MIN_VOTES: Record<string, number> = {
+  imdb: 100,
+  letterboxd: 50,
+  tomatoes: 10,
+  popcorn: 50,
+  tomatoesaudience: 50,
+  tmdb: 20,
+  metacritic: 5,
+  trakt: 20,
+};
+
+export const SOURCE_WEIGHTS: Record<string, number> = {
+  imdb: 0.30,
+  letterboxd: 0.25,
+  tomatoes: 0.15,
+  popcorn: 0.10,
+  tomatoesaudience: 0.10,
+  tmdb: 0.10,
+  metacritic: 0.05,
+  trakt: 0.05,
+};

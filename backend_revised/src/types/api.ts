@@ -36,7 +36,7 @@ export interface MovieSummary {
   release_date: string;
   poster_path: string;
   backdrop_path: string;
-  rating: number;
+  rating_score: number;
   vote_count: number;
   media_type: 'movie' | 'tv';
   genres: Genre[];
@@ -82,4 +82,10 @@ export interface SubtitleTrack {
 export interface LaneConfig {
   id: string;
   title: string;
+}
+
+export interface DashboardConfig {
+  id: string;
+  title: string;
+  lanes: LaneConfig[];
 }

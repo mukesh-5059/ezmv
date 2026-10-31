@@ -1,10 +1,4 @@
-import { LaneConfig } from '../types';
-
-export interface DashboardConfig {
-  id: string;
-  title: string;
-  lanes: LaneConfig[];
-}
+import { DashboardConfig, LaneConfig } from '../types';
 
 export const TAMIL_LANES: LaneConfig[] = [
   {
