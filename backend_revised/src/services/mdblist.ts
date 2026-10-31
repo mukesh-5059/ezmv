@@ -1,4 +1,4 @@
-import { MdblistItem } from '../types';
+import { MdblistItem } from '../types/upstream';
 
 export class MdblistService {
   private apiKey: string;
@@ -8,44 +8,45 @@ export class MdblistService {
     this.apiKey = apiKey || '';
   }
 
-  async batchMovies(ids: (string | number)[]): Promise<MdblistItem[]> {
-    if (!this.apiKey || ids.length === 0) return [];
-
-    const imdbIds: string[] = [];
-    const tmdbIds: number[] = [];
-
-    for (const id of ids) {
-      if (typeof id === 'string' && id.startsWith('tt')) {
-        imdbIds.push(id);
-      } else if (!isNaN(Number(id))) {
-        tmdbIds.push(Number(id));
-      }
-    }
+  async batchMovies(imdbIds: string[], mediaType: 'all' | 'movie' | 'tv' = 'all'): Promise<MdblistItem[]> {
+    if (!this.apiKey || imdbIds.length === 0) return [];
 
     const results: MdblistItem[] = [];
+    const targetType = mediaType === 'tv' ? 'show' : (mediaType === 'movie' ? 'movie' : null);
 
-    // Chunk size 100
-    if (imdbIds.length > 0) {
+    if (targetType) {
       for (let i = 0; i < imdbIds.length; i += 100) {
         const chunk = imdbIds.slice(i, i + 100);
-        const res = await this.postBatch('imdb', 'movie', chunk);
+        const res = await this.postBatch(targetType, chunk);
         results.push(...res);
       }
-    }
-
-    if (tmdbIds.length > 0) {
-      for (let i = 0; i < tmdbIds.length; i += 100) {
-        const chunk = tmdbIds.slice(i, i + 100);
-        const res = await this.postBatch('tmdb', 'movie', chunk);
+    } else {
+      const resolved = new Set<string>();
+      for (let i = 0; i < imdbIds.length; i += 100) {
+        const chunk = imdbIds.slice(i, i + 100);
+        const res = await this.postBatch('movie', chunk);
+        for (const item of res) {
+          const id = item.ids?.imdb || item.imdbid;
+          if (id) resolved.add(id);
+        }
         results.push(...res);
+      }
+
+      const remaining = imdbIds.filter((id) => !resolved.has(id));
+      if (remaining.length > 0) {
+        for (let i = 0; i < remaining.length; i += 100) {
+          const chunk = remaining.slice(i, i + 100);
+          const res = await this.postBatch('show', chunk);
+          results.push(...res);
+        }
       }
     }
 
     return results;
   }
 
-  private async postBatch(provider: 'imdb' | 'tmdb', mediaType: 'movie' | 'show', ids: (string | number)[]): Promise<MdblistItem[]> {
-    const url = `${this.baseUrl}/${provider}/${mediaType}/?apikey=${this.apiKey}`;
+  private async postBatch(mediaType: 'movie' | 'show', ids: string[]): Promise<MdblistItem[]> {
+    const url = `${this.baseUrl}/imdb/${mediaType}/?apikey=${this.apiKey}`;
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -59,7 +60,7 @@ export class MdblistService {
       });
 
       if (!resp.ok) {
-        console.warn(`[MDBList postBatch error] ${provider}/${mediaType} status ${resp.status}`);
+        console.warn(`[MDBList postBatch error] imdb/${mediaType} status ${resp.status}`);
         return [];
       }
 
@@ -75,9 +76,7 @@ export class MdblistService {
   static parseRating(item: MdblistItem): number {
     if (Array.isArray(item.ratings)) {
       const imdb = item.ratings.find((r) => r.source === 'imdb' && typeof r.value === 'number');
-      if (imdb && typeof imdb.value === 'number') return Number(imdb.value.toFixed(1));
-      const tmdb = item.ratings.find((r) => r.source === 'tmdb' && typeof r.value === 'number');
-      if (tmdb && typeof tmdb.value === 'number') return Number((tmdb.value / 10).toFixed(1));
+      if (imdb) return Number(imdb.value.toFixed(1));
     }
     if (typeof item.score === 'number' && item.score > 0) {
       return Number((item.score / 10).toFixed(1));
@@ -88,9 +87,7 @@ export class MdblistService {
   static parseVotes(item: MdblistItem): number {
     if (Array.isArray(item.ratings)) {
       const imdb = item.ratings.find((r) => r.source === 'imdb' && typeof r.votes === 'number');
-      if (imdb && typeof imdb.votes === 'number') return imdb.votes;
-      const tmdb = item.ratings.find((r) => r.source === 'tmdb' && typeof r.votes === 'number');
-      if (tmdb && typeof tmdb.votes === 'number') return tmdb.votes;
+      if (imdb?.votes !== undefined) return imdb.votes;
     }
     return 0;
   }
