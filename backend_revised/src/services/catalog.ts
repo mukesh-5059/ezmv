@@ -1,4 +1,4 @@
-import { Bindings, MovieDetails, MovieSummary, Genre, RequestTrace } from '../types/api';
+import { Bindings, MovieDetails, MovieSummary, Genre, RequestTrace, TvEpisodeSummary, TvSeasonResponse } from '../types/api';
 import { MdblistItem } from '../types/upstream';
 import { MdblistService } from './mdblist';
 import { resolveGenres } from '../config/genres';
@@ -87,10 +87,18 @@ export class CatalogService {
 
   // Single movie details lookup: strictly D1 summary + TMDb for cast & extra details. Zero fallbacks.
   async getSingleMovie(imdbId: string): Promise<MovieDetails | null> {
-    const row = await this.db
+    let row = await this.db
       .prepare('SELECT * FROM v_movies WHERE imdb_id = ? LIMIT 1')
       .bind(imdbId)
       .first<any>();
+
+    if (!row) {
+      await this.resolveMovies([imdbId]);
+      row = await this.db
+        .prepare('SELECT * FROM v_movies WHERE imdb_id = ? LIMIT 1')
+        .bind(imdbId)
+        .first<any>();
+    }
 
     if (!row) return null;
 
@@ -122,13 +130,18 @@ export class CatalogService {
               order: c.order,
             }));
           }
-          if (details.media_type === 'tv' && Array.isArray(tmdbData.seasons)) {
-            details.seasons = tmdbData.seasons.map((s: any) => ({
-              season_number: s.season_number,
-              name: s.name,
-              episode_count: s.episode_count,
-              poster_path: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
-            }));
+          if (details.media_type === 'tv') {
+            details.status = tmdbData.status || null;
+            details.is_ongoing = tmdbData.status === 'Returning Series' || Boolean(tmdbData.in_production);
+            if (Array.isArray(tmdbData.seasons)) {
+              details.seasons = tmdbData.seasons
+                .filter((s: any) => s.season_number > 0)
+                .map((s: any) => ({
+                  season_number: s.season_number,
+                  name: s.name || `Season ${s.season_number}`,
+                  episode_count: s.episode_count || 0,
+                }));
+            }
           }
         }
       } catch (err: any) {
@@ -137,6 +150,66 @@ export class CatalogService {
     }
 
     return details;
+  }
+
+  async getTvSeason(imdbId: string, seasonNumber: number): Promise<TvSeasonResponse | null> {
+    if (!imdbId.startsWith('tt') || !this.tmdbApiKey) return null;
+
+    let row = await this.db
+      .prepare('SELECT tmdb_id FROM movies WHERE imdb_id = ? LIMIT 1')
+      .bind(imdbId)
+      .first<{ tmdb_id: number | null }>();
+
+    let tmdbId = row?.tmdb_id;
+
+    if (!tmdbId) {
+      const resolved = await this.resolveMovies([imdbId]);
+      if (resolved.length && resolved[0].tmdb_id) {
+        tmdbId = resolved[0].tmdb_id;
+      }
+    }
+
+    if (!tmdbId) return null;
+
+    const url = `https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${this.tmdbApiKey}`;
+    try {
+      const resp = await fetch(url, {
+        headers: { Accept: 'application/json', 'User-Agent': 'CloudflareWorker/1.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (!resp.ok) return null;
+
+      const data: any = await resp.json();
+      const now = Date.now();
+
+      const episodes: TvEpisodeSummary[] = Array.isArray(data.episodes)
+        ? data.episodes.map((ep: any) => {
+            const airDate = ep.air_date || null;
+            const isReleased = Boolean(airDate && new Date(airDate).getTime() <= now);
+            return {
+              episode_number: ep.episode_number,
+              season_number: ep.season_number ?? seasonNumber,
+              name: ep.name || `Episode ${ep.episode_number}`,
+              overview: ep.overview || '',
+              still_path: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : null,
+              air_date: airDate,
+              runtime: ep.runtime ?? null,
+              is_released: isReleased,
+            };
+          })
+        : [];
+
+      return {
+        season_number: data.season_number ?? seasonNumber,
+        name: data.name || `Season ${seasonNumber}`,
+        episode_count: episodes.length,
+        episodes,
+      };
+    } catch (err: any) {
+      console.warn(`[TMDb season error for ${imdbId} S${seasonNumber}]:`, err.message);
+      return null;
+    }
   }
 
 

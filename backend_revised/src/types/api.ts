@@ -42,10 +42,36 @@ export interface MovieSummary {
   genres: Genre[];
 }
 
+export interface TvSeasonSummary {
+  season_number: number;
+  name: string;
+  episode_count: number;
+}
+
+export interface TvEpisodeSummary {
+  episode_number: number;
+  season_number: number;
+  name: string;
+  overview: string;
+  still_path: string | null;
+  air_date: string | null;
+  runtime: number | null;
+  is_released: boolean;
+}
+
+export interface TvSeasonResponse {
+  season_number: number;
+  name: string;
+  episode_count: number;
+  episodes: TvEpisodeSummary[];
+}
+
 export interface MovieDetails extends MovieSummary {
   runtime?: number | null;
   cast?: CastMember[];
-  seasons?: any[];
+  seasons?: TvSeasonSummary[];
+  status?: string | null;
+  is_ongoing?: boolean;
 }
 
 export interface LaneFilters {
