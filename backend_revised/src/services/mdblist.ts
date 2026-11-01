@@ -79,6 +79,7 @@ export class MdblistService {
     let totalWeight = 0;
     let totalVotes = 0;
     const cleanedRatings: MdblistRating[] = [];
+    const qualifiedSources = new Set<string>();
 
     for (const r of rawRatings) {
       if (!r || !r.source) continue;
@@ -105,23 +106,51 @@ export class MdblistService {
         weightedSum += normalized * weight;
         totalWeight += weight;
         totalVotes += votes;
+        qualifiedSources.add(r.source);
       }
     }
 
     const ratingsJson = JSON.stringify(cleanedRatings);
 
-    if (totalWeight > 0) {
-      const rating_score = Number((weightedSum / totalWeight).toFixed(1));
-      return { rating_score, votes: totalVotes, ratingsJson };
-    }
+    if (totalWeight > 0 && qualifiedSources.size > 0) {
+      const rawRating = weightedSum / totalWeight;
+      const numSources = qualifiedSources.size;
 
-    const fallbackScore = item.score_average;
-    if (typeof fallbackScore === 'number' && fallbackScore > 0) {
-      return {
-        rating_score: Number((fallbackScore / 10).toFixed(1)),
-        votes: 0,
-        ratingsJson,
-      };
+      let m = 1000;
+      if (numSources === 1) m = 10000;
+      else if (numSources === 2) m = 3000;
+
+      // Era modifier: exponential recency decay + slow classic boost
+      const now = new Date();
+      const currentYear = now.getUTCFullYear();
+      let age: number | null = null;
+
+      const relDateStr = item.released || (item as any).release_date;
+      if (typeof relDateStr === 'string' && relDateStr.length >= 4) {
+        const d = new Date(relDateStr);
+        if (!isNaN(d.getTime())) {
+          age = Math.max(0, (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+        }
+      }
+      if (age === null && typeof item.year === 'number') {
+        age = Math.max(0, currentYear - item.year);
+      }
+
+      if (age !== null) {
+        const penalty = 0.5 * Math.exp(-age * 1.5);
+        const boost = 0.5 * Math.max(0, Math.min(1, (age - 3) / 25));
+        const rawEra = Math.max(0.5, Math.min(1.5, 1.0 + penalty - boost));
+        // Anti-double-penalty: distribute recency skepticism across corroborated sources
+        const eraModifier = 1.0 + (rawEra - 1.0) / numSources;
+        m *= eraModifier;
+      }
+
+      const C = 6.8;
+      const rating_score = Number(
+        (((totalVotes / (totalVotes + m)) * rawRating) + ((m / (totalVotes + m)) * C)).toFixed(1)
+      );
+
+      return { rating_score, votes: totalVotes, ratingsJson };
     }
 
     return { rating_score: 0, votes: 0, ratingsJson };
@@ -129,7 +158,7 @@ export class MdblistService {
 }
 
 export const MIN_VOTES: Record<string, number> = {
-  imdb: 100,
+  imdb: 500,
   letterboxd: 50,
   tomatoes: 10,
   popcorn: 50,

@@ -1,261 +1,228 @@
-# Rating Architecture Analysis & Proposal
+# Movie Catalog & Rating Architecture
 
-## The Problem
-
-Your current system extracts **only IMDb ratings + IMDb votes** from mdblist, falling back to `score / 10` when IMDb is absent. This creates three compounding issues for a Tamil/regional-focused app:
-
-### 1. MDBList's `score` is Actively Hostile to Regional Cinema
-
-MDBList's weighted `score` applies a **minimum-votes baseline penalty per source**. A Tamil film with 25,000 IMDb votes (rated 8.5) but only 20 TMDB votes, 5 Trakt votes, and 0 RT/Metacritic gets its `score` **crushed to 30–50 out of 100** — because most Western-centric sources have near-zero coverage for South Indian cinema.
-
-This means your current fallback (`score / 10`) actively punishes exactly the movies your app prioritizes.
-
-### 2. Vote Count Black Hole
-
-[`parseVotes`](file:///home/mukes/dev/movies/backend_revised/src/services/mdblist.ts#L87-L93) returns `0` when IMDb votes are missing — no fallback to TMDB, Letterboxd, or any other source. Combined with your `ORDER BY rating DESC, votes DESC` sort in [lanes.ts](file:///home/mukes/dev/movies/backend_revised/src/services/lanes.ts#L68), regional titles with real engagement on other platforms get buried at the bottom of "Top Rated" lanes.
-
-### 3. Inconsistency Between Sync and Worker
-
-Your [sync script](file:///home/mukes/dev/movies/backend_revised/scripts/sync_catalog_to_d1.py#L178-L181) already uses Letterboxd-first logic for filtering (`val = lr if lr is not None else ir`), but the [worker's parseRating](file:///home/mukes/dev/movies/backend_revised/src/services/mdblist.ts#L76-L84) doesn't replicate this. Same movie can get different ratings depending on whether it came through the daily sync or an on-demand lookup.
+This document specifies the end-to-end rating calculation algorithm, source ingestion pipelines, and dynamic lane selection mechanics used in the platform.
 
 ---
 
-## What MDBList Gives You (That You're Throwing Away)
+## 1. Catalog Provenance & Data Ingestion
 
-| Source | Scale | Regional Coverage | Currently Used? |
-|---|---|---|---|
-| `imdb` | 0–10 | ✅ Good (but brigade-prone) | ✅ Primary |
-| `letterboxd` | 0–5 (normalized 0–100) | ✅ Growing among Indian cinephiles | ❌ Discarded |
-| `tmdb` | 0–100 | ⚠️ Low vote counts | ❌ Discarded |
-| `trakt` | 0–100 | ❌ Western-skewed | ❌ Discarded |
-| `tomatoes` | 0–100 | ❌ Near-zero for regional | ❌ Discarded |
-| `popcorn` | 0–100 | ❌ Near-zero for regional | ❌ Discarded |
-| `metacritic` | 0–100 | ❌ Near-zero for regional | ❌ Discarded |
-| `score` | 0–100 (weighted) | ⚠️ Deflated for regional | ⚠️ Fallback only |
-| `score_average` | 0–100 (unweighted) | ✅ Fairer | ❌ Discarded |
+### Upstream Sources
+All raw movie metadata and multi-platform ratings are ingested via the official REST API of **MDBList** (`https://api.mdblist.com/`):
+- **Tamil Regional Catalog**: List `218335` (contains 6,690+ Tamil titles).
+- **Pan-India Cross-Industry Catalog**: List `76398` (contains curated South Indian blockbusters across Tamil, Telugu, Malayalam, and Kannada).
 
-> [!IMPORTANT]
-> Every provider in `ratings[]` has a **pre-normalized `score` field (0–100)** alongside the raw `value`. This eliminates the scale-conversion headache — you can compare apples to apples across all sources.
-
----
-
-## Proposed Architecture: Weighted Multi-Source Rating
-
-### Core Idea
-
-Instead of one `rating` + one `votes` column, compute a **composite rating** from all available sources, weighted by relevance to your audience.
-
-### Rating Strategy: Priority Cascade with Adaptive Weights
-
-```
-┌─────────────────────────────────────────────────────┐
-│              For each title from MDBList             │
-│                                                     │
-│  Collect all sources where value != null             │
-│  Normalize each to 0–10 scale (use r.score / 10)    │
-│                                                     │
-│  Apply weight per source:                           │
-│    imdb:        0.45  (largest sample, most recognized)
-│    letterboxd:  0.30  (cinephile signal, less brigading)
-│    tmdb:        0.15  (decent metadata, decent coverage)
-│    trakt:       0.05  (niche, Western-skewed)          
-│    tomatoes:    0.03  (critic signal when available)   
-│    popcorn:     0.02  (audience RT when available)     
-│                                                     │
-│  Redistribute missing weights proportionally         │
-│  across available sources                            │
-│                                                     │
-│  composite_rating = Σ(normalized_score × weight)     │
-│  total_votes = Σ(votes across all available sources) │
-│                                                     │
-│  Apply minimum-votes confidence gate:               │
-│    if total_votes < 50 → flag as "low confidence"   │
-└─────────────────────────────────────────────────────┘
-```
-
-### Why These Weights?
-
-- **IMDb (0.45)**: Largest user base in India. Despite brigading on star vehicles, IMDb's own Bayesian filter handles most of it. Still the most recognized rating for Indian users.
-- **Letterboxd (0.30)**: The **key differentiator** for regional cinema quality. Less susceptible to fan-war brigading. Films like *Super Deluxe*, *Jai Bhim*, *Maharaja* get thoughtful review distributions here. This is your best signal for "is this actually a good Tamil film."
-- **TMDB (0.15)**: Rich multilingual metadata (Tamil posters, translated overviews). Low vote counts mean it shouldn't dominate, but it adds signal.
-- **Trakt/RT/Popcorn (0.10 combined)**: Useful for Hollywood/crossover titles, nearly absent for regional. The proportional redistribution handles this gracefully — when they're missing, their weight flows to IMDb + Letterboxd.
-
-### Schema Change
-
-```sql
--- Replace the single rating/votes with multi-source storage
-CREATE TABLE IF NOT EXISTS ratings (
-    imdb_id TEXT PRIMARY KEY,
-    -- Individual source ratings (0-10 normalized) + votes
-    imdb_rating REAL,
-    imdb_votes INTEGER DEFAULT 0,
-    letterboxd_rating REAL,
-    letterboxd_votes INTEGER DEFAULT 0,
-    tmdb_rating REAL,
-    tmdb_votes INTEGER DEFAULT 0,
-    trakt_rating REAL,
-    trakt_votes INTEGER DEFAULT 0,
-    -- Computed composite (what the API returns)
-    rating REAL NOT NULL DEFAULT 0,       -- weighted composite (0-10)
-    votes INTEGER NOT NULL DEFAULT 0,     -- sum of all source votes
-    source_count INTEGER NOT NULL DEFAULT 0, -- how many sources contributed
-    updated_at INTEGER NOT NULL
-);
-```
-
-> [!TIP]
-> Storing individual source ratings lets you recompute composites if you change weights later — without re-fetching from mdblist. It also enables a future "ratings breakdown" UI showing per-source scores.
-
-### The parseRating / parseVotes Replacement
-
-```typescript
-interface CompositeRating {
-  rating: number;       // 0-10 composite
-  votes: number;        // total across all sources
-  sourceCount: number;  // how many sources contributed
-  sources: {            // individual, for DB storage
-    imdb?: { rating: number; votes: number };
-    letterboxd?: { rating: number; votes: number };
-    tmdb?: { rating: number; votes: number };
-    trakt?: { rating: number; votes: number };
-  };
-}
-
-const SOURCE_WEIGHTS: Record<string, number> = {
-  imdb: 0.45,
-  letterboxd: 0.30,
-  tmdb: 0.15,
-  trakt: 0.05,
-  tomatoes: 0.03,
-  popcorn: 0.02,
-};
-
-static computeRating(item: MdblistItem): CompositeRating {
-  const sources: CompositeRating['sources'] = {};
-  let weightedSum = 0;
-  let totalWeight = 0;
-  let totalVotes = 0;
-
-  if (!Array.isArray(item.ratings)) {
-    // Last-resort fallback to score_average (fairer than score)
-    const avg = item.score_average ?? item.score;
-    const rating = (typeof avg === 'number' && avg > 0) ? Number((avg / 10).toFixed(1)) : 0;
-    return { rating, votes: 0, sourceCount: 0, sources: {} };
-  }
-
-  for (const r of item.ratings) {
-    const weight = SOURCE_WEIGHTS[r.source];
-    if (!weight || typeof r.score !== 'number') continue;
-
-    const normalized = r.score / 10; // r.score is 0-100 → 0-10
-    const votes = r.votes ?? 0;
-
-    weightedSum += normalized * weight;
-    totalWeight += weight;
-    totalVotes += votes;
-
-    if (['imdb', 'letterboxd', 'tmdb', 'trakt'].includes(r.source)) {
-      sources[r.source as keyof typeof sources] = { rating: Number(normalized.toFixed(1)), votes };
-    }
-  }
-
-  if (totalWeight === 0) {
-    const avg = item.score_average ?? item.score;
-    const rating = (typeof avg === 'number' && avg > 0) ? Number((avg / 10).toFixed(1)) : 0;
-    return { rating, votes: 0, sourceCount: 0, sources: {} };
-  }
-
-  // Redistribute to make weights sum to 1.0
-  const rating = Number((weightedSum / totalWeight).toFixed(1));
-  const sourceCount = Object.keys(sources).length;
-
-  return { rating, votes: totalVotes, sourceCount, sources };
-}
-```
-
-### How This Plays Out — Concrete Examples
-
-#### Tamil Film: *Maharaja* (2024)
-| Source | Raw Value | Normalized (0-10) | Votes | Weight |
-|---|---|---|---|---|
-| IMDb | 8.1 | 8.1 | 32,000 | 0.45 |
-| Letterboxd | 3.9/5 | 7.8 | 15,200 | 0.30 |
-| TMDB | 76 | 7.6 | 280 | 0.15 |
-| Trakt | – | – | – | – |
-| RT | – | – | – | – |
-
-**Current system**: `rating = 8.1, votes = 32,000` (IMDb only)
-**Proposed**: `rating = 7.9, votes = 47,480, sourceCount = 3`
-→ Minor rating change, but **47k total votes** vs 32k gives much better ranking signal.
-
-#### Tamil Film with no IMDb rating: *Maayam*
-| Source | Raw Value | Normalized (0-10) | Votes |
-|---|---|---|---|
-| IMDb | – | – | – |
-| TMDB | 70 | 7.0 | 45 |
-| Letterboxd | 3.2/5 | 6.4 | 120 |
-
-**Current system**: `rating = 0 (or score/10 fallback), votes = 0` → **invisible**
-**Proposed**: `rating = 6.6, votes = 165, sourceCount = 2` → visible and ranked fairly
-
-#### Hollywood Blockbuster: *Jaws*
-| Source | Normalized | Votes | Weight |
-|---|---|---|---|
-| IMDb | 8.1 | 673,852 | 0.45 |
-| Letterboxd | 8.0 | 876,082 | 0.30 |
-| TMDB | 7.6 | 10,114 | 0.15 |
-| Trakt | 7.8 | 14,033 | 0.05 |
-| RT Critics | 9.7 | 102 | 0.03 |
-| RT Audience | 9.1 | 41,105 | 0.02 |
-
-**Proposed**: `rating = 8.1, votes = 1,615,288, sourceCount = 6`
-→ All sources present; weights work as-is. No redistribution needed.
+### Two-Stage Ingestion Pipeline
+1. **Lane List Ingestion**:
+   - Fetches candidate items via `GET /lists/{list_id}/items?limit=1000&append_to_response=genres,poster,description,ratings`.
+   - Queries include server-side filters such as `sort=releasedigital&sort_order=desc` for digital releases or `filter_genre=comedy`.
+2. **Multi-Source Batch Enrichment**:
+   - MDBList list responses provide basic info, but full multi-platform ratings (Letterboxd, Rotten Tomatoes Critics, Popcorn Audience, Trakt, Metacritic) require the detailed movie endpoint.
+   - The sync script chunks unique IMDb IDs into batches of 100 and queries `POST https://api.mdblist.com/imdb/movie/` with `{'ids': chunk}`.
+   - Results are persisted locally in `/tmp/mdblist_batch_cache.json` to prevent quota exhaustion.
+3. **Database Layer (Local SQLite / Cloudflare D1)**:
+   - Ingested entities are normalized into:
+     - `movies`: Core metadata (IMDb ID, TMDB ID, title, year, release date, runtime, poster, backdrop, overview, normalized genre slugs).
+     - `ratings`: Cleaned ratings array JSON, Bayesian composite `rating_score`, total verified `votes`.
+     - `lane_entries`: Mapping of `(lane_id, imdb_id, rank)`.
+     - `v_movies`: Unified view joining `movies` and `ratings` for indexed querying and filtering.
 
 ---
 
-## API Changes
+## 2. Multi-Source Composite Rating Algorithm
 
-### Option A: Minimal — Drop-In Replacement (Recommended to start)
-Keep the API contract unchanged (`rating` + `vote_count`). The composite computation is internal. Frontend doesn't change at all.
+### Philosophy
+Standard single-source metrics (e.g. raw IMDb score) fail for regional cinema due to fan brigading, low sample sizes on Western aggregators, and uncorroborated astroturfing. The rating algorithm combines **calibrated qualification gates**, **platform relevance weighting**, and **source-count Bayesian shrinkage with an era curve**.
 
-### Option B: Enhanced — Expose Source Breakdown
-Add optional `rating_sources` in the detail endpoint:
-```json
-{
-  "rating": 7.9,
-  "vote_count": 47480,
-  "rating_source_count": 3,
-  "rating_sources": {
-    "imdb": { "rating": 8.1, "votes": 32000 },
-    "letterboxd": { "rating": 7.8, "votes": 15200 },
-    "tmdb": { "rating": 7.6, "votes": 280 }
-  }
-}
+Implementation references:
+- Python Sync Script: [sync_catalog_to_d1.py](file:///home/mukes/dev/movies/backend_revised/scripts/sync_catalog_to_d1.py#L65-L183)
+- Cloudflare Worker Service: [mdblist.ts](file:///home/mukes/dev/movies/backend_revised/src/services/mdblist.ts#L60-L167)
+
+---
+
+### Step 1: Qualification Gates (`MIN_VOTES`)
+To prevent single-user review attacks from polluting aggregate scores, each rating source must satisfy a minimum vote threshold before its score is admitted:
+
+| Provider | Min Votes | Rationale |
+|---|---|---|
+| `imdb` | **500** | Raised from 100 to eliminate micro-budget films with 15 brigaded 10/10 ratings |
+| `letterboxd` | **50** | Cinephile community engagement floor |
+| `tmdb` | **20** | General community engagement floor |
+| `trakt` | **20** | Media tracking user floor |
+| `popcorn` (RT Audience) | **50** | General audience floor |
+| `tomatoes` (RT Critics) | **10** | Verified critic review threshold |
+| `metacritic` | **5** | Professional review threshold |
+
+If a platform has fewer votes than its threshold, its rating and votes are discarded from the weighted average.
+
+---
+
+### Step 2: Platform Relevance Weighting
+Qualified ratings are normalized to a 10-point scale ($r_i = \text{score} / 10$) and assigned weights based on relevance to Indian regional cinema:
+
+| Provider | Weight ($w_i$) | Relevance Justification |
+|---|---|---|
+| `letterboxd` | **0.35** | Highest cinephile signal-to-noise ratio, highly resistant to automated brigading |
+| `imdb` | **0.30** | Primary volume driver and broad-audience benchmark |
+| `tmdb` | **0.15** | Neutral metadata community baseline |
+| `trakt` | **0.10** | Active media trackers |
+| `popcorn` | **0.05** | Auxiliary general audience signal |
+| `tomatoes` | **0.025** | Rare for regional titles, but high signal when available |
+| `metacritic` | **0.025** | Highly conservative academic/critic signal |
+
+The raw weighted average is:
+$$\text{raw\_rating} = \frac{\sum_{i=1}^{k} (r_i \times w_i)}{\sum_{i=1}^{k} w_i}$$
+$$\text{total\_votes} = \sum_{i=1}^{k} v_i$$
+
+---
+
+### Step 3: Source-Count Bayesian Shrinkage
+Raw ratings are pulled toward a global regional prior mean ($C = 6.8$) using a Bayesian dampening factor ($m$). The value of $m$ scales dynamically based on the number of **independent, qualified sources** ($N$):
+
 ```
-This enables a future "ratings breakdown" chip UI (like Letterboxd's own detail page).
+                       ┌── N = 1 source  ──> m = 10,000 (Severe skepticism)
+                       │
+m baseline by sources ─┼── N = 2 sources ──> m = 3,000  (Moderate corroboration)
+                       │
+                       └── N >= 3 sources ─> m = 1,000  (Cross-platform consensus)
+```
+
+- **Single-Source Protection**: An obscure indie with 600 votes only on IMDb and 0 on Letterboxd/TMDB gets $m = 10,000$. Even with a raw 9.5 rating, its score shrinks to ~7.0.
+- **Corroborated Blockbusters**: A movie reviewed across IMDb, Letterboxd, and TMDB gets $m = 1,000$, allowing its true score to emerge with minimal resistance.
 
 ---
 
-## What Changes, File by File
+### Step 4: Era Curve Calibration (Recency Penalty & Classic Boost)
+Movie age is calculated in fractional years:
+$$\text{age} = \max\left(0, \frac{\text{now} - \text{release\_date}}{365.25}\right)$$
 
-| File | Change |
-|---|---|
-| [`schema.sql`](file:///home/mukes/dev/movies/backend_revised/schema.sql) | Expand `ratings` table with per-source columns |
-| [`types/upstream.ts`](file:///home/mukes/dev/movies/backend_revised/src/types/upstream.ts) | Add `score_average` to `MdblistItem` |
-| [`services/mdblist.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/mdblist.ts) | Replace `parseRating`/`parseVotes` with `computeRating` |
-| [`services/catalog.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/catalog.ts) | Update upsert to store per-source + composite fields |
-| [`scripts/sync_catalog_to_d1.py`](file:///home/mukes/dev/movies/backend_revised/scripts/sync_catalog_to_d1.py) | Mirror the same composite logic in Python for daily sync |
-| [`services/lanes.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/lanes.ts) | No change needed — `ORDER BY rating DESC, votes DESC` works better with composite votes |
-| [`routes/movies.ts`](file:///home/mukes/dev/movies/backend_revised/src/routes/movies.ts) | Optional: expose `rating_sources` in detail endpoint |
+1. **Recency Penalty (Exponential Decay)**:
+   Protects against opening-window fan hype and review bombing during the first 30–90 days:
+   $$\text{penalty} = 0.5 \times e^{-\text{age} \times 1.5}$$
+2. **Classic Boost (Survivorship Curve)**:
+   Accounts for archival classics (pre-2005) whose online vote volume is artificially constrained by internet penetration in India:
+   $$\text{boost} = 0.5 \times \text{clamp}\left(\frac{\text{age} - 3}{25}, 0, 1\right)$$
+3. **Anti-Double-Penalty Factor**:
+   If a recent movie has already been cross-corroborated across 3+ platforms, the recency penalty is softened:
+   $$\text{rawEra} = \text{clamp}(1.0 + \text{penalty} - \text{boost}, 0.5, 1.5)$$
+   $$\text{eraModifier} = 1.0 + \frac{\text{rawEra} - 1.0}{N}$$
+   $$m \leftarrow m \times \text{eraModifier}$$
 
 ---
 
-## Open Questions for You
+### Step 5: Final Score Formula
+$$\text{rating\_score} = \text{round}\left( \frac{\text{total\_votes}}{\text{total\_votes} + m} \times \text{raw\_rating} + \frac{m}{\text{total\_votes} + m} \times C, 1 \right)$$
 
-1. **Weights**: The proposed IMDb 0.45 / Letterboxd 0.30 / TMDB 0.15 split — does this match your intuition for your audience? If you want Letterboxd to dominate for Tamil content, we could bump it to 0.40 and drop IMDb to 0.35.
+- **Unverified Fallback Stripping**: If no sources meet their minimum vote gates ($N = 0$), the movie receives `rating_score = 0.0` and `votes = 0`. Arbitrary fallback scores (`score_average / 10`) are strictly banned to prevent unverified titles from ranking at #1.
 
-2. **`score_average` as last-resort fallback**: When no individual sources have ratings, should we fall back to mdblist's `score_average` (unweighted mean — fairer than `score` for regional content) or just show `0`?
+---
 
-3. **API surface**: Start with Option A (internal-only, no frontend change) or go directly to Option B (expose per-source breakdown)?
+## 3. Dynamic Lane Selection & Ranking
 
-4. **Migration**: The schema change adds columns to `ratings`. This needs a D1 migration. Want me to generate that alongside the code changes?
+All lanes apply common quality baselines before lane-specific logic:
+- `poster_path != ''` (must have valid artwork)
+- `runtime >= 85` minutes (filters out short films and clips)
+- Excludes genres: `documentary`, `short`, `animation`
+
+Implementation reference: [sync_catalog_to_d1.py#L502-L574](file:///home/mukes/dev/movies/backend_revised/scripts/sync_catalog_to_d1.py#L502-L574)
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Dynamic Lane Matrix                             │
+├───────────────┬──────────────┬──────────────┬──────────────────────────┤
+│ Lane ID       │ Window       │ Vote Floor   │ Ranking Criterion        │
+├───────────────┼──────────────┼──────────────┼──────────────────────────┤
+│ trending      │ Last 180 d   │ >= 400 total │ Vote Velocity (dv/dt)    │
+│ new_releases  │ Last 90 d    │ >= 400 IMDb  │ release_date DESC        │
+│ new_ott       │ Last 180 d   │ >= 400 total │ MDBList releasedigital   │
+│ top_rated     │ All-time     │ >= 5000      │ rating_score DESC        │
+│ comedy        │ All-time     │ >= 500       │ votes DESC               │
+│ pan_india     │ All-time     │ >= 5000      │ votes DESC               │
+└───────────────┴──────────────┴──────────────┴──────────────────────────┤
+```
+
+---
+
+### Detailed Lane Mechanics
+
+### 1. Trending Now (`trending`)
+- **Objective**: Surface movies currently capturing audience attention without letting multi-year-old blockbusters (*Leo*, *Vikram*) camp in Trending permanently.
+- **Window**: Released in the last 180 days ($\text{today} - 180\text{d} \le \text{rel\_date} \le \text{today}$).
+- **Language**: `ta` (Original Tamil).
+- **Gate**: $\text{IMDb Votes} + \text{Letterboxd Votes} \ge 400$.
+- **Vote Velocity Formula ($dv/dt$)**:
+  $$\text{Velocity} = \frac{1.5 \times \text{Letterboxd Votes} + \text{IMDb Votes}}{\text{Age in Days} + 21}$$
+  - **1.5x Multiplier on Letterboxd**: Letterboxd logs reflect active daily viewings by cinephiles rather than passive legacy votes.
+  - **+21 Dampening Denominator**: Prevents asymptotes on Days 1–3 where a movie with 400 votes on Day 1 would yield an artificial velocity of 400/1 = 400, unfairly beating a theatrical hit with 60,000 votes on Day 14.
+  - **Result**: Breakout hits (*Jailer 2*, *Dorothy*, *Baththa*) rise to ranks 1–3, while older releases naturally decelerate.
+
+---
+
+### 2. New in Theaters (`new_releases`)
+- **Objective**: Track new theatrical releases available to watch right now.
+- **Window**: Theatrical release within the last 90 days ($\text{today} - 90\text{d} \le \text{rel\_date} \le \text{today}$).
+- **Language**: `ta` (Original Tamil).
+- **Anti-Indie / Anti-Phantom Gate**:
+  $$\text{IMDb Votes} \ge 400 \quad\text{OR}\quad \text{Letterboxd Votes} \ge 200$$
+  - Every legitimate Indian theatrical or major OTT release crosses 400 IMDb votes during its opening weekend.
+  - Micro-budget festival screenings with negligible audience footprint (e.g. 19 votes globally) are cleanly eliminated.
+- **Ranking**: Strictly ordered by `release_date DESC` (newest first: *Drones*, *Jailer 2*, *All Pass*).
+
+---
+
+### 3. New on OTT (`new_ott`)
+- **Objective**: Track newly arrived streaming and digital releases.
+- **Source**: MDBList query `sort=releasedigital&sort_order=desc`.
+- **Ranking Mechanism**:
+  - MDBList internally indexes TMDB digital availability timestamps.
+  - The lane preserves MDBList's server-side digital release sequence while enforcing our quality gate ($\text{votes} \ge 400$, $\text{runtime} \ge 85$, `language != 'en'`).
+  - Movies that have only had theatrical releases (*Anbil Avan*) are excluded because MDBList's `releasedigital` index excludes them.
+
+---
+
+### 4. All-Time Masterpieces (`top_rated`)
+- **Objective**: Hall-of-fame lane for the greatest regional films.
+- **Gate**: Total verified votes $\ge 5,000$ and composite `rating_score >= 7.0`.
+- **Ranking**: Sorted by `rating_score DESC`, then `votes DESC`.
+- **Astroturf Resistance**: The source-count Bayesian shrinkage ensures that only films with multi-source consensus (*Baththa*, *Kadaisi Vivasayi*, *Anbe Sivam*, *Nayakan*, *Super Deluxe*) make the cut.
+
+---
+
+### 5. Popular Comedy (`comedy`)
+- **Objective**: Comfort watch genre lane.
+- **Gate**: Genre slug contains `comedy`, total votes $\ge 500$, `language != 'en'`.
+- **Ranking**: Sorted by all-time `votes DESC` (*Chennai Express*, *Aavesham*, *Jailer*).
+
+---
+
+### 6. South Indian Blockbusters (`pan_india`)
+- **Objective**: High-spectacle cross-industry cinema (Tamil, Telugu, Malayalam, Kannada).
+- **Source**: MDBList List `76398`.
+- **Gate**: Total votes $\ge 5,000$.
+- **Ranking**: Sorted by all-time `votes DESC` (*RRR*, *Jai Bhim*, *Bāhubali*).
+
+---
+
+## 4. Serving Architecture: Carousel vs. "Show All" Grid
+
+```
+┌────────────────────────────────────────────────────────┐
+│                   Cloudflare Worker                    │
+├────────────────────────────────────────────────────────┤
+│ GET /api/v1/dashboard/tamil                            │
+│  -> Homepage view                                      │
+│  -> Returns top 25 items per lane for carousel speed   │
+│  -> Cached at edge (TTL: 12h)                          │
+├────────────────────────────────────────────────────────┤
+│ GET /api/v1/dashboard/tamil/lanes/:lane_id             │
+│  -> "Show All" grid view                               │
+│  -> Paginates full lane pool (100 items / page)        │
+│  -> D1 SQL filters: genre, year, min_rating, sort_by   │
+└────────────────────────────────────────────────────────┘
+```
+
+1. **Homepage Carousels** ([dashboard.ts#L33](file:///home/mukes/dev/movies/backend_revised/src/routes/dashboard.ts#L33)):
+   - Serves the top 20–30 ranked items per lane.
+   - Prevents DOM bloat and optimizes mobile bandwidth.
+2. **"Show All" Paginated Grid** ([dashboard.ts#L58](file:///home/mukes/dev/movies/backend_revised/src/routes/dashboard.ts#L58)):
+   - Retains the entire qualified pool in `lane_entries` (e.g. 500–1,000 titles).
+   - Allows users to drill in, paginate with infinite scroll, and re-sort by `popular`, `rating`, `recent`, or `votes`.

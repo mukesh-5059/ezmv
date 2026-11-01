@@ -7,8 +7,10 @@ Zero web scraping, zero curl_cffi dependency, 100% official REST API.
 """
 
 import argparse
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone, timedelta
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -63,7 +65,7 @@ def normalize_genre_slugs(raw: str) -> list[str]:
     return [key.replace(" ", "-")]
 
 MIN_VOTES = {
-    "imdb": 100,
+    "imdb": 500,
     "letterboxd": 50,
     "tomatoes": 10,
     "popcorn": 50,
@@ -90,6 +92,7 @@ def compute_composite_rating(item: dict) -> tuple[float, int, str]:
     total_weight = 0.0
     total_votes = 0
     cleaned_ratings = []
+    qualified_sources = set()
 
     for r in raw_ratings:
         src = r.get("source")
@@ -121,25 +124,70 @@ def compute_composite_rating(item: dict) -> tuple[float, int, str]:
             weighted_sum += normalized * weight
             total_weight += weight
             total_votes += votes
+            qualified_sources.add(src)
 
     ratings_json = json.dumps(cleaned_ratings)
 
-    if total_weight > 0:
-        composite_rating = round(weighted_sum / total_weight, 1)
-        return composite_rating, total_votes, ratings_json
+    if total_weight > 0 and len(qualified_sources) > 0:
+        raw_rating = weighted_sum / total_weight
+        num_sources = len(qualified_sources)
 
-    fallback_score = item.get("score_average")
-    if fallback_score is not None and isinstance(fallback_score, (int, float)) and fallback_score > 0:
-        return round(fallback_score / 10.0, 1), 0, ratings_json
+        if num_sources == 1:
+            m = 10000.0
+        elif num_sources == 2:
+            m = 3000.0
+        else:
+            m = 1000.0
+
+        # Era modifier
+        now = datetime.now(timezone.utc)
+        current_year = now.year
+        age = None
+        rel_date_str = item.get("release_date") or item.get("released")
+        if rel_date_str:
+            try:
+                parts = str(rel_date_str).strip().split("-")
+                if len(parts) >= 1 and len(parts[0]) == 4:
+                    y = int(parts[0])
+                    mth = int(parts[1]) if len(parts) > 1 else 1
+                    d = int(parts[2]) if len(parts) > 2 else 1
+                    rel_dt = datetime(y, mth, d, tzinfo=timezone.utc)
+                    age = (now - rel_dt).days / 365.25
+            except Exception:
+                pass
+
+        if age is None:
+            y = item.get("release_year") or item.get("year")
+            if y:
+                try:
+                    age = float(current_year - int(y))
+                except Exception:
+                    pass
+
+        if age is not None:
+            age = max(0.0, age)
+            penalty = 0.5 * math.exp(-age * 1.5)
+            boost = 0.5 * max(0.0, min(1.0, (age - 3.0) / 25.0))
+            raw_era = max(0.5, min(1.5, 1.0 + penalty - boost))
+            era_modifier = 1.0 + (raw_era - 1.0) / num_sources
+            m *= era_modifier
+
+        C = 6.8
+        rating_score = round(
+            (total_votes / (total_votes + m)) * raw_rating + (m / (total_votes + m)) * C,
+            1,
+        )
+        return rating_score, total_votes, ratings_json
 
     return 0.0, 0, ratings_json
+
 
 LANES_CONFIG = [
     {
         "lane_id": "trending",
         "title": "Trending Now",
         "list_id": 218335,
-        "query": "sort=imdbpopular&sort_order=asc",
+        "query": "sort=tmdbpopular&sort_order=desc",
         "exclude_lang": "en",
     },
     {
@@ -169,7 +217,7 @@ LANES_CONFIG = [
         "lane_id": "comedy",
         "title": "Popular Comedy",
         "list_id": 218335,
-        "query": "sort=imdbpopular&sort_order=asc&filter_genre=comedy",
+        "query": "sort=tmdbpopular&sort_order=desc&filter_genre=comedy",
         "exclude_lang": "en",
     },
     {
@@ -264,25 +312,56 @@ def fetch_batch_details(api_key: str, imdb_ids: list[str]) -> dict[str, dict]:
     if not imdb_ids:
         return lookup
 
+    cache_file = Path("/tmp/mdblist_batch_cache.json")
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                lookup = json.load(f)
+            missing = [iid for iid in imdb_ids if iid not in lookup]
+            print(f"  [Cache] Loaded {len(lookup)} items from {cache_file}. {len(missing)} missing.")
+            if not missing:
+                return lookup
+            imdb_ids = missing
+        except Exception as e:
+            print(f"  [Cache Warning] Could not load cache: {e}")
+
     url = f"{MDBLIST_BASE_URL}/imdb/movie/?apikey={api_key}"
     chunk_size = 100
-    for i in range(0, len(imdb_ids), chunk_size):
-        chunk = imdb_ids[i:i + chunk_size]
+    chunks = [imdb_ids[i:i + chunk_size] for i in range(0, len(imdb_ids), chunk_size)]
+
+    def fetch_chunk(chunk_data):
+        idx, chunk = chunk_data
         try:
             req = urllib.request.Request(
                 url,
                 data=json.dumps({"ids": chunk}).encode("utf-8"),
                 headers={"Content-Type": "application/json", "User-Agent": "MDBListSync/1.0"}
             )
-            with urllib.request.urlopen(req, timeout=15) as res:
-                items = json.loads(res.read().decode("utf-8"))
-                for item in items:
-                    iid = item.get("imdbid") or item.get("ids", {}).get("imdb")
-                    if iid:
-                        lookup[iid] = item
+            with urllib.request.urlopen(req, timeout=30) as res:
+                return json.loads(res.read().decode("utf-8"))
         except Exception as e:
-            print(f"  [Warning] Batch ratings fetch failed for chunk {i//chunk_size + 1}: {e}")
+            print(f"  [Warning] Batch ratings fetch failed for chunk {idx + 1}: {e}")
+            return []
+
+    print(f"  -> Concurrently fetching {len(chunks)} chunks of batch ratings...")
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_chunk, (i, ch)) for i, ch in enumerate(chunks)]
+        for fut in as_completed(futures):
+            items = fut.result()
+            for item in items:
+                iid = item.get("imdbid") or item.get("ids", {}).get("imdb")
+                if iid:
+                    lookup[iid] = item
+
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(lookup, f)
+        print(f"  [Cache] Saved {len(lookup)} items to {cache_file}.")
+    except Exception as e:
+        print(f"  [Cache Warning] Could not save cache: {e}")
+
     return lookup
+
 
 
 def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
@@ -321,77 +400,187 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
     print(f"  -> Fetching full multi-source ratings for {len(all_unique_ids)} unique titles via MDBList batch...")
     batch_details = fetch_batch_details(api_key, list(all_unique_ids))
 
+    now_dt = datetime.now(timezone.utc)
+    cutoff_180d = now_dt - timedelta(days=180)
+    cutoff_90d = now_dt - timedelta(days=90)
+
+    # 1. Ingest all unique movies and ratings into catalog
+    catalog: dict[str, dict] = {}
     for lane_id, valid_movies in lanes_data:
-        statements.append(f"DELETE FROM lane_entries WHERE lane_id = '{lane_id}';")
-
-        for rank, item in enumerate(valid_movies, start=1):
+        for item in valid_movies:
             imdb_id = item.get("imdb_id") or item.get("ids", {}).get("imdb")
+            if not imdb_id or imdb_id in catalog:
+                continue
             full_item = {**item, **batch_details.get(imdb_id, {})}
+            rating_score, votes, ratings_json = compute_composite_rating(full_item)
+            poster = full_item.get("poster") or item.get("poster") or ""
+            runtime = full_item.get("runtime") or item.get("runtime") or 0
+            lang = full_item.get("language") or item.get("language") or ""
+            rel_str = full_item.get("released") or full_item.get("release_date") or item.get("release_date") or ""
 
-            # 1. Movie & Ratings metadata (upsert once per unique movie)
-            if imdb_id not in seen_movies:
-                seen_movies.add(imdb_id)
+            rel_dt = None
+            if rel_str and len(rel_str) >= 10:
+                try:
+                    rel_dt = datetime.strptime(rel_str[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                except Exception:
+                    pass
 
-                tmdb_id = item.get("id") or item.get("ids", {}).get("tmdb")
-                tmdb_id_sql = str(int(tmdb_id)) if tmdb_id else "NULL"
-                title = escape_sql(item.get("title", "Unknown"))
-                year = item.get("release_year")
-                year_sql = str(int(year)) if year else "NULL"
-                rel_date = item.get("release_date") or (f"{year}-01-01" if year else "")
-                release_date_sql = escape_sql(rel_date)
-                poster_sql = escape_sql(item.get("poster") or "")
-                backdrop_sql = escape_sql("")
-                overview_sql = escape_sql(item.get("description") or "")
-                runtime = item.get("runtime")
-                runtime_sql = str(int(runtime)) if runtime else "NULL"
+            raw_genres = item.get("genres", [])
+            seen_genres = set()
+            slugs = []
+            for g in raw_genres:
+                raw_str = g if isinstance(g, str) else (g.get("name") or g.get("title") or g.get("slug") or "")
+                if not raw_str or not isinstance(raw_str, str):
+                    continue
+                for slug in normalize_genre_slugs(raw_str):
+                    if slug and slug not in seen_genres:
+                        seen_genres.add(slug)
+                        slugs.append(slug)
 
-                raw_genres = item.get("genres", [])
-                seen_genres = set()
-                slugs = []
-                for g in raw_genres:
-                    raw_str = g if isinstance(g, str) else (g.get("name") or g.get("title") or g.get("slug") or "")
-                    if not raw_str or not isinstance(raw_str, str):
-                        continue
-                    for slug in normalize_genre_slugs(raw_str):
-                        if slug and slug not in seen_genres:
-                            seen_genres.add(slug)
-                            slugs.append(slug)
-                genres_sql = escape_sql(json.dumps(slugs))
+            is_excluded_genre = any(s in ("documentary", "short", "animation") for s in slugs)
+            imdb_votes = next((int(r.get("votes") or 0) for r in (full_item.get("ratings") or []) if r.get("source") == "imdb"), 0)
+            lb_votes = next((int(r.get("votes") or 0) for r in (full_item.get("ratings") or []) if r.get("source") == "letterboxd"), 0)
 
-                movie_stmt = (
-                    f"INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, updated_at) "
-                    f"VALUES ('{imdb_id}', {tmdb_id_sql}, 'movie', {title}, {year_sql}, {release_date_sql}, {poster_sql}, {backdrop_sql}, {overview_sql}, {runtime_sql}, {genres_sql}, {now}) "
-                    f"ON CONFLICT(imdb_id) DO UPDATE SET "
-                    f"tmdb_id = COALESCE(excluded.tmdb_id, movies.tmdb_id), "
-                    f"title = excluded.title, "
-                    f"year = COALESCE(excluded.year, movies.year), "
-                    f"release_date = CASE WHEN excluded.release_date != '' THEN excluded.release_date ELSE movies.release_date END, "
-                    f"poster_path = CASE WHEN excluded.poster_path != '' THEN excluded.poster_path ELSE movies.poster_path END, "
-                    f"overview = CASE WHEN excluded.overview != '' THEN excluded.overview ELSE movies.overview END, "
-                    f"genres = excluded.genres, "
-                    f"updated_at = excluded.updated_at;"
-                )
-                statements.append(movie_stmt)
+            catalog[imdb_id] = {
+                "imdb_id": imdb_id,
+                "full_item": full_item,
+                "item": item,
+                "rating_score": rating_score,
+                "votes": votes,
+                "ratings_json": ratings_json,
+                "poster": poster,
+                "runtime": runtime,
+                "lang": lang,
+                "rel_str": rel_str,
+                "rel_dt": rel_dt,
+                "slugs": slugs,
+                "is_excluded_genre": is_excluded_genre,
+                "imdb_votes": imdb_votes,
+                "lb_votes": lb_votes,
+            }
 
-                # Composite multi-source rating & votes with raw JSON
-                rating_score, votes, ratings_json = compute_composite_rating(full_item)
-                ratings_sql = escape_sql(ratings_json)
+            # Generate movie & rating upsert statements
+            tmdb_id = item.get("id") or item.get("ids", {}).get("tmdb")
+            tmdb_id_sql = str(int(tmdb_id)) if tmdb_id else "NULL"
+            title = escape_sql(item.get("title", "Unknown"))
+            year = item.get("release_year") or full_item.get("year")
+            year_sql = str(int(year)) if year else "NULL"
+            rel_date_sql = escape_sql(rel_str[:10] if rel_str else (f"{year}-01-01" if year else ""))
+            poster_sql = escape_sql(poster)
+            backdrop_sql = escape_sql(item.get("backdrop") or full_item.get("backdrop") or "")
+            overview_sql = escape_sql(item.get("description") or full_item.get("description") or "")
+            runtime_sql = str(int(runtime)) if runtime else "NULL"
+            genres_sql = escape_sql(json.dumps(slugs))
 
-                rating_stmt = (
-                    f"INSERT INTO ratings (imdb_id, ratings, rating_score, votes, updated_at) "
-                    f"VALUES ('{imdb_id}', {ratings_sql}, {rating_score}, {votes}, {now}) "
-                    f"ON CONFLICT(imdb_id) DO UPDATE SET "
-                    f"ratings = excluded.ratings, "
-                    f"rating_score = excluded.rating_score, "
-                    f"votes = excluded.votes, "
-                    f"updated_at = excluded.updated_at;"
-                )
-                statements.append(rating_stmt)
+            movie_stmt = (
+                f"INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, updated_at) "
+                f"VALUES ('{imdb_id}', {tmdb_id_sql}, 'movie', {title}, {year_sql}, {rel_date_sql}, {poster_sql}, {backdrop_sql}, {overview_sql}, {runtime_sql}, {genres_sql}, {now}) "
+                f"ON CONFLICT(imdb_id) DO UPDATE SET "
+                f"tmdb_id = COALESCE(excluded.tmdb_id, movies.tmdb_id), "
+                f"title = excluded.title, "
+                f"year = COALESCE(excluded.year, movies.year), "
+                f"release_date = CASE WHEN excluded.release_date != '' THEN excluded.release_date ELSE movies.release_date END, "
+                f"poster_path = CASE WHEN excluded.poster_path != '' THEN excluded.poster_path ELSE movies.poster_path END, "
+                f"overview = CASE WHEN excluded.overview != '' THEN excluded.overview ELSE movies.overview END, "
+                f"genres = excluded.genres, "
+                f"updated_at = excluded.updated_at;"
+            )
+            statements.append(movie_stmt)
 
-            # 2. Lane entry rank
+            ratings_sql = escape_sql(ratings_json)
+            rating_stmt = (
+                f"INSERT INTO ratings (imdb_id, ratings, rating_score, votes, updated_at) "
+                f"VALUES ('{imdb_id}', {ratings_sql}, {rating_score}, {votes}, {now}) "
+                f"ON CONFLICT(imdb_id) DO UPDATE SET "
+                f"ratings = excluded.ratings, "
+                f"rating_score = excluded.rating_score, "
+                f"votes = excluded.votes, "
+                f"updated_at = excluded.updated_at;"
+            )
+            statements.append(rating_stmt)
+
+    # 2. Generate Local Rule-Based Dynamic Lanes
+    lanes_items: dict[str, list[str]] = {}
+
+    # Trending: Last 180 days, lang=ta, rt>=85, !excluded, votes>=400, sorted by velocity
+    trending_cands = []
+    for iid, m in catalog.items():
+        if m["lang"] != "ta" or not m["poster"] or m["runtime"] < 85 or m["is_excluded_genre"]:
+            continue
+        if not m["rel_dt"] or m["rel_dt"] < cutoff_180d or m["rel_dt"] > now_dt:
+            continue
+        if (m["imdb_votes"] + m["lb_votes"]) < 400:
+            continue
+        age_days = max(1, (now_dt - m["rel_dt"]).days)
+        vel = (m["lb_votes"] * 1.5 + m["imdb_votes"]) / (age_days + 21)
+        trending_cands.append((vel, iid))
+    trending_cands.sort(key=lambda x: x[0], reverse=True)
+    lanes_items["trending"] = [c[1] for c in trending_cands[:100]]
+
+    # New Releases: Last 90 days, lang=ta, rt>=85, !excluded, votes>=400 (or lb>=200), sorted by rel_date desc
+    nr_cands = []
+    for iid, m in catalog.items():
+        if m["lang"] != "ta" or not m["poster"] or m["runtime"] < 85 or m["is_excluded_genre"]:
+            continue
+        if not m["rel_dt"] or m["rel_dt"] < cutoff_90d or m["rel_dt"] > now_dt:
+            continue
+        if m["imdb_votes"] < 400 and m["lb_votes"] < 200:
+            continue
+        nr_cands.append((m["rel_dt"], iid))
+    nr_cands.sort(key=lambda x: x[0], reverse=True)
+    lanes_items["new_releases"] = [c[1] for c in nr_cands[:100]]
+
+    # New on OTT: Preserve MDBList's internal sort=releasedigital order, applying quality gates
+    ott_movies = next((vm for lid, vm in lanes_data if lid == "new_ott"), [])
+    ott_cands = []
+    for item in ott_movies:
+        iid = item.get("imdb_id") or item.get("ids", {}).get("imdb")
+        m = catalog.get(iid)
+        if not m or m["lang"] == "en" or not m["poster"] or m["runtime"] < 85 or m["is_excluded_genre"]:
+            continue
+        if m["rel_dt"] and m["rel_dt"] > now_dt:
+            continue
+        if m["votes"] < 400:
+            continue
+        ott_cands.append(iid)
+    lanes_items["new_ott"] = ott_cands[:100]
+
+    # Top Rated: lang!=en, poster, votes>=5000, rating_score>=7.0, sorted by rating_score desc, votes desc
+    top_cands = []
+    for iid, m in catalog.items():
+        if m["lang"] == "en" or not m["poster"] or m["votes"] < 5000 or m["rating_score"] < 7.0:
+            continue
+        top_cands.append((m["rating_score"], m["votes"], iid))
+    top_cands.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    lanes_items["top_rated"] = [c[2] for c in top_cands[:100]]
+
+    # Comedy: lang!=en, poster, comedy in genres, votes>=500, sorted by votes desc
+    comedy_cands = []
+    for iid, m in catalog.items():
+        if m["lang"] == "en" or not m["poster"] or "comedy" not in m["slugs"] or m["votes"] < 500:
+            continue
+        comedy_cands.append((m["votes"], iid))
+    comedy_cands.sort(key=lambda x: x[0], reverse=True)
+    lanes_items["comedy"] = [c[1] for c in comedy_cands[:100]]
+
+    # Pan India: Blockbusters from list 76398
+    pan_india_cands = []
+    pan_movies = next((vm for lid, vm in lanes_data if lid == "pan_india"), [])
+    for item in pan_movies:
+        iid = item.get("imdb_id") or item.get("ids", {}).get("imdb")
+        m = catalog.get(iid)
+        if m and m["poster"] and m["votes"] >= 5000:
+            pan_india_cands.append((m["votes"], iid))
+    pan_india_cands.sort(key=lambda x: x[0], reverse=True)
+    lanes_items["pan_india"] = [c[1] for c in pan_india_cands[:100]]
+
+    # 3. Write lane_entries statements
+    for lane_id, item_ids in lanes_items.items():
+        statements.append(f"DELETE FROM lane_entries WHERE lane_id = '{lane_id}';")
+        for rank, iid in enumerate(item_ids, start=1):
             lane_stmt = (
                 f"INSERT INTO lane_entries (lane_id, imdb_id, rank, updated_at) "
-                f"VALUES ('{lane_id}', '{imdb_id}', {rank}, {now}) "
+                f"VALUES ('{lane_id}', '{iid}', {rank}, {now}) "
                 f"ON CONFLICT(lane_id, imdb_id) DO UPDATE SET "
                 f"rank = excluded.rank, "
                 f"updated_at = excluded.updated_at;"
