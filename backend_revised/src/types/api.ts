@@ -72,6 +72,36 @@ export interface ListFilters {
   min_rating?: number;
 }
 
+export interface TraktListSummary {
+  id: string | number;
+  name: string;
+  item_count: number;
+  likes: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  page: number;
+  total_pages: number;
+  total_items: number;
+  has_more: boolean;
+  next_page: number | null;
+}
+
+export type PaginatedMoviesResponse = PaginatedResponse<MovieSummary>;
+export type PaginatedListsResponse = PaginatedResponse<TraktListSummary>;
+
+export interface PaginatedLaneResponse extends PaginatedMoviesResponse {
+  id: string;
+  title: string;
+}
+
+export interface DashboardResponse {
+  id: string;
+  title: string;
+  lanes: PaginatedLaneResponse[];
+}
+
 export interface SubtitleTrack {
   name: string;
   language: string;

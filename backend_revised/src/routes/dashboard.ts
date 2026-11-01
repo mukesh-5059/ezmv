@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { Bindings, MovieSummary, Variables, LaneFilters } from '../types';
+import { Bindings, DashboardResponse, LaneFilters, PaginatedLaneResponse, Variables } from '../types';
 import { LanesService } from '../services/lanes';
 import { CacheService } from '../services/cache';
 import { DASHBOARDS } from '../config/lanes';
@@ -28,21 +28,12 @@ dashboardRouter.get('/:dashboard_id', async (c) => {
 
   const lanesService = new LanesService(c.env);
   const tCatalog = Date.now();
-  const lanesOutput = await Promise.all(
-    dashboard.lanes.map(async (lane) => {
-      const movies = await lanesService.getLaneItems(lane.id, 100, 0);
-      return {
-        id: lane.id,
-        title: lane.title,
-        items: movies,
-        has_more: movies.length >= 100,
-        next_page: movies.length >= 100 ? 2 : null,
-      };
-    })
+  const lanesOutput: PaginatedLaneResponse[] = await Promise.all(
+    dashboard.lanes.map((lane) => lanesService.getLaneItems(lane, 1, 100))
   );
   if (trace) trace.add(`d1: RESOLVE ${dashboard.lanes.length} LANES in ${Date.now() - tCatalog}ms`);
 
-  const responsePayload = {
+  const responsePayload: DashboardResponse = {
     id: dashboard.id,
     title: dashboard.title,
     lanes: lanesOutput,
@@ -64,7 +55,6 @@ dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
 
   const page = Math.max(1, Number(c.req.query('page') || 1));
   const PAGE_SIZE = 100;
-  const offset = (page - 1) * PAGE_SIZE;
 
   const typeParam = (c.req.query('type') || c.req.query('media_type'))?.trim().toLowerCase();
   const media_type: LaneFilters['media_type'] = (typeParam === 'movie' || typeParam === 'tv') ? typeParam : 'all';
@@ -100,23 +90,13 @@ dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
   }
 
   const lanesService = new LanesService(c.env);
-  const items = await lanesService.getLaneItems(laneId, PAGE_SIZE, offset, filters, trace);
-  const hasMore = items.length >= PAGE_SIZE;
+  const result = await lanesService.getLaneItems(lane, page, PAGE_SIZE, filters, trace);
 
-  const responsePayload = {
-    id: lane.id,
-    title: lane.title,
-    page,
-    items,
-    has_more: hasMore,
-    next_page: hasMore ? page + 1 : null,
-  };
-
-  if (items.length > 0) {
-    await cacheService.set(cacheKey, responsePayload, 43200);
+  if (result.items.length > 0) {
+    await cacheService.set(cacheKey, result, 43200);
   }
 
-  return c.json(responsePayload, 200, {
+  return c.json(result, 200, {
     'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
   });
 });
