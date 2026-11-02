@@ -6,6 +6,7 @@
     "types": ["@cloudflare/workers-types"],
     "strict": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "lib": ["ES2022"]
   },
   "include": ["src/**/*"]

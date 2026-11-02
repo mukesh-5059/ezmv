@@ -460,8 +460,9 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
             }
 
             # Generate movie & rating upsert statements
+            media_type = "tv" if (item.get("type") == "show" or full_item.get("type") == "show") else "movie"
             tmdb_id = item.get("id") or item.get("ids", {}).get("tmdb")
-            tmdb_id_sql = str(int(tmdb_id)) if tmdb_id else "NULL"
+            tmdb_id_sql = f"'{media_type}:{int(tmdb_id)}'" if tmdb_id else "NULL"
             title = escape_sql(item.get("title", "Unknown"))
             year = item.get("release_year") or full_item.get("year")
             year_sql = str(int(year)) if year else "NULL"
@@ -474,9 +475,10 @@ def generate_sync_sql(api_key: str, out_sql_file: Path) -> int:
 
             movie_stmt = (
                 f"INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, updated_at) "
-                f"VALUES ('{imdb_id}', {tmdb_id_sql}, 'movie', {title}, {year_sql}, {rel_date_sql}, {poster_sql}, {backdrop_sql}, {overview_sql}, {runtime_sql}, {genres_sql}, {now}) "
+                f"VALUES ('{imdb_id}', {tmdb_id_sql}, '{media_type}', {title}, {year_sql}, {rel_date_sql}, {poster_sql}, {backdrop_sql}, {overview_sql}, {runtime_sql}, {genres_sql}, {now}) "
                 f"ON CONFLICT(imdb_id) DO UPDATE SET "
                 f"tmdb_id = COALESCE(excluded.tmdb_id, movies.tmdb_id), "
+                f"media_type = excluded.media_type, "
                 f"title = excluded.title, "
                 f"year = COALESCE(excluded.year, movies.year), "
                 f"release_date = CASE WHEN excluded.release_date != '' THEN excluded.release_date ELSE movies.release_date END, "

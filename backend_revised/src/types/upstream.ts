@@ -74,3 +74,19 @@ export interface TraktSearchResponse {
   total_pages: number;
   total_items: number;
 }
+
+export interface TmdbCredit {
+  id: number;
+  media_type: 'movie' | 'tv';
+  title?: string;
+  name?: string;
+  release_date?: string;
+  first_air_date?: string;
+  popularity?: number;
+  vote_count?: number;
+  vote_average?: number;
+  genre_ids?: number[];
+  character?: string;
+  order?: number;
+  episode_count?: number;
+}

@@ -6,6 +6,7 @@ import { moviesRouter } from './routes/movies';
 import { searchRouter } from './routes/search';
 import { subtitlesRouter } from './routes/subtitles';
 import { listsRouter } from './routes/lists';
+import { actorsRouter } from './routes/actors';
 import { GENRES } from './config/genres';
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -48,6 +49,7 @@ app.route('/api/v1/movies', moviesRouter);
 app.route('/api/v1/search', searchRouter);
 app.route('/api/v1/subtitles', subtitlesRouter);
 app.route('/api/v1/lists', listsRouter);
+app.route('/api/v1/actors', actorsRouter);
 
 // Canonical genre list for client filter pills
 app.get('/api/v1/genres', (c) => {

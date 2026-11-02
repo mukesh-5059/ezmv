@@ -11,7 +11,7 @@ DROP TABLE IF EXISTS imdb_titles;
 -- 2. Static Movie Metadata (TTL: ~7 days)
 CREATE TABLE IF NOT EXISTS movies (
     imdb_id TEXT PRIMARY KEY,
-    tmdb_id INTEGER,
+    tmdb_id TEXT,
     media_type TEXT NOT NULL DEFAULT 'movie',
     title TEXT NOT NULL,
     year INTEGER,
