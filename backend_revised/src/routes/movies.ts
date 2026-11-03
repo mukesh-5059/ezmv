@@ -7,20 +7,14 @@ export const moviesRouter = new Hono<{ Bindings: Bindings; Variables: Variables 
 
 // GET /api/v1/movies/tv/:id/season/:season_number
 moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
-  const imdbId = c.req.param('id').trim();
-  const seasonParam = c.req.param('season_number');
-  const seasonNumber = Number(seasonParam);
+  const tmdbId = Number(c.req.param('id'));
+  const seasonNumber = Number(c.req.param('season_number'));
 
-  if (!imdbId.startsWith('tt')) {
-    return c.json({ error: 'Invalid id parameter (must start with "tt").' }, 400);
-  }
-
-  if (isNaN(seasonNumber) || seasonNumber < 0) {
-    return c.json({ error: 'Invalid season_number parameter.' }, 400);
-  }
+  if (isNaN(tmdbId) || tmdbId <= 0) return c.json({ error: 'Invalid id parameter (must be numeric TMDb ID).' }, 400);
+  if (isNaN(seasonNumber) || seasonNumber < 0) return c.json({ error: 'Invalid season_number parameter.' }, 400);
 
   const origin = new URL(c.req.url).origin;
-  const cacheKey = `${origin}/api/v1/movies/tv/${imdbId}/season/${seasonNumber}`;
+  const cacheKey = `${origin}/api/v1/movies/tv/${tmdbId}/season/${seasonNumber}`;
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
@@ -34,11 +28,8 @@ moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
   }
 
   const catalog = new CatalogService(c.env);
-  const seasonDetails = await catalog.getTvSeason(imdbId, seasonNumber);
-
-  if (!seasonDetails) {
-    return c.json({ error: `Season ${seasonNumber} not found for ${imdbId}` }, 404);
-  }
+  const seasonDetails = await catalog.getTvSeason(tmdbId, seasonNumber);
+  if (!seasonDetails) return c.json({ error: `Season ${seasonNumber} not found for TMDb ID ${tmdbId}` }, 404);
 
   await cacheService.set(cacheKey, seasonDetails, 86400);
   c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');

@@ -81,6 +81,12 @@
   - Separate lanes config from code and make it dynamic (e.g. database-driven or external config).
 - [ ] **Separate Vote Weightage and Min Vote Config from Code**:
   - Move `SOURCE_WEIGHTS` and `MIN_VOTES` configurations out of service and sync code into a dedicated, shared configuration file or external config.
+- [ ] **Look into Parallelization of Code**:
+  - Audit and parallelize independent async operations across backend services (e.g. concurrent batch calls, D1 operations, and external API requests).
+- [ ] **Unified Cache Invalidation & Bypassing Mechanism**:
+  - Implement a standardized cache bypass / refresh pattern (e.g. `?refresh=true` or authorization-gated cache-control header) across all endpoints and services in bulk.
+- [ ] **Actor Search Endpoint (`/api/v1/actors/search`)**:
+  - Implement an endpoint to search actors/people by name (e.g. via TMDb `/search/person`), returning `ActorSummary[]` so clients can let users search and add actors to their personal favorite lists.
 
 
 ### 4. Response Schema & Compatibility Cleanup
@@ -122,6 +128,9 @@
 ### 9. Infrastructure, Hosting & Hardening
 - [ ] **Deploy `backend_revised` to Cloudflare**:
   - Run `npx wrangler deploy` once validated with frontend.
+- [ ] **Cloudflare Observability & Metrics Logging**:
+  - Enable Cloudflare Workers native observability in `wrangler.toml` (`[observability] enabled = true`) for automatic HTTP tracing across MDBList, TMDb, and Trakt.
+  - Implement custom metric logging (Cloudflare Analytics Engine or Axiom) to track batch sizes, upstream call quotas, and movie counts per call with visual dashboards.
 - [ ] **Remove Debug & Diagnostic Headers**:
   - Strip custom diagnostic headers (`X-Cache-Status`, `X-Cache-TTL`) across all routes in `backend_revised` before production release.
 - [ ] **Explore Free Hosting Services for Legacy Backend**:

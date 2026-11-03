@@ -17,14 +17,14 @@ export class MdblistService {
     if (targetType) {
       for (let i = 0; i < imdbIds.length; i += 100) {
         const chunk = imdbIds.slice(i, i + 100);
-        const res = await this.postBatch(targetType, chunk);
+        const res = await this.postBatch('imdb', targetType, chunk);
         results.push(...res);
       }
     } else {
       const resolved = new Set<string>();
       for (let i = 0; i < imdbIds.length; i += 100) {
         const chunk = imdbIds.slice(i, i + 100);
-        const res = await this.postBatch('movie', chunk);
+        const res = await this.postBatch('imdb', 'movie', chunk);
         for (const item of res) {
           const id = item.ids?.imdb || item.imdbid;
           if (id) resolved.add(id);
@@ -36,7 +36,7 @@ export class MdblistService {
       if (remaining.length > 0) {
         for (let i = 0; i < remaining.length; i += 100) {
           const chunk = remaining.slice(i, i + 100);
-          const res = await this.postBatch('show', chunk);
+          const res = await this.postBatch('imdb', 'show', chunk);
           results.push(...res);
         }
       }
@@ -45,8 +45,37 @@ export class MdblistService {
     return results;
   }
 
-  private async postBatch(mediaType: 'movie' | 'show', ids: string[]): Promise<MdblistItem[]> {
-    const url = `${this.baseUrl}/imdb/${mediaType}/?apikey=${this.apiKey}`;
+  async batchByTmdbIds(
+    items: Array<{ id: number; media_type: 'movie' | 'tv' }>
+  ): Promise<MdblistItem[]> {
+    if (!this.apiKey || items.length === 0) return [];
+
+    const movieIds = Array.from(new Set(items.filter((i) => i.media_type === 'movie').map((i) => i.id)));
+    const tvIds = Array.from(new Set(items.filter((i) => i.media_type === 'tv').map((i) => i.id)));
+
+    const results: MdblistItem[] = [];
+
+    for (let i = 0; i < movieIds.length; i += 100) {
+      const chunk = movieIds.slice(i, i + 100);
+      const res = await this.postBatch('tmdb', 'movie', chunk);
+      results.push(...res);
+    }
+
+    for (let i = 0; i < tvIds.length; i += 100) {
+      const chunk = tvIds.slice(i, i + 100);
+      const res = await this.postBatch('tmdb', 'show', chunk);
+      results.push(...res);
+    }
+
+    return results;
+  }
+
+  private async postBatch(
+    provider: 'imdb' | 'tmdb',
+    mediaType: 'movie' | 'show',
+    ids: Array<string | number>
+  ): Promise<MdblistItem[]> {
+    const url = `${this.baseUrl}/${provider}/${mediaType}/?apikey=${this.apiKey}`;
     try {
       const resp = await fetch(url, {
         method: 'POST',
@@ -60,7 +89,7 @@ export class MdblistService {
       });
 
       if (!resp.ok) {
-        console.warn(`[MDBList postBatch error] imdb/${mediaType} status ${resp.status}`);
+        console.warn(`[MDBList postBatch error] ${provider}/${mediaType} status ${resp.status}`);
         return [];
       }
 

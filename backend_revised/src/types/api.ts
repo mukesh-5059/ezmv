@@ -30,7 +30,7 @@ export interface CastMember {
 
 export interface MovieSummary {
   imdb_id: string;
-  tmdb_id: number;
+  tmdb_id: number | null;
   title: string;
   overview: string;
   release_date: string;
@@ -42,15 +42,8 @@ export interface MovieSummary {
   genres: Genre[];
 }
 
-export interface TvSeasonSummary {
-  season_number: number;
-  name: string;
-  episode_count: number;
-}
-
 export interface TvEpisodeSummary {
   episode_number: number;
-  season_number: number;
   name: string;
   overview: string;
   still_path: string | null;
@@ -59,10 +52,13 @@ export interface TvEpisodeSummary {
   is_released: boolean;
 }
 
-export interface TvSeasonResponse {
+export interface TvSeasonSummary {
   season_number: number;
   name: string;
   episode_count: number;
+}
+
+export interface TvSeasonResponse extends TvSeasonSummary{
   episodes: TvEpisodeSummary[];
 }
 
@@ -144,4 +140,16 @@ export interface DashboardConfig {
   id: string;
   title: string;
   lanes: LaneConfig[];
+}
+
+export interface ActorSummary {
+  tmdb_id: number;
+  name: string;
+  biography: string;
+  profile_path: string | null;
+}
+
+export interface PersonDetailsResponse extends ActorSummary {
+  popular: MovieSummary[];
+  recent: MovieSummary[];
 }

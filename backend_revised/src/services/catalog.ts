@@ -1,7 +1,14 @@
 import { Bindings, MovieDetails, MovieSummary, Genre, RequestTrace, TvEpisodeSummary, TvSeasonResponse } from '../types/api';
-import { MdblistItem } from '../types/upstream';
+import { CompositeRating, MdblistItem } from '../types/upstream';
 import { MdblistService } from './mdblist';
 import { resolveGenres } from '../config/genres';
+
+const RATING_TTL_SECONDS = 86400 * 2;
+
+function isRatingStale(ratingsUpdatedAt?: number | null): boolean {
+  if (!ratingsUpdatedAt) return true;
+  return ratingsUpdatedAt < Math.floor(Date.now() / 1000) - RATING_TTL_SECONDS;
+}
 
 export class CatalogService {
   private db: D1Database;
@@ -18,9 +25,6 @@ export class CatalogService {
   async resolveMovies(imdbIds: string[], trace?: RequestTrace, mediaType: 'all' | 'movie' | 'tv' = 'all'): Promise<MovieSummary[]> {
     if (!imdbIds.length) return [];
 
-    const now = Math.floor(Date.now() / 1000);
-    const staleRatingThreshold = now - 86400 * 2; // 48 hours
-
     // 1. Check D1 for known items
     const lookup = new Map<string, MovieSummary>();
     const missingIds: string[] = [];
@@ -35,8 +39,7 @@ export class CatalogService {
       const { results } = await this.db.prepare(query).bind(...cleanIds).all<any>();
 
       for (const row of results || []) {
-        const isRatingStale = !row.ratings_updated_at || row.ratings_updated_at < staleRatingThreshold;
-        if (isRatingStale) continue; // treat as needing refresh
+        if (isRatingStale(row.ratings_updated_at)) continue;
 
         const summary = rowToMovieSummary(row);
         if (summary.imdb_id) lookup.set(summary.imdb_id, summary);
@@ -47,12 +50,7 @@ export class CatalogService {
       trace.add(`d1_read: HIT ${lookup.size}/${cleanIds.length} in ${d1ReadDuration}ms`);
     }
 
-    // Identify which requested items are missing or stale
-    for (const id of cleanIds) {
-      if (!lookup.has(id)) {
-        missingIds.push(id);
-      }
-    }
+    for (const id of cleanIds) if (!lookup.has(id)) missingIds.push(id);
 
     // 2. Batch fetch missing items from MDBList
     if (missingIds.length > 0) {
@@ -60,14 +58,12 @@ export class CatalogService {
       const fetchedItems = await this.mdblist.batchMovies(missingIds, mediaType);
       if (trace) trace.add(`mdblist: FETCH ${Date.now() - tMdb}ms (${fetchedItems.length} items)`);
 
-      if (fetchedItems.length > 0 && this.db) {
+      if (fetchedItems.length > 0) {
         const tUpsert = Date.now();
-        await this.upsertBatch(fetchedItems);
-        if (trace) trace.add(`d1_upsert: ${Date.now() - tUpsert}ms`);
+        const freshSummaries = await this.upsertBatch(fetchedItems);
+        if (trace && this.db) trace.add(`d1_upsert: ${Date.now() - tUpsert}ms`);
 
-        // Populate lookup map with fresh items
-        for (const item of fetchedItems) {
-          const summary = this.mdblistItemToSummary(item);
+        for (const summary of freshSummaries) {
           if (summary.imdb_id) lookup.set(summary.imdb_id, summary);
         }
       }
@@ -77,12 +73,64 @@ export class CatalogService {
     const finalResults: MovieSummary[] = [];
     for (const id of imdbIds) {
       const item = lookup.get(id);
-      if (item) {
-        finalResults.push(item);
-      }
+      if (item) finalResults.push(item);
     }
 
     return finalResults;
+  }
+
+  async resolveByTmdbItems(
+    items: Array<{ id: number; media_type: 'movie' | 'tv' }>,
+    trace?: RequestTrace
+  ): Promise<MovieSummary[]> {
+    if (!items.length) return [];
+
+    const lookup = new Map<string, MovieSummary>();
+    const compositeKeys = Array.from(new Set(items.map((i) => `${i.media_type}:${i.id}`)));
+
+    const tD1 = Date.now();
+    if (this.db && compositeKeys.length > 0) {
+      for (let i = 0; i < compositeKeys.length; i += 100) {
+        const chunk = compositeKeys.slice(i, i + 100);
+        const placeholders = chunk.map(() => '?').join(',');
+        const query = `SELECT * FROM v_movies WHERE tmdb_id IN (${placeholders})`;
+        const { results } = await this.db.prepare(query).bind(...chunk).all<any>();
+        for (const row of results || []) {
+          if (isRatingStale(row.ratings_updated_at)) continue;
+          const summary = rowToMovieSummary(row);
+          if (summary.imdb_id && row.tmdb_id) lookup.set(row.tmdb_id, summary);
+        }
+      }
+    }
+
+    const d1ReadDuration = Date.now() - tD1;
+    if (trace) trace.add(`d1_read_tmdb: HIT ${lookup.size}/${items.length} in ${d1ReadDuration}ms`);
+
+    const missingItems: Array<{ id: number; media_type: 'movie' | 'tv' }> = [];
+    for (const it of items) {
+      const key = `${it.media_type}:${it.id}`;
+      if (!lookup.has(key)) missingItems.push(it);
+    }
+
+    if (missingItems.length > 0) {
+      const tMdb = Date.now();
+      const fetchedItems = await this.mdblist.batchByTmdbIds(missingItems);
+      if (trace) trace.add(`mdblist_tmdb: FETCH ${Date.now() - tMdb}ms (${fetchedItems.length} items)`);
+
+      if (fetchedItems.length > 0) {
+        const tUpsert = Date.now();
+        const freshSummaries = await this.upsertBatch(fetchedItems);
+        if (trace && this.db) trace.add(`d1_upsert: ${Date.now() - tUpsert}ms`);
+
+        for (const summary of freshSummaries) {
+          if (summary.imdb_id && summary.tmdb_id) {
+            lookup.set(`${summary.media_type}:${summary.tmdb_id}`, summary);
+          }
+        }
+      }
+    }
+
+    return Array.from(lookup.values()).filter((item) => item.imdb_id?.startsWith('tt'));
   }
 
   // Single movie details lookup: strictly D1 summary + TMDb for cast & extra details. Zero fallbacks.
@@ -152,24 +200,8 @@ export class CatalogService {
     return details;
   }
 
-  async getTvSeason(imdbId: string, seasonNumber: number): Promise<TvSeasonResponse | null> {
-    if (!imdbId.startsWith('tt') || !this.tmdbApiKey) return null;
-
-    let row = await this.db
-      .prepare('SELECT tmdb_id FROM movies WHERE imdb_id = ? LIMIT 1')
-      .bind(imdbId)
-      .first<{ tmdb_id: number | null }>();
-
-    let tmdbId = row?.tmdb_id;
-
-    if (!tmdbId) {
-      const resolved = await this.resolveMovies([imdbId]);
-      if (resolved.length && resolved[0].tmdb_id) {
-        tmdbId = resolved[0].tmdb_id;
-      }
-    }
-
-    if (!tmdbId) return null;
+  async getTvSeason(tmdbId: number, seasonNumber: number): Promise<TvSeasonResponse | null> {
+    if (!tmdbId || !this.tmdbApiKey) return null;
 
     const url = `https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${this.tmdbApiKey}`;
     try {
@@ -189,7 +221,6 @@ export class CatalogService {
             const isReleased = Boolean(airDate && new Date(airDate).getTime() <= now);
             return {
               episode_number: ep.episode_number,
-              season_number: ep.season_number ?? seasonNumber,
               name: ep.name || `Episode ${ep.episode_number}`,
               overview: ep.overview || '',
               still_path: ep.still_path ? `https://image.tmdb.org/t/p/w500${ep.still_path}` : null,
@@ -207,21 +238,26 @@ export class CatalogService {
         episodes,
       };
     } catch (err: any) {
-      console.warn(`[TMDb season error for ${imdbId} S${seasonNumber}]:`, err.message);
+      console.warn(`[TMDb season error for TMDb:${tmdbId} S${seasonNumber}]:`, err.message);
       return null;
     }
   }
 
 
   // Bulk upsert into movies and ratings tables
-  private async upsertBatch(items: MdblistItem[]): Promise<void> {
-    if (!items.length) return;
+  private async upsertBatch(items: MdblistItem[]): Promise<MovieSummary[]> {
+    if (!items.length) return [];
     const now = Math.floor(Date.now() / 1000);
     const statements: D1PreparedStatement[] = [];
+    const summaries: MovieSummary[] = [];
 
     for (const item of items) {
-      const summary = this.mdblistItemToSummary(item);
+      const comp = MdblistService.computeRating(item);
+      const summary = this.mdblistItemToSummary(item, comp);
       if (!summary.imdb_id) continue;
+      summaries.push(summary);
+
+      if (!this.db) continue;
 
       const year = summary.release_date ? Number(summary.release_date.slice(0, 4)) : null;
       const genresJson = JSON.stringify(summary.genres.map((g) => g.slug));
@@ -245,7 +281,7 @@ export class CatalogService {
             updated_at = excluded.updated_at
         `).bind(
           summary.imdb_id,
-          summary.tmdb_id || null,
+          summary.tmdb_id ? `${summary.media_type}:${summary.tmdb_id}` : null,
           summary.media_type,
           summary.title || 'Unknown',
           year,
@@ -256,13 +292,7 @@ export class CatalogService {
           item.runtime || null,
           genresJson,
           now
-        )
-      );
-
-      const comp = MdblistService.computeRating(item);
-
-      // Rating upsert
-      statements.push(
+        ),
         this.db.prepare(`
           INSERT INTO ratings (imdb_id, ratings, rating_score, votes, updated_at)
           VALUES (?, ?, ?, ?, ?)
@@ -271,16 +301,18 @@ export class CatalogService {
             rating_score = excluded.rating_score,
             votes = excluded.votes,
             updated_at = excluded.updated_at
-        `).bind(summary.imdb_id, comp.ratingsJson, comp.rating_score, comp.votes, now)
+        `).bind(summary.imdb_id, comp.ratingsJson, summary.rating_score, summary.vote_count, now)
       );
     }
 
-    if (statements.length > 0) {
+    if (this.db && statements.length > 0) {
       await this.db.batch(statements);
     }
+
+    return summaries;
   }
 
-  private mdblistItemToSummary(item: MdblistItem): MovieSummary {
+  private mdblistItemToSummary(item: MdblistItem, comp?: CompositeRating): MovieSummary {
     const rawGenres = item.genres || [];
     const seen = new Set<string>();
     const genres: Genre[] = [];
@@ -295,18 +327,18 @@ export class CatalogService {
       }
     }
     const year = item.year || (item.released ? Number(item.released.slice(0, 4)) : 0);
-    const comp = MdblistService.computeRating(item);
+    const rating = comp || MdblistService.computeRating(item);
 
     return {
       imdb_id: item.ids?.imdb || item.imdbid || '',
-      tmdb_id: item.ids?.tmdb || item.tmdbid || 0,
+      tmdb_id: item.ids?.tmdb || item.tmdbid || null,
       title: item.title || '',
       overview: item.description || '',
       release_date: item.released || (year ? `${year}-01-01` : ''),
       poster_path: item.poster || '',
       backdrop_path: item.backdrop || '',
-      rating_score: comp.rating_score,
-      vote_count: comp.votes,
+      rating_score: rating.rating_score,
+      vote_count: rating.votes,
       media_type: item.type === 'show' ? 'tv' : 'movie',
       genres,
     };
@@ -317,10 +349,11 @@ export class CatalogService {
 export function rowToMovieSummary(row: any): MovieSummary {
   const slugs: string[] = row.genres ? JSON.parse(row.genres) : [];
   const genres: Genre[] = slugs.flatMap(resolveGenres);
+  const tmdb_id = row.tmdb_id ? Number(row.tmdb_id.split(':')[1]) : null;
 
   return {
     imdb_id: row.imdb_id,
-    tmdb_id: row.tmdb_id || 0,
+    tmdb_id,
     title: row.title || '',
     overview: row.overview || '',
     release_date: row.release_date || '',
