@@ -2,21 +2,20 @@ import { Hono } from 'hono';
 import { Bindings, DashboardResponse, LaneFilters, PaginatedLaneResponse, Variables } from '../types';
 import { LanesService } from '../services/lanes';
 import { CacheService } from '../services/cache';
-import { ConfigService } from '../services/config';
+import { DASHBOARDS, DASHBOARDS_LIST } from '../config/dashboards';
 
 export const dashboardRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 // GET /api/v1/dashboard (Returns list of available dashboards)
 dashboardRouter.get('/', async (c) => {
-  const config = new ConfigService(c.env.CONFIG_KV);
   c.header('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
-  return c.json(await config.getDashboards());
+  return c.json(DASHBOARDS_LIST);
 });
 
 // GET /api/v1/dashboard/:dashboard_id (Returns all homepage lanes for dashboard)
 dashboardRouter.get('/:dashboard_id', async (c) => {
-  const config = new ConfigService(c.env.CONFIG_KV);
-  const dashboard = await config.getDashboard(c.req.param('dashboard_id'));
+  const dashboardId = c.req.param('dashboard_id')?.toLowerCase();
+  const dashboard = DASHBOARDS[dashboardId];
   if (!dashboard) return c.notFound();
 
   const origin = new URL(c.req.url).origin;
@@ -24,8 +23,9 @@ dashboardRouter.get('/:dashboard_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true';
   const tCache = Date.now();
-  const cached = await cacheService.get<any>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
@@ -55,8 +55,8 @@ dashboardRouter.get('/:dashboard_id', async (c) => {
 
 // GET /api/v1/dashboard/:dashboard_id/lanes/:lane_id (Paginates individual lane, fixed 100 items per page with filters)
 dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
-  const config = new ConfigService(c.env.CONFIG_KV);
-  const dashboard = await config.getDashboard(c.req.param('dashboard_id'));
+  const dashboardId = c.req.param('dashboard_id')?.toLowerCase();
+  const dashboard = DASHBOARDS[dashboardId];
   const laneId = c.req.param('lane_id')?.toLowerCase();
   const lane = dashboard?.lanes.find((l) => l.id === laneId);
 
@@ -88,8 +88,9 @@ dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true';
   const tCache = Date.now();
-  const cached = await cacheService.get<any>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {

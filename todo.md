@@ -32,6 +32,13 @@
   - Implemented multi-source composite calculation (`computeRating`) with adaptive weight redistribution.
   - Added single `ratings` JSON column to persist raw source metadata while keeping precomputed `rating_score` and `votes` for fast D1 SQL sorting and filtering.
   - Synchronized calculation across Worker runtime and Python D1 sync script.
+- [x] **Separate Lanes Config from Code and Make Dynamic**:
+  - Standardized dashboard configurations in [`dashboards.ts`](file:///home/mukes/dev/movies/backend_revised/src/config/dashboards.ts) and modularized sync scripts across Tamil, English, and Anime dashboards.
+- [x] **Separate Vote Weightage and Min Vote Config from Code**:
+  - Extracted rating rules, source weights, and vote thresholds into [`rating_rules.json`](file:///home/mukes/dev/movies/backend_revised/src/config/rating_rules.json) synced via Cloudflare KV. Added support for `myanimelist` (weight 0.45) and 500-vote RT audience thresholds.
+- [x] **English & Anime Dashboards and Catalog Sync**:
+  - Added English and Anime dashboard lane configurations to [`dashboards.ts`](file:///home/mukes/dev/movies/backend_revised/src/config/dashboards.ts).
+  - Built TypeScript sync pipeline ([`sync_catalog_to_d1.ts`](file:///home/mukes/dev/movies/backend_revised/scripts/sync_catalog_to_d1.ts)) using native Trakt endpoints and MDBList batch enrichment.
 
 
 ---
@@ -69,18 +76,12 @@
   - Support discovery and selection of internal/embedded subtitle tracks (muxed inside MP4/MKV video containers) alongside external OpenSubtitles VTT/SRT tracks in the player HUD.
 
 ### 3. Route & API Architecture
-- [ ] **English Dashboard & Additional Catalog Profiles**:
-  - Add English dashboard configuration to `lanes.ts` and sync catalog to D1.
 - [ ] **Curated & Trakt Lists Migration**:
   - Port `/lists/{list_id}/items` to `backend_revised` with upstream `page >= total_pages` checks from Trakt headers.
 - [ ] **Direct Single Movie Resolution Without D1**:
   - Look into resolving single movies directly without requiring a D1 entry.
 - [ ] **Explore Query Request Caching**:
   - Explore caching requests with query parameters (similar to the search endpoint caching pattern).
-- [ ] **Separate Lanes Config from Code and Make Dynamic**:
-  - Separate lanes config from code and make it dynamic (e.g. database-driven or external config).
-- [ ] **Separate Vote Weightage and Min Vote Config from Code**:
-  - Move `SOURCE_WEIGHTS` and `MIN_VOTES` configurations out of service and sync code into a dedicated, shared configuration file or external config.
 - [ ] **Look into Parallelization of Code**:
   - Audit and parallelize independent async operations across backend services (e.g. concurrent batch calls, D1 operations, and external API requests).
 - [ ] **Unified Cache Invalidation & Bypassing Mechanism**:

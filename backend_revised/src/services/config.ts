@@ -1,14 +1,8 @@
 import defaultRatingRules from '../config/rating_rules.json';
 import defaultActors from '../config/actors.json';
-import defaultDashboardList from '../config/dashboardlist.json';
-import defaultTamilDashboard from '../config/dashboards/tamil.json';
-import { ActorSummary, DashboardConfig } from '../types/api';
-import { DashboardsList, RatingRules } from '../types/config';
+import { ActorSummary } from '../types/api';
+import { RatingRules } from '../types/config';
 import { CacheService } from './cache';
-
-const DEFAULT_DASHBOARDS: Record<string, DashboardConfig> = {
-  tamil: defaultTamilDashboard as DashboardConfig,
-};
 
 export class ConfigService {
   private kv: KVNamespace;
@@ -45,15 +39,5 @@ export class ConfigService {
 
   async getCuratedActors(): Promise<ActorSummary[]> {
     return this.loadConfig<ActorSummary[]>('curated_actors', defaultActors as ActorSummary[]);
-  }
-
-  async getDashboards(): Promise<DashboardsList> {
-    return this.loadConfig<DashboardsList>('dashboards', defaultDashboardList as DashboardsList);
-  }
-
-  async getDashboard(id: string): Promise<DashboardConfig | null> {
-    const normId = id.trim().toLowerCase();
-    const fallback = DEFAULT_DASHBOARDS[normId] || null;
-    return this.loadConfig<DashboardConfig | null>(`dashboard:${normId}`, fallback);
   }
 }

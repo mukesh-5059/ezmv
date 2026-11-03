@@ -3,19 +3,22 @@
   "min_votes": {
     "imdb": 500,
     "letterboxd": 50,
+    "myanimelist": 100,
+    "popcorn": 500,
+    "tomatoesaudience": 500,
     "tmdb": 20,
     "trakt": 20,
-    "popcorn": 50,
     "tomatoes": 10,
     "metacritic": 5
   },
   "source_weights": {
-    "letterboxd": 0.35,
-    "imdb": 0.25,
-    "tomatoes": 0.15,
-    "popcorn": 0.10,
+    "myanimelist": 0.45,
+    "letterboxd": 0.40,
+    "imdb": 0.30,
+    "tmdb": 0.10,
+    "tomatoes": 0.05,
+    "popcorn": 0.05,
     "tomatoesaudience": 0.05,
-    "tmdb": 0.05,
     "metacritic": 0.025,
     "trakt": 0.025
   },
