@@ -1,0 +1,35 @@
+{
+  "prior_mean": 6.8,
+  "min_votes": {
+    "imdb": 500,
+    "letterboxd": 50,
+    "tmdb": 20,
+    "trakt": 20,
+    "popcorn": 50,
+    "tomatoes": 10,
+    "metacritic": 5
+  },
+  "source_weights": {
+    "letterboxd": 0.35,
+    "imdb": 0.25,
+    "tomatoes": 0.15,
+    "popcorn": 0.10,
+    "tomatoesaudience": 0.05,
+    "tmdb": 0.05,
+    "metacritic": 0.025,
+    "trakt": 0.025
+  },
+  "bayesian_m": {
+    "single_source": 10000,
+    "two_sources": 3000,
+    "three_plus_sources": 1000
+  },
+  "era_curve": {
+    "decay_rate": 1.386,
+    "recency_penalty_max": 0.5,
+    "classic_start_age": 3.0,
+    "classic_ramp_years": 25.0,
+    "classic_boost_max": 0.5,
+    "era_bounds": [0.5, 1.5]
+  }
+}

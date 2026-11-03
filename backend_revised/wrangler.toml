@@ -7,3 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"
 database_name = "movies-catalog"
 database_id = "ce5096c4-ec8a-463d-890e-493c92d5f580"
+
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "4d8a8b30e668412596ca7b9cabfecdb4"

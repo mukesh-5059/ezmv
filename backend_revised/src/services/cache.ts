@@ -1,11 +1,14 @@
 export class CacheService {
-  private cache: Cache;
+  private cache?: Cache;
 
   constructor() {
-    this.cache = caches.default;
+    if (typeof caches !== 'undefined') {
+      this.cache = caches.default;
+    }
   }
 
   async get<T>(keyUrl: string): Promise<T | null> {
+    if (!this.cache) return null;
     try {
       const cacheKey = new Request(keyUrl);
       const cached = await this.cache.match(cacheKey);
@@ -18,6 +21,7 @@ export class CacheService {
   }
 
   async set(keyUrl: string, data: any, ttlSeconds: number): Promise<void> {
+    if (!this.cache) return;
     try {
       const cacheKey = new Request(keyUrl);
       const cacheInit: ResponseInit = {
@@ -33,6 +37,7 @@ export class CacheService {
   }
 
   async delete(keyUrl: string): Promise<boolean> {
+    if (!this.cache) return false;
     try {
       const cacheKey = new Request(keyUrl);
       return await this.cache.delete(cacheKey);

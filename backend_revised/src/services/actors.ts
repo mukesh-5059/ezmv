@@ -6,7 +6,7 @@ import {
   RequestTrace,
   TmdbCredit,
 } from '../types';
-import curatedActors from '../config/actors.json';
+import { ConfigService } from './config';
 import { CatalogService } from './catalog';
 
 const EXCLUDED_GENRE_IDS = new Set([99, 10763, 10764, 10767]);
@@ -28,14 +28,16 @@ function isExcludedCharacter(character?: string): boolean {
 export class ActorsService {
   private env: Bindings;
   private tmdbApiKey?: string;
+  private config: ConfigService;
 
   constructor(env: Bindings) {
     this.env = env;
     this.tmdbApiKey = env.TMDB_API_KEY;
+    this.config = new ConfigService(env.CONFIG_KV);
   }
 
-  getCuratedActors(): ActorSummary[] {
-    return curatedActors as ActorSummary[];
+  async getCuratedActors(): Promise<ActorSummary[]> {
+    return this.config.getCuratedActors();
   }
 
   async getPersonDetails(personId: number, trace?: RequestTrace): Promise<PersonDetailsResponse | null> {

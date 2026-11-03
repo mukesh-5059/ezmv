@@ -8,7 +8,7 @@ export const actorsRouter = new Hono<{ Bindings: Bindings; Variables: Variables 
 actorsRouter.get('/', async (c) => {
   const actorsService = new ActorsService(c.env);
   c.header('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
-  return c.json(actorsService.getCuratedActors());
+  return c.json(await actorsService.getCuratedActors());
 });
 
 actorsRouter.get('/:id', async (c) => {

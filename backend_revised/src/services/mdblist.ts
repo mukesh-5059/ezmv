@@ -1,4 +1,5 @@
 import { CompositeRating, MdblistItem, MdblistRating } from '../types/upstream';
+import { RatingRules } from '../types/config';
 
 export class MdblistService {
   private apiKey: string;
@@ -102,7 +103,7 @@ export class MdblistService {
   }
 
   // Utilities to parse MDBList item into standard format
-  static computeRating(item: MdblistItem): CompositeRating {
+  static computeRating(item: MdblistItem, rules: RatingRules): CompositeRating {
     const rawRatings = Array.isArray(item.ratings) ? item.ratings : [];
     let weightedSum = 0;
     let totalWeight = 0;
@@ -119,10 +120,10 @@ export class MdblistService {
         votes: r.votes || 0,
       });
 
-      const weight = SOURCE_WEIGHTS[r.source];
+      const weight = (rules.source_weights || {})[r.source];
       if (!weight) continue;
 
-      const minVotes = MIN_VOTES[r.source] ?? 0;
+      const minVotes = (rules.min_votes || {})[r.source] ?? 0;
       const votes = r.votes || 0;
       if (votes < minVotes) continue;
 
@@ -145,9 +146,9 @@ export class MdblistService {
       const rawRating = weightedSum / totalWeight;
       const numSources = qualifiedSources.size;
 
-      let m = 1000;
-      if (numSources === 1) m = 10000;
-      else if (numSources === 2) m = 3000;
+      let m = rules.bayesian_m.three_plus_sources;
+      if (numSources === 1) m = rules.bayesian_m.single_source;
+      else if (numSources === 2) m = rules.bayesian_m.two_sources;
 
       // Era modifier: exponential recency decay + slow classic boost
       const now = new Date();
@@ -166,15 +167,16 @@ export class MdblistService {
       }
 
       if (age !== null) {
-        const penalty = 0.5 * Math.exp(-age * 1.5);
-        const boost = 0.5 * Math.max(0, Math.min(1, (age - 3) / 25));
-        const rawEra = Math.max(0.5, Math.min(1.5, 1.0 + penalty - boost));
+        const era = rules.era_curve;
+        const penalty = era.recency_penalty_max * Math.exp(-age * era.decay_rate);
+        const boost = era.classic_boost_max * Math.max(0, Math.min(1, (age - era.classic_start_age) / era.classic_ramp_years));
+        const rawEra = Math.max(era.era_bounds[0], Math.min(era.era_bounds[1], 1.0 + penalty - boost));
         // Anti-double-penalty: distribute recency skepticism across corroborated sources
         const eraModifier = 1.0 + (rawEra - 1.0) / numSources;
         m *= eraModifier;
       }
 
-      const C = 6.8;
+      const C = rules.prior_mean;
       const rating_score = Number(
         (((totalVotes / (totalVotes + m)) * rawRating) + ((m / (totalVotes + m)) * C)).toFixed(1)
       );
@@ -185,25 +187,3 @@ export class MdblistService {
     return { rating_score: 0, votes: 0, ratingsJson };
   }
 }
-
-export const MIN_VOTES: Record<string, number> = {
-  imdb: 500,
-  letterboxd: 50,
-  tomatoes: 10,
-  popcorn: 50,
-  tomatoesaudience: 50,
-  tmdb: 20,
-  metacritic: 5,
-  trakt: 20,
-};
-
-export const SOURCE_WEIGHTS: Record<string, number> = {
-  imdb: 0.30,
-  letterboxd: 0.25,
-  tomatoes: 0.15,
-  popcorn: 0.10,
-  tomatoesaudience: 0.10,
-  tmdb: 0.10,
-  metacritic: 0.05,
-  trakt: 0.05,
-};

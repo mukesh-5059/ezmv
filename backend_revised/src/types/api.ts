@@ -1,5 +1,6 @@
 export type Bindings = {
   DB: D1Database;
+  CONFIG_KV: KVNamespace;
   MDBLIST_API_KEY?: string;
   TRAKT_CLIENT_ID?: string;
   TMDB_API_KEY?: string;
@@ -129,6 +130,11 @@ export interface SubtitleTrack {
   language: string;
   url: string;
   popularity: number;
+}
+
+export interface DashboardSummary {
+  id: string;
+  title: string;
 }
 
 export interface LaneConfig {

@@ -1,6 +1,7 @@
 import { Bindings, MovieDetails, MovieSummary, Genre, RequestTrace, TvEpisodeSummary, TvSeasonResponse } from '../types/api';
 import { CompositeRating, MdblistItem } from '../types/upstream';
 import { MdblistService } from './mdblist';
+import { ConfigService } from './config';
 import { resolveGenres } from '../config/genres';
 
 const RATING_TTL_SECONDS = 86400 * 2;
@@ -14,11 +15,13 @@ export class CatalogService {
   private db: D1Database;
   private mdblist: MdblistService;
   private tmdbApiKey: string;
+  private config: ConfigService;
 
   constructor(env: Bindings) {
     this.db = env.DB;
     this.mdblist = new MdblistService(env.MDBLIST_API_KEY);
     this.tmdbApiKey = env.TMDB_API_KEY || '';
+    this.config = new ConfigService(env.CONFIG_KV);
   }
 
   // Resolve multiple movie IDs: checks D1 first, batches missing to MDBList, upserts D1, returns in requested order
@@ -250,9 +253,10 @@ export class CatalogService {
     const now = Math.floor(Date.now() / 1000);
     const statements: D1PreparedStatement[] = [];
     const summaries: MovieSummary[] = [];
+    const rules = await this.config.getRatingRules();
 
     for (const item of items) {
-      const comp = MdblistService.computeRating(item);
+      const comp = MdblistService.computeRating(item, rules);
       const summary = this.mdblistItemToSummary(item, comp);
       if (!summary.imdb_id) continue;
       summaries.push(summary);
@@ -312,7 +316,7 @@ export class CatalogService {
     return summaries;
   }
 
-  private mdblistItemToSummary(item: MdblistItem, comp?: CompositeRating): MovieSummary {
+  private mdblistItemToSummary(item: MdblistItem, comp: CompositeRating): MovieSummary {
     const rawGenres = item.genres || [];
     const seen = new Set<string>();
     const genres: Genre[] = [];
@@ -327,7 +331,6 @@ export class CatalogService {
       }
     }
     const year = item.year || (item.released ? Number(item.released.slice(0, 4)) : 0);
-    const rating = comp || MdblistService.computeRating(item);
 
     return {
       imdb_id: item.ids?.imdb || item.imdbid || '',
@@ -337,8 +340,8 @@ export class CatalogService {
       release_date: item.released || (year ? `${year}-01-01` : ''),
       poster_path: item.poster || '',
       backdrop_path: item.backdrop || '',
-      rating_score: rating.rating_score,
-      vote_count: rating.votes,
+      rating_score: comp.rating_score,
+      vote_count: comp.votes,
       media_type: item.type === 'show' ? 'tv' : 'movie',
       genres,
     };

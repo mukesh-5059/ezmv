@@ -2,13 +2,21 @@ import { Hono } from 'hono';
 import { Bindings, DashboardResponse, LaneFilters, PaginatedLaneResponse, Variables } from '../types';
 import { LanesService } from '../services/lanes';
 import { CacheService } from '../services/cache';
-import { DASHBOARDS } from '../config/lanes';
+import { ConfigService } from '../services/config';
 
 export const dashboardRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
+// GET /api/v1/dashboard (Returns list of available dashboards)
+dashboardRouter.get('/', async (c) => {
+  const config = new ConfigService(c.env.CONFIG_KV);
+  c.header('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+  return c.json(await config.getDashboards());
+});
+
 // GET /api/v1/dashboard/:dashboard_id (Returns all homepage lanes for dashboard)
 dashboardRouter.get('/:dashboard_id', async (c) => {
-  const dashboard = DASHBOARDS[c.req.param('dashboard_id')?.toLowerCase()];
+  const config = new ConfigService(c.env.CONFIG_KV);
+  const dashboard = await config.getDashboard(c.req.param('dashboard_id'));
   if (!dashboard) return c.notFound();
 
   const origin = new URL(c.req.url).origin;
@@ -47,11 +55,12 @@ dashboardRouter.get('/:dashboard_id', async (c) => {
 
 // GET /api/v1/dashboard/:dashboard_id/lanes/:lane_id (Paginates individual lane, fixed 100 items per page with filters)
 dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
-  const dashboard = DASHBOARDS[c.req.param('dashboard_id')?.toLowerCase()];
+  const config = new ConfigService(c.env.CONFIG_KV);
+  const dashboard = await config.getDashboard(c.req.param('dashboard_id'));
   const laneId = c.req.param('lane_id')?.toLowerCase();
   const lane = dashboard?.lanes.find((l) => l.id === laneId);
 
-  if (!lane) return c.notFound();
+  if (!dashboard || !lane) return c.notFound();
 
   const page = Math.max(1, Number(c.req.query('page') || 1));
   const PAGE_SIZE = 100;

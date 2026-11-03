@@ -19,9 +19,12 @@ build/
 *.tsv.gz
 .cache/
 *.zip
+*.pdf
 **/batches/
 catalog/
 *.sql
 seed_state.json
 dist/
 **/dist/
+local
+**/local
