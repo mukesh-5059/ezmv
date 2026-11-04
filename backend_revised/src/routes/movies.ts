@@ -5,12 +5,12 @@ import { CacheService } from '../services/cache';
 
 export const moviesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// GET /api/v1/movies/tv/:id/season/:season_number
-moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
-  const tmdbId = Number(c.req.param('id'));
+// GET /api/v1/movies/tv/:tmdb_id/season/:season_number
+moviesRouter.get('/tv/:tmdb_id/season/:season_number', async (c) => {
+  const tmdbId = Number(c.req.param('tmdb_id'));
   const seasonNumber = Number(c.req.param('season_number'));
 
-  if (isNaN(tmdbId) || tmdbId <= 0) return c.json({ error: 'Invalid id parameter (must be numeric TMDb ID).' }, 400);
+  if (isNaN(tmdbId) || tmdbId <= 0) return c.json({ error: 'Invalid tmdb_id parameter (must be numeric TMDb ID).' }, 400);
   if (isNaN(seasonNumber) || seasonNumber < 0) return c.json({ error: 'Invalid season_number parameter.' }, 400);
 
   const origin = new URL(c.req.url).origin;
@@ -37,17 +37,17 @@ moviesRouter.get('/tv/:id/season/:season_number', async (c) => {
   return c.json(seasonDetails);
 });
 
-// GET /api/v1/movies/:media_type/:id
-moviesRouter.get('/:media_type/:id', async (c) => {
+// GET /api/v1/movies/:media_type/:imdb_id
+moviesRouter.get('/:media_type/:imdb_id', async (c) => {
   const mediaTypeParam = c.req.param('media_type').toLowerCase();
-  const imdbId = c.req.param('id').trim();
+  const imdbId = c.req.param('imdb_id').trim();
 
   if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv') {
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
   }
 
   if (!imdbId.startsWith('tt')) {
-    return c.json({ error: 'Invalid id parameter (must start with "tt").' }, 400);
+    return c.json({ error: 'Invalid imdb_id parameter (must start with "tt").' }, 400);
   }
 
   const origin = new URL(c.req.url).origin;

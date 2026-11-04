@@ -20,6 +20,7 @@ backend_revised/
 │   │   ├── lists.ts           # /api/v1/lists (Trakt curated lists)
 │   │   ├── movies.ts          # /api/v1/movies (Movie details & TV season episodes)
 │   │   ├── search.ts          # /api/v1/search (Catalog & Trakt upstream search)
+│   │   ├── streams.ts         # /api/v1/streams (PenguPlay & HDHub Stremio streams)
 │   │   └── subtitles.ts       # /api/v1/subtitles (OpenSubtitles resolution)
 │   ├── services/              # Core business services
 │   │   ├── actors.ts          # Actor resolution & TMDb combined filmography
@@ -29,6 +30,7 @@ backend_revised/
 │   │   ├── lanes.ts           # Lane queries, multi-filter & sorting
 │   │   ├── lists.ts           # Trakt lists client & pagination
 │   │   ├── mdblist.ts         # MDBList batch client & Bayesian rating calculator
+│   │   ├── streams.ts         # Multi-provider Stremio stream scraper & parser
 │   │   └── traktsearch.ts     # Trakt catalog search service
 │   ├── types/                 # TypeScript interfaces & API response definitions
 │   │   ├── api.ts             # API request/response contracts & filters
@@ -272,16 +274,16 @@ Paginated view of an individual lane (100 items per page) with server-side multi
 
 ---
 
-#### `GET /api/v1/movies/:media_type/:id`
+#### `GET /api/v1/movies/:media_type/:imdb_id`
 Retrieves detailed metadata for a single movie or TV show, including composite rating, cast list (top 20), seasons breakdown, and ongoing status.
 
 - **Method**: `GET`
-- **Path**: `/api/v1/movies/:media_type/:id`
+- **Path**: `/api/v1/movies/:media_type/:imdb_id`
 - **Path Parameters**:
   | Parameter | Type | Required | Description |
   |---|---|---|---|
   | `media_type` | `string` | Yes | Media type: strictly `'movie'` or `'tv'` |
-  | `id` | `string` | Yes | IMDb ID: strictly required to start with `'tt'` (e.g. `tt0944947`) |
+  | `imdb_id` | `string` | Yes | IMDb ID: strictly required to start with `'tt'` (e.g. `tt0944947`) |
 
 - **Query Parameters**: None
 - **Cache-Control**: `public, max-age=86400, stale-while-revalidate=43200` (24 hours)
@@ -330,15 +332,15 @@ Retrieves detailed metadata for a single movie or TV show, including composite r
 
 ---
 
-#### `GET /api/v1/movies/tv/:id/season/:season_number`
+#### `GET /api/v1/movies/tv/:tmdb_id/season/:season_number`
 Retrieves episode-level details for a specific season of a TV series.
 
 - **Method**: `GET`
-- **Path**: `/api/v1/movies/tv/:id/season/:season_number`
+- **Path**: `/api/v1/movies/tv/:tmdb_id/season/:season_number`
 - **Path Parameters**:
   | Parameter | Type | Required | Description |
   |---|---|---|---|
-  | `id` | `number` | Yes | Numeric TMDb TV Series ID (`> 0`) |
+  | `tmdb_id` | `number` | Yes | Numeric TMDb TV Series ID (`> 0`) |
   | `season_number` | `number` | Yes | Numeric season number (`>= 0`) |
 
 - **Query Parameters**: None
@@ -550,7 +552,55 @@ Returns actor biography and filmography categorized into up to 30 popular works 
 
 ---
 
-### 5.7. Subtitles
+### 5.7. Streams
+
+---
+
+#### `GET /api/v1/streams/:media_type/:imdb_id`
+Resolves streaming links for movies or TV episodes by querying PenguPlay and HDHub Stremio addons in parallel.
+
+- **Method**: `GET`
+- **Path**: `/api/v1/streams/:media_type/:imdb_id`
+- **Path Parameters**:
+  | Parameter | Type | Required | Description |
+  |---|---|---|---|
+  | `media_type` | `string` | Yes | Media type: strictly `'movie'` or `'tv'` |
+  | `imdb_id` | `string` | Yes | IMDb ID strictly starting with `'tt'` (e.g. `tt0816692`) |
+
+- **Query Parameters**:
+  | Parameter | Type | Required | Default | Description |
+  |---|---|---|---|---|
+  | `season` | `number` | Yes (if `tv`) | `undefined` | Season number (required when `media_type === 'tv'`) |
+  | `episode` | `number` | Yes (if `tv`) | `undefined` | Episode number (required when `media_type === 'tv'`) |
+  | `default_language` | `string` | No | `undefined` | Fallback language or ISO code (e.g. `'Tamil'`, `'ta'`) used when release has no explicit language tags |
+
+- **Response** (`200 OK`):
+  ```json
+  {
+    "imdb_id": "tt0816692",
+    "media_type": "movie",
+    "streams": [
+      {
+        "url": "https://pengu.uk/direct/external/...",
+        "quality": "1080p",
+        "filename": "Interstellar (2014) IMAX 1080p BluRay REMUX AVC...",
+        "size_bytes": 36582383944,
+        "formatted_size": "34.07 GB",
+        "priority": 30,
+        "provider": "penguplay",
+        "host": "pengu.uk",
+        "languages": ["Hindi", "English"],
+        "headers": {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)..."
+        }
+      }
+    ]
+  }
+  ```
+
+---
+
+### 5.8. Subtitles
 
 ---
 
@@ -597,12 +647,13 @@ Resolves available subtitle tracks for movies or TV episodes via OpenSubtitles (
 | `GET` | `/api/v1/dashboard` | — | List available dashboard categories |
 | `GET` | `/api/v1/dashboard/:dashboard_id` | `:dashboard_id`, `?refresh` | Homepage lanes with first 100 items each |
 | `GET` | `/api/v1/dashboard/:dashboard_id/lanes/:lane_id` | `:dashboard_id`, `:lane_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?refresh` | Paginated lane items (100/page) with 4 filters & 5 sorts |
-| `GET` | `/api/v1/movies/:media_type/:id` | `:media_type`, `:id` (`tt...`) | Movie/show details, Bayesian rating, cast (top 20), seasons |
-| `GET` | `/api/v1/movies/tv/:id/season/:season_number` | `:id` (TMDb), `:season_number` | TV Season episode list with `is_released` flags |
+| `GET` | `/api/v1/movies/:media_type/:imdb_id` | `:media_type`, `:imdb_id` (`tt...`) | Movie/show details, Bayesian rating, cast (top 20), seasons |
+| `GET` | `/api/v1/movies/tv/:tmdb_id/season/:season_number` | `:tmdb_id` (TMDb), `:season_number` | TV Season episode list with `is_released` flags |
 | `GET` | `/api/v1/search` | `?q`, `?page`, `?type`, `?genre`, `?year`, `?min_rating` | Search catalog & Trakt upstream with Bayesian ratings |
 | `GET` | `/api/v1/lists/popular` | `?page` | Curated popular Trakt lists (100/page) |
 | `GET` | `/api/v1/lists/search` | `?q`, `?page` | Search Trakt lists (50/page) |
 | `GET` | `/api/v1/lists/:list_id/items` | `:list_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?sort_order` | Paginated items inside a curated list (100/page) |
 | `GET` | `/api/v1/actors` | — | Curated regional featured actors |
 | `GET` | `/api/v1/actors/:id` | `:id` (TMDb) | Actor profile, top 30 popular and top 30 recent filmography |
+| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?default_language` | PenguPlay and HDHub streaming links |
 | `GET` | `/api/v1/subtitles` | `?imdb_id`, `?media_type`, `?season`, `?episode`, `?language` | OpenSubtitles tracks sorted by popularity |

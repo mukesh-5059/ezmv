@@ -5,6 +5,8 @@ export type Bindings = {
   TRAKT_CLIENT_ID?: string;
   TMDB_API_KEY?: string;
   TMDB_READ_ACCESS_TOKEN?: string;
+  PENGUPLAY_MANIFEST_URL?: string;
+  HDHUB_MANIFEST_URL?: string;
 };
 
 export interface RequestTrace {
@@ -158,4 +160,25 @@ export interface ActorSummary {
 export interface PersonDetailsResponse extends ActorSummary {
   popular: MovieSummary[];
   recent: MovieSummary[];
+}
+
+export interface StreamSource {
+  url: string;
+  quality: string;
+  filename?: string;
+  size_bytes?: number;
+  formatted_size?: string;
+  priority?: number;
+  provider: string;
+  host?: string;
+  languages?: string[];
+  headers?: Record<string, string>;
+}
+
+export interface StreamsResponse {
+  imdb_id: string;
+  media_type: 'movie' | 'tv';
+  season?: number;
+  episode?: number;
+  streams: StreamSource[];
 }

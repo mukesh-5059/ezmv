@@ -11,8 +11,8 @@ actorsRouter.get('/', async (c) => {
   return c.json(await actorsService.getCuratedActors());
 });
 
-actorsRouter.get('/:id', async (c) => {
-  const personId = Number(c.req.param('id'));
+actorsRouter.get('/:tmdb_id', async (c) => {
+  const personId = Number(c.req.param('tmdb_id'));
   if (isNaN(personId) || personId <= 0) {
     return c.json({ error: 'Invalid actor/person id parameter.' }, 400);
   }
