@@ -16,7 +16,7 @@ export class ListsService {
       'Content-Type': 'application/json',
       'trakt-api-version': '2',
       'trakt-api-key': this.clientId,
-      'User-Agent': 'CloudflareWorker/1.0',
+      'User-Agent': 'MoviesStreamingApp/1.0',
     };
   }
 
@@ -41,7 +41,10 @@ export class ListsService {
         signal: AbortSignal.timeout(10000),
       });
 
-      if (!resp.ok) return emptyResponse;
+      if (!resp.ok) {
+        console.warn(`[ListsService getPopularLists] HTTP ${resp.status} ${resp.statusText} for ${url}`);
+        return emptyResponse;
+      }
 
       const pageHeader = Number(resp.headers.get('x-pagination-page')) || page;
       const totalPages = Number(resp.headers.get('x-pagination-page-count')) || 0;
@@ -52,7 +55,7 @@ export class ListsService {
 
       for (const entry of rawItems) {
         const l = entry.list;
-        if (!l) continue;
+        if (!l?.ids?.trakt) continue;
 
         items.push({
           id: l.ids.trakt,
@@ -100,7 +103,10 @@ export class ListsService {
         signal: AbortSignal.timeout(10000),
       });
 
-      if (!resp.ok) return emptyResponse;
+      if (!resp.ok) {
+        console.warn(`[ListsService searchLists] HTTP ${resp.status} ${resp.statusText} for ${url}`);
+        return emptyResponse;
+      }
 
       const pageHeader = Number(resp.headers.get('x-pagination-page')) || page;
       const totalPages = Number(resp.headers.get('x-pagination-page-count')) || 0;
@@ -111,7 +117,7 @@ export class ListsService {
 
       for (const entry of rawItems) {
         const l = entry.list;
-        if (!l) continue;
+        if (!l?.ids?.trakt) continue;
 
         items.push({
           id: l.ids.trakt,
@@ -138,7 +144,7 @@ export class ListsService {
 
   // Get items in a specific list with filtering and sorting
   async getListItems(
-    listId: string,
+    listId: number,
     page = 1,
     limit = 100,
     filters?: ListFilters,
@@ -153,7 +159,7 @@ export class ListsService {
       next_page: null,
     };
 
-    if (!listId || !this.clientId) return emptyResponse;
+    if (!listId || listId <= 0 || !this.clientId) return emptyResponse;
 
     let typeSegment = '';
     if (filters?.media_type === 'movie') {
@@ -178,7 +184,10 @@ export class ListsService {
         signal: AbortSignal.timeout(10000),
       });
 
-      if (!resp.ok) return emptyResponse;
+      if (!resp.ok) {
+        console.warn(`[ListsService getListItems] HTTP ${resp.status} ${resp.statusText} for ${url}`);
+        return emptyResponse;
+      }
 
       const pageHeader = Number(resp.headers.get('x-pagination-page')) || page;
       const totalPages = Number(resp.headers.get('x-pagination-page-count')) || 0;

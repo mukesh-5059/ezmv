@@ -39,6 +39,12 @@
 - [x] **English & Anime Dashboards and Catalog Sync**:
   - Added English and Anime dashboard lane configurations to [`dashboards.ts`](file:///home/mukes/dev/movies/backend_revised/src/config/dashboards.ts).
   - Built TypeScript sync pipeline ([`sync_catalog_to_d1.ts`](file:///home/mukes/dev/movies/backend_revised/scripts/sync_catalog_to_d1.ts)) using native Trakt endpoints and MDBList batch enrichment.
+- [x] **Curated & Trakt Lists Migration**:
+  - Ported `/api/v1/lists/popular`, `/api/v1/lists/search`, and `/api/v1/lists/:list_id/items` to [`backend_revised`](file:///home/mukes/dev/movies/backend_revised/src/routes/lists.ts).
+  - Implemented upstream `x-pagination-page-count` bounds checking (`has_more = pageHeader < totalPages`).
+- [x] **Filtering in Lists**:
+  - Implemented multi-parameter filtering & sorting (`type`, `genre`, `year`, `min_rating`, `sort_by`, `sort_order`) on `/api/v1/lists/:list_id/items` in [`backend_revised`](file:///home/mukes/dev/movies/backend_revised/src/routes/lists.ts).
+  - Combined Trakt upstream sorting (`sort_by`, `sort_how`) with in-memory post-filtering.
 
 
 ---
@@ -53,9 +59,9 @@
 - [ ] **Move "To Top of Page" Button into Grid Widget**:
   - Refactor [`MovieGrid`](file:///home/mukes/dev/movies/mobile_app/lib/widgets/movie_grid.dart) to encapsulate the scroll-to-top floating button and scroll listeners internally.
   - Remove duplicate floating action button implementations from [`search_screen.dart`](file:///home/mukes/dev/movies/mobile_app/lib/screens/search_screen.dart) and [`list_movies_screen.dart`](file:///home/mukes/dev/movies/mobile_app/lib/screens/list_movies_screen.dart).
-- [ ] **Anime-Specific Homepage Dashboard**:
-  - Add dedicated Anime dashboard view / lanes (e.g. "Trending Anime", "Top Airing Series", "All-Time Classic Movies", "Shonen & Action").
-  - Leverage AniList GraphQL API (100% free, no key, 90 req/min) for clean seasonal/cour groupings without TMDb multi-season fragmentation.
+- [ ] **Anime Seasons from AniList**:
+  - Leverage AniList GraphQL API (100% free, no key, 90 req/min) to fetch clean seasonal/cour groupings without TMDb multi-season fragmentation.
+  - Map prequel/sequel relations and seasonal air dates for accurate anime cour progression.
 - [ ] **Multi-Audio Track Selection & Support**:
   - Audio track switcher in the video player for streams containing multiple embedded audio channels (e.g. Tamil, English, Hindi dubs).
   - Accurate language tagging and stream track enumeration from demuxer metadata.
@@ -76,19 +82,18 @@
   - Support discovery and selection of internal/embedded subtitle tracks (muxed inside MP4/MKV video containers) alongside external OpenSubtitles VTT/SRT tracks in the player HUD.
 
 ### 3. Route & API Architecture
-- [ ] **Curated & Trakt Lists Migration**:
-  - Port `/lists/{list_id}/items` to `backend_revised` with upstream `page >= total_pages` checks from Trakt headers.
 - [ ] **Direct Single Movie Resolution Without D1**:
   - Look into resolving single movies directly without requiring a D1 entry.
 - [ ] **Explore Query Request Caching**:
   - Explore caching requests with query parameters (similar to the search endpoint caching pattern).
+- [ ] **Explore Internal Caching**:
+  - Investigate internal service-level caching (e.g. caching raw Trakt list payloads or intermediate upstream fetches) to optimize throughput without hammering external rate limits.
 - [ ] **Look into Parallelization of Code**:
   - Audit and parallelize independent async operations across backend services (e.g. concurrent batch calls, D1 operations, and external API requests).
 - [ ] **Unified Cache Invalidation & Bypassing Mechanism**:
   - Implement a standardized cache bypass / refresh pattern (e.g. `?refresh=true` or authorization-gated cache-control header) across all endpoints and services in bulk.
 - [ ] **Actor Search Endpoint (`/api/v1/actors/search`)**:
   - Implement an endpoint to search actors/people by name (e.g. via TMDb `/search/person`), returning `ActorSummary[]` so clients can let users search and add actors to their personal favorite lists.
-
 
 ### 4. Response Schema & Compatibility Cleanup
 - [ ] **Remove Backward Compatibility in Paginated Responses**:
@@ -98,9 +103,6 @@
   - Update frontend parsers across mobile and TV apps to read `items` uniformly.
 
 ### 5. List Features & Chronological Order
-- [ ] **Filtering in Lists**:
-  - Add filtering parameters (`genre`, `year`, `language`, `sort_by`) to list endpoints (`GET /api/v1/movies/lists/{list_id}/items`).
-  - Enable local/upstream filtering inside Trakt user lists and custom curated collections.
 - [ ] **Preserve Chronological Order & Per-Season/Episode Entries in Lists**:
   - Eliminate aggressive `seen_keys` deduplication in [`backend/services/trakt.py`](file:///home/mukes/dev/movies/backend/services/trakt.py) that currently strips repeated TV shows.
   - Support franchise lists (e.g. Marvel Cinematic Universe chronological order) where distinct seasons or episodes of the same show appear interspersed between movies.

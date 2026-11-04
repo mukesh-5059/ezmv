@@ -310,7 +310,9 @@ export class CatalogService {
     }
 
     if (this.db && statements.length > 0) {
-      await this.db.batch(statements);
+      for (let i = 0; i < statements.length; i += 50) {
+        await this.db.batch(statements.slice(i, i + 50));
+      }
     }
 
     return summaries;

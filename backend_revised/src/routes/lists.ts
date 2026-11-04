@@ -76,9 +76,9 @@ listsRouter.get('/search', async (c) => {
 
 // GET /api/v1/lists/:list_id/items (Items inside a specific list, with in-list filters and sorting)
 listsRouter.get('/:list_id/items', async (c) => {
-  const listId = c.req.param('list_id')?.trim();
-  if (!listId) {
-    return c.json({ error: 'Missing list_id parameter' }, 400);
+  const listId = Number(c.req.param('list_id')?.trim());
+  if (isNaN(listId) || listId <= 0) {
+    return c.json({ error: 'Invalid or missing list_id parameter (must be numeric Trakt list ID)' }, 400);
   }
 
   const page = Math.max(1, Number(c.req.query('page') || 1));

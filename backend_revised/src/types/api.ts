@@ -96,7 +96,7 @@ export interface ListFilters {
 }
 
 export interface TraktListSummary {
-  id: string | number;
+  id: number;
   name: string;
   item_count: number;
   likes: number;
