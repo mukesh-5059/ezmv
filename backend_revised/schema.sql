@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS movies (
     overview TEXT,
     runtime INTEGER,
     genres TEXT,
+    original_language TEXT,
     updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb_id ON movies(tmdb_id);
@@ -51,6 +52,7 @@ SELECT
     m.overview,
     m.runtime,
     m.genres,
+    m.original_language,
     m.updated_at AS metadata_updated_at,
     r.updated_at AS ratings_updated_at
 FROM movies m

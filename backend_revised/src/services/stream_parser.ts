@@ -118,10 +118,41 @@ export function calculatePriority(
   provider: string,
   quality: string,
   languages?: string[],
-  defaultLanguage?: string
+  defaultLanguage?: string,
+  host?: string,
+  sizeBytes?: number
 ): number {
   let score = 100;
-  if (provider.toLowerCase() === 'hdhub') score -= 20;
+  const pLow = provider.toLowerCase();
+  if (pLow === 'hdhub' || pLow === 'plaviohd') score -= 20;
+  else if (pLow === 'penguplay') score -= 10;
+
+  // Host speed weighting
+  if (host) {
+    const hLow = host.toLowerCase();
+    if (
+      hLow.includes('pixeldrain') ||
+      hLow.includes('googleusercontent') ||
+      hLow.includes('hubcloud') ||
+      (hLow.includes('workers.dev') && !hLow.includes('notorrent'))
+    ) {
+      score -= 15;
+    } else if (
+      hLow.includes('notorrent') ||
+      hLow.includes('vidvault') ||
+      hLow.includes('streamtape') ||
+      hLow.includes('dood')
+    ) {
+      score += 20;
+    }
+  }
+
+  // Size spectrum: slight bonus for reasonable sizes (< 4 GB) over 30 GB remuxes
+  if (sizeBytes && sizeBytes > 0) {
+    const gb = sizeBytes / (1024 * 1024 * 1024);
+    if (gb <= 3.5) score -= 5;
+    else if (gb > 25) score += 5;
+  }
 
   const hasTamil = languages?.some((l) => l.toLowerCase() === 'tamil');
   if (hasTamil) {
@@ -186,7 +217,7 @@ export function parseStreamItem(
     filename,
     size_bytes: sizeBytes,
     formatted_size: formatSizeBytes(sizeBytes),
-    priority: calculatePriority(provider, quality, languages, defaultLanguage),
+    priority: calculatePriority(provider, quality, languages, defaultLanguage, host, sizeBytes),
     provider,
     host,
     languages: languages.length > 0 ? languages : undefined,

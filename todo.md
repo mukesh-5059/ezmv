@@ -45,6 +45,11 @@
 - [x] **Filtering in Lists**:
   - Implemented multi-parameter filtering & sorting (`type`, `genre`, `year`, `min_rating`, `sort_by`, `sort_order`) on `/api/v1/lists/:list_id/items` in [`backend_revised`](file:///home/mukes/dev/movies/backend_revised/src/routes/lists.ts).
   - Combined Trakt upstream sorting (`sort_by`, `sort_how`) with in-memory post-filtering.
+- [x] **Remove Backward Compatibility in Paginated Responses**:
+  - Deprecate and remove redundant `results` field from [`PaginatedMovieResponse`](file:///home/mukes/dev/movies/backend/models.py) and [`LaneMoviesResponse`](file:///home/mukes/dev/movies/backend/models.py).
+  - Standardize all backend responses on `items`.
+  - Remove `sync_items_and_results` `@model_validator`.
+  - Update frontend parsers across mobile and TV apps to read `items` uniformly.
 
 
 ---
@@ -95,19 +100,12 @@
 - [ ] **Actor Search Endpoint (`/api/v1/actors/search`)**:
   - Implement an endpoint to search actors/people by name (e.g. via TMDb `/search/person`), returning `ActorSummary[]` so clients can let users search and add actors to their personal favorite lists.
 
-### 4. Response Schema & Compatibility Cleanup
-- [ ] **Remove Backward Compatibility in Paginated Responses**:
-  - Deprecate and remove redundant `results` field from [`PaginatedMovieResponse`](file:///home/mukes/dev/movies/backend/models.py) and [`LaneMoviesResponse`](file:///home/mukes/dev/movies/backend/models.py).
-  - Standardize all backend responses on `items`.
-  - Remove `sync_items_and_results` `@model_validator`.
-  - Update frontend parsers across mobile and TV apps to read `items` uniformly.
-
-### 5. List Features & Chronological Order
+### 4. List Features & Chronological Order
 - [ ] **Preserve Chronological Order & Per-Season/Episode Entries in Lists**:
   - Eliminate aggressive `seen_keys` deduplication in [`backend/services/trakt.py`](file:///home/mukes/dev/movies/backend/services/trakt.py) that currently strips repeated TV shows.
   - Support franchise lists (e.g. Marvel Cinematic Universe chronological order) where distinct seasons or episodes of the same show appear interspersed between movies.
 
-### 6. Client-Side Cache Management
+### 5. Client-Side Cache Management
 - [ ] **Cache Management of Backend Returned Items on Client Side**:
   - Implement a persistent local cache layer (e.g. Hive, SQLite, or SharedPreferences in `shared_core`) for:
     - Dashboard lane feeds (instant cold start).
@@ -115,12 +113,12 @@
     - Search queries and Trakt lists.
   - Add configurable TTL and cache invalidation policies (e.g. background stale-while-revalidate).
 
-### 7. Watch State & Continuity
+### 6. Watch State & Continuity
 - [ ] **Cross-Device Watch State Management (Auth-Backed)**:
   - User account system (Username/User ID & Password authentication + token issuance) for profile synchronization.
   - Cloud-synced playback resume timestamps, completed watch states, favorites, and "Continue Watching" lane shared seamlessly between mobile and TV apps.
 
-### 8. Authoritative Data Integrity & Fallback Elimination
+### 7. Authoritative Data Integrity & Fallback Elimination
 - [ ] **Remove All Fallbacks & Rely Strictly on Authoritative Data**:
   - Eliminate all fallback chains and synthetic/placeholder data across backend and frontend:
     - **Search Fallbacks**: Stop cascading from Trakt search to TMDb search; query the authoritative index directly.
@@ -128,7 +126,7 @@
     - **Client-Side Metadata Fallbacks**: Remove `fallbackMovie` injections and mock metadata generation in `shared_core` (`MediaService`).
     - **Catalog & Stream Fallbacks**: Eliminate mock/static fallback catalogs; return verified real-time data or explicit empty states instead of masked fallback responses.
 
-### 9. Infrastructure, Hosting & Hardening
+### 8. Infrastructure, Hosting & Hardening
 - [ ] **Deploy `backend_revised` to Cloudflare**:
   - Run `npx wrangler deploy` once validated with frontend.
 - [ ] **Cloudflare Observability & Metrics Logging**:

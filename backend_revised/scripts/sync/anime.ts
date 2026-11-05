@@ -18,6 +18,7 @@ export async function fetchCandidates(traktClientId: string): Promise<CandidateF
     const movies = await fetchTraktItems(traktClientId, cfg.endpoint, cfg.params);
     feeds[lid] = movies;
     for (const m of movies) {
+      if (!m.language || m.language === "en") m.language = "ja";
       const iid = m.imdb_id;
       if (iid && iid.startsWith("tt")) {
         candidateIds.add(iid);

@@ -326,7 +326,8 @@ Retrieves detailed metadata for a single movie or TV show, including composite r
       }
     ],
     "status": "Ended",
-    "is_ongoing": false
+    "is_ongoing": false,
+    "original_language": "en"
   }
   ```
 
@@ -557,7 +558,7 @@ Returns actor biography and filmography categorized into up to 30 popular works 
 ---
 
 #### `GET /api/v1/streams/:media_type/:imdb_id`
-Resolves streaming links for movies or TV episodes by querying PenguPlay and HDHub Stremio addons in parallel.
+Resolves streaming links for movies or TV episodes by querying high-speed direct CDN providers (**PlavioHD** & **HDHub**) in parallel, with automatic fallback to secondary scrapers (**PenguPlay** & **NoTorrent**). Deduplicates streams by canonical URL and filename/size, ranks by host speed and language priority, and returns a clean top-20 stratified slice.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/streams/:media_type/:imdb_id`
@@ -604,16 +605,20 @@ Resolves streaming links for movies or TV episodes by querying PenguPlay and HDH
 
 ---
 
-#### `GET /api/v1/subtitles`
+#### `GET /api/v1/subtitles/:media_type/:imdb_id`
 Resolves available subtitle tracks for movies or TV episodes via OpenSubtitles (Stremio v3 Addon).
 
 - **Method**: `GET`
-- **Path**: `/api/v1/subtitles`
+- **Path**: `/api/v1/subtitles/:media_type/:imdb_id` *(also supports legacy `GET /api/v1/subtitles?imdb_id=...&media_type=...`)*
+- **Path Parameters**:
+  | Parameter | Type | Required | Description |
+  |---|---|---|---|
+  | `media_type` | `string` | Yes | Media type: `'movie'` or `'tv'` |
+  | `imdb_id` | `string` | Yes | IMDb ID strictly starting with `'tt'` (e.g. `tt0111161`) |
+
 - **Query Parameters**:
   | Parameter | Type | Required | Default | Description |
   |---|---|---|---|---|
-  | `imdb_id` | `string` | Yes | — | IMDb ID strictly starting with `'tt'` (e.g. `tt0111161`) |
-  | `media_type` | `string` | No | `'movie'` | Media type: `'movie'` or `'tv'` |
   | `season` | `number` | Yes (if `tv`) | `undefined` | Season number (required when `media_type === 'tv'`) |
   | `episode` | `number` | Yes (if `tv`) | `undefined` | Episode number (required when `media_type === 'tv'`) |
   | `language` | `string` | No | `undefined` | Case-insensitive language name or ISO code filter (e.g. `English`, `eng`, `Tamil`) |
@@ -655,5 +660,5 @@ Resolves available subtitle tracks for movies or TV episodes via OpenSubtitles (
 | `GET` | `/api/v1/lists/:list_id/items` | `:list_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?sort_order` | Paginated items inside a curated list (100/page) |
 | `GET` | `/api/v1/actors` | — | Curated regional featured actors |
 | `GET` | `/api/v1/actors/:id` | `:id` (TMDb) | Actor profile, top 30 popular and top 30 recent filmography |
-| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?default_language` | PenguPlay and HDHub streaming links |
-| `GET` | `/api/v1/subtitles` | `?imdb_id`, `?media_type`, `?season`, `?episode`, `?language` | OpenSubtitles tracks sorted by popularity |
+| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?default_language` | Deduplicated, host-ranked streaming links (PlavioHD, HDHub, PenguPlay, NoTorrent) |
+| `GET` | `/api/v1/subtitles/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?language` | OpenSubtitles tracks sorted by popularity |

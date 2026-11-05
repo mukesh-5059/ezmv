@@ -52,7 +52,7 @@ export async function fetchTraktItems(
       title: target.title || "",
       year: target.year,
       type: isShow ? "show" : "movie",
-      language: "en",
+      language: target.language || "en",
       genres: target.genres || [],
     });
   }

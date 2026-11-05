@@ -7,6 +7,8 @@ export type Bindings = {
   TMDB_READ_ACCESS_TOKEN?: string;
   PENGUPLAY_MANIFEST_URL?: string;
   HDHUB_MANIFEST_URL?: string;
+  PLAVIOHD_MANIFEST_URL?: string;
+  NOTORRENT_MANIFEST_URL?: string;
 };
 
 export interface RequestTrace {
@@ -71,6 +73,7 @@ export interface MovieDetails extends MovieSummary {
   seasons?: TvSeasonSummary[];
   status?: string | null;
   is_ongoing?: boolean;
+  original_language?: string | null;
 }
 
 export interface LaneFilters {

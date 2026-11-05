@@ -14,7 +14,8 @@ export function buildMovieSql(
   runtime: number,
   relStr: string,
   slugs: string[],
-  now: number
+  now: number,
+  lang: string = ""
 ): string {
   const isShow = item.type === "show" || fullItem.type === "show";
   const mediaType = isShow ? "tv" : "movie";
@@ -29,10 +30,11 @@ export function buildMovieSql(
   const overviewSql = escapeSql(item.description || fullItem.description || "");
   const runtimeSql = runtime ? String(Number(runtime)) : "NULL";
   const genresSql = escapeSql(JSON.stringify(slugs));
+  const langSql = escapeSql(lang || fullItem.language || item.language || "");
 
   return (
-    `INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, updated_at) ` +
-    `VALUES ('${imdbId}', ${tmdbIdSql}, '${mediaType}', ${title}, ${yearSql}, ${relDateSql}, ${posterSql}, ${backdropSql}, ${overviewSql}, ${runtimeSql}, ${genresSql}, ${now}) ` +
+    `INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, original_language, updated_at) ` +
+    `VALUES ('${imdbId}', ${tmdbIdSql}, '${mediaType}', ${title}, ${yearSql}, ${relDateSql}, ${posterSql}, ${backdropSql}, ${overviewSql}, ${runtimeSql}, ${genresSql}, ${langSql}, ${now}) ` +
     `ON CONFLICT(imdb_id) DO UPDATE SET ` +
     `tmdb_id = COALESCE(excluded.tmdb_id, movies.tmdb_id), ` +
     `media_type = excluded.media_type, ` +
@@ -42,6 +44,7 @@ export function buildMovieSql(
     `poster_path = CASE WHEN excluded.poster_path != '' THEN excluded.poster_path ELSE movies.poster_path END, ` +
     `overview = CASE WHEN excluded.overview != '' THEN excluded.overview ELSE movies.overview END, ` +
     `genres = excluded.genres, ` +
+    `original_language = CASE WHEN excluded.original_language != '' THEN excluded.original_language ELSE movies.original_language END, ` +
     `updated_at = excluded.updated_at;`
   );
 }

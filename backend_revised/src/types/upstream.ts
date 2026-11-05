@@ -38,6 +38,7 @@ export interface MdblistItem {
   type?: 'movie' | 'show';
   poster?: string;
   backdrop?: string;
+  language?: string;
   ratings?: MdblistRating[];
   genres?: Array<string | MdblistGenre>;
 }

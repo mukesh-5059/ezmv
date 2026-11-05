@@ -158,6 +158,7 @@ export class CatalogService {
       runtime: row.runtime || null,
       cast: [],
       seasons: [],
+      original_language: row.original_language || null,
     };
 
     // Fetch credits & seasons from TMDb if tmdb_id exists
@@ -172,6 +173,9 @@ export class CatalogService {
 
         if (resp.ok) {
           const tmdbData: any = await resp.json();
+          if (!details.original_language && tmdbData.original_language) {
+            details.original_language = tmdbData.original_language;
+          }
           if (Array.isArray(tmdbData.credits?.cast)) {
             details.cast = tmdbData.credits.cast.slice(0, 20).map((c: any) => ({
               tmdb_id: c.id,
@@ -269,8 +273,8 @@ export class CatalogService {
       // Metadata upsert
       statements.push(
         this.db.prepare(`
-          INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO movies (imdb_id, tmdb_id, media_type, title, year, release_date, poster_path, backdrop_path, overview, runtime, genres, original_language, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(imdb_id) DO UPDATE SET
             tmdb_id = COALESCE(excluded.tmdb_id, movies.tmdb_id),
             media_type = excluded.media_type,
@@ -282,6 +286,7 @@ export class CatalogService {
             overview = COALESCE(excluded.overview, movies.overview),
             runtime = COALESCE(excluded.runtime, movies.runtime),
             genres = excluded.genres,
+            original_language = COALESCE(excluded.original_language, movies.original_language),
             updated_at = excluded.updated_at
         `).bind(
           summary.imdb_id,
@@ -295,6 +300,7 @@ export class CatalogService {
           summary.overview,
           item.runtime || null,
           genresJson,
+          item.language || null,
           now
         ),
         this.db.prepare(`

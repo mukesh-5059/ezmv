@@ -154,7 +154,7 @@ export async function generateSyncSql(
       lb_votes: lbVotes,
     };
 
-    statements.push(buildMovieSql(imdbId, item, fullItem, poster, runtime, relStr, slugs, nowTs));
+    statements.push(buildMovieSql(imdbId, item, fullItem, poster, runtime, relStr, slugs, nowTs, lang));
     statements.push(buildRatingSql(imdbId, ratingsJson, ratingScore, votes, nowTs));
   }
 
