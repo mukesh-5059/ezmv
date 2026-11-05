@@ -154,6 +154,9 @@ export async function generateSyncSql(
       lb_votes: lbVotes,
     };
 
+    // Do not insert completely empty ghost items that have neither a poster nor any ratings
+    if (!poster && (!fullItem.ratings || fullItem.ratings.length === 0)) continue;
+
     statements.push(buildMovieSql(imdbId, item, fullItem, poster, runtime, relStr, slugs, nowTs, lang));
     statements.push(buildRatingSql(imdbId, ratingsJson, ratingScore, votes, nowTs));
   }
@@ -204,7 +207,8 @@ if (require.main === module || process.argv[1]?.endsWith("sync_catalog_to_d1.ts"
   generateSyncSql(apiKey, traktClientId, outputArg)
     .then(() => {
       if (executeFlag) {
-        executeSeed(outputArg, isLocal);
+        const ok = executeSeed(outputArg, isLocal);
+        if (!ok) process.exit(1);
       } else {
         console.log("\n[D1 Execution Skipped] SQL file generated only. Pass --execute to seed D1.");
       }

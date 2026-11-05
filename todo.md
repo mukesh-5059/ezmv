@@ -87,6 +87,10 @@
   - Support discovery and selection of internal/embedded subtitle tracks (muxed inside MP4/MKV video containers) alongside external OpenSubtitles VTT/SRT tracks in the player HUD.
 
 ### 3. Route & API Architecture
+- [ ] **Random Title Discovery Endpoint (`/api/v1/random`)**:
+  - Endpoint for TV lean-back instant playback and "Surprise Me" / "Quick Laughs" features.
+  - Query parameters: `?dashboard_id=tamil|english|anime`, `?genre=comedy|...`, `?type=movie|tv`, `?min_rating=7.0`.
+  - Returns a single randomized `MovieSummary` meeting criteria from D1 catalog, enabling zero-click instant playback for indecisive/lazy viewers.
 - [ ] **Direct Single Movie Resolution Without D1**:
   - Look into resolving single movies directly without requiring a D1 entry.
 - [ ] **Explore Query Request Caching**:

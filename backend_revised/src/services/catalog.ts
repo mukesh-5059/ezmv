@@ -176,6 +176,12 @@ export class CatalogService {
           if (!details.original_language && tmdbData.original_language) {
             details.original_language = tmdbData.original_language;
           }
+          if (!details.backdrop_path && tmdbData.backdrop_path) {
+            details.backdrop_path = `https://image.tmdb.org/t/p/w1920_and_h800_multi_faces${tmdbData.backdrop_path}`;
+          }
+          if (!details.poster_path && tmdbData.poster_path) {
+            details.poster_path = `https://image.tmdb.org/t/p/original${tmdbData.poster_path}`;
+          }
           if (Array.isArray(tmdbData.credits?.cast)) {
             details.cast = tmdbData.credits.cast.slice(0, 20).map((c: any) => ({
               tmdb_id: c.id,
@@ -263,6 +269,7 @@ export class CatalogService {
       const comp = MdblistService.computeRating(item, rules);
       const summary = this.mdblistItemToSummary(item, comp);
       if (!summary.imdb_id) continue;
+      if (!summary.poster_path && (!item.ratings || item.ratings.length === 0)) continue;
       summaries.push(summary);
 
       if (!this.db) continue;
@@ -280,13 +287,13 @@ export class CatalogService {
             media_type = excluded.media_type,
             title = excluded.title,
             year = COALESCE(excluded.year, movies.year),
-            release_date = COALESCE(excluded.release_date, movies.release_date),
-            poster_path = COALESCE(excluded.poster_path, movies.poster_path),
-            backdrop_path = COALESCE(excluded.backdrop_path, movies.backdrop_path),
-            overview = COALESCE(excluded.overview, movies.overview),
+            release_date = COALESCE(NULLIF(excluded.release_date, ''), movies.release_date),
+            poster_path = COALESCE(NULLIF(excluded.poster_path, ''), movies.poster_path),
+            backdrop_path = COALESCE(NULLIF(excluded.backdrop_path, ''), movies.backdrop_path),
+            overview = COALESCE(NULLIF(excluded.overview, ''), movies.overview),
             runtime = COALESCE(excluded.runtime, movies.runtime),
-            genres = excluded.genres,
-            original_language = COALESCE(excluded.original_language, movies.original_language),
+            genres = CASE WHEN excluded.genres != '[]' AND excluded.genres != '' THEN excluded.genres ELSE movies.genres END,
+            original_language = COALESCE(NULLIF(excluded.original_language, ''), movies.original_language),
             updated_at = excluded.updated_at
         `).bind(
           summary.imdb_id,

@@ -19,8 +19,9 @@ export function buildMovieSql(
 ): string {
   const isShow = item.type === "show" || fullItem.type === "show";
   const mediaType = isShow ? "tv" : "movie";
-  const tmdbId = item.id || item.ids?.tmdb || fullItem.id || fullItem.ids?.tmdb;
-  const tmdbIdSql = tmdbId ? `'${mediaType}:${Number(tmdbId)}'` : "NULL";
+  const rawTmdb = item.id || item.ids?.tmdb || fullItem.id || fullItem.ids?.tmdb;
+  const numTmdb = rawTmdb ? Number(String(rawTmdb).replace(/^(movie|tv):/, "")) : null;
+  const tmdbIdSql = numTmdb && !isNaN(numTmdb) ? `'${mediaType}:${numTmdb}'` : "NULL";
   const title = escapeSql(item.title || fullItem.title || "Unknown");
   const year = item.release_year || fullItem.year || item.year;
   const yearSql = year ? String(Number(year)) : "NULL";
@@ -42,8 +43,10 @@ export function buildMovieSql(
     `year = COALESCE(excluded.year, movies.year), ` +
     `release_date = CASE WHEN excluded.release_date != '' THEN excluded.release_date ELSE movies.release_date END, ` +
     `poster_path = CASE WHEN excluded.poster_path != '' THEN excluded.poster_path ELSE movies.poster_path END, ` +
+    `backdrop_path = CASE WHEN excluded.backdrop_path != '' THEN excluded.backdrop_path ELSE movies.backdrop_path END, ` +
     `overview = CASE WHEN excluded.overview != '' THEN excluded.overview ELSE movies.overview END, ` +
-    `genres = excluded.genres, ` +
+    `runtime = COALESCE(excluded.runtime, movies.runtime), ` +
+    `genres = CASE WHEN excluded.genres != '[]' AND excluded.genres != '' THEN excluded.genres ELSE movies.genres END, ` +
     `original_language = CASE WHEN excluded.original_language != '' THEN excluded.original_language ELSE movies.original_language END, ` +
     `updated_at = excluded.updated_at;`
   );

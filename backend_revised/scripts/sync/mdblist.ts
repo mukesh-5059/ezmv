@@ -58,9 +58,11 @@ export async function fetchBatchDetails(
       chunks.push(ids.slice(i, i + chunkSize));
     }
 
-    await Promise.all(
-      chunks.map(async (chunk) => {
-        try {
+    const concurrency = 3;
+    for (let i = 0; i < chunks.length; i += concurrency) {
+      const slice = chunks.slice(i, i + concurrency);
+      await Promise.all(
+        slice.map(async (chunk, chunkIdx) => {
           const res = await fetch(`${MDBLIST_BASE_URL}/imdb/${targetType}/?apikey=${apiKey}`, {
             method: "POST",
             headers: {
@@ -69,17 +71,28 @@ export async function fetchBatchDetails(
             },
             body: JSON.stringify({ ids: chunk }),
           });
-          if (!res.ok) return;
+
+          if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            throw new Error(
+              `MDBList batch query failed for ${targetType} chunk ${i + chunkIdx}: HTTP ${res.status} ${res.statusText} - ${errText}`
+            );
+          }
+
           const items = (await res.json()) as any[];
+          if (!Array.isArray(items)) {
+            throw new Error(`MDBList batch query returned unexpected response: ${JSON.stringify(items)}`);
+          }
+
           for (const item of items) {
             const iid = item.imdbid || item.ids?.imdb;
             if (iid) {
               lookup[iid] = item;
             }
           }
-        } catch {}
-      })
-    );
+        })
+      );
+    }
   }
 
   console.log(`  -> Concurrently fetching ${idsToFetch.length} movie batch ratings...`);

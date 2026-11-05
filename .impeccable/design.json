@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T12:55:20Z",
+  "title": "Design System: Movies Streaming Client",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Cinematic Red",
+        "canonical": "#E50914",
+        "tonalRamp": ["#E50914", "#FF3B30", "#B20710", "#800000"]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "OLED Deep Black",
+        "canonical": "#07080B",
+        "tonalRamp": ["#07080B", "#0E1015", "#131418"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Charcoal Surface",
+        "canonical": "#131418",
+        "tonalRamp": ["#131418", "#1C1D24", "#252730"]
+      },
+      "surface-elevated": {
+        "role": "neutral",
+        "displayName": "Elevated Charcoal",
+        "canonical": "#1C1D24",
+        "tonalRamp": ["#1C1D24", "#252730", "#30323E"]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Pure White",
+        "canonical": "#FFFFFF",
+        "tonalRamp": ["#FFFFFF", "#E0E0E6", "#9E9EA7", "#6E717E"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display Large", "purpose": "Hero billboard title showcase." },
+      "headline": { "displayName": "Headline Large", "purpose": "Section headings and dashboard headers." },
+      "title": { "displayName": "Title Large", "purpose": "Lane titles and modal headers." },
+      "body": { "displayName": "Body Text", "purpose": "Movie overview synopsis and readable content." },
+      "label": { "displayName": "Label / Metadata", "purpose": "Quality tags, year, runtime, and ratings." }
+    },
+    "shadows": [
+      {
+        "name": "tv-focus-halo",
+        "value": "0 0 10px 1px rgba(255, 255, 255, 0.15)",
+        "purpose": "Soft white halo around focused 10-foot TV card."
+      },
+      {
+        "name": "tv-card-drop",
+        "value": "0 8px 16px rgba(0, 0, 0, 0.85)",
+        "purpose": "Deep OLED drop shadow lifting focused card off canvas."
+      },
+      {
+        "name": "rest-shadow",
+        "value": "0 4px 6px rgba(0, 0, 0, 0.5)",
+        "purpose": "Subtle grounding shadow under inactive cards."
+      }
+    ],
+    "motion": [
+      {
+        "name": "focus-scale",
+        "value": "cubic-bezier(0.2, 0, 0, 1) 200ms",
+        "purpose": "Springy 1.08x card scale on remote D-pad focus."
+      },
+      {
+        "name": "auto-center-scroll",
+        "value": "cubic-bezier(0.25, 1, 0.5, 1) 350ms",
+        "purpose": "Smooth camera auto-centering for active lanes."
+      }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "360px" },
+      { "name": "tv-1080p", "value": "1920px" },
+      { "name": "tv-4k", "value": "3840px" }
+    ]
+  }
+}
