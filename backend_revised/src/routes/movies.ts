@@ -27,8 +27,11 @@ moviesRouter.get('/tv/:tmdb_id/season/:season_number', async (c) => {
     return c.json(cached);
   }
 
+  const tTmdb = Date.now();
   const catalog = new CatalogService(c.env);
   const seasonDetails = await catalog.getTvSeason(tmdbId, seasonNumber);
+  if (trace) trace.add(`TMDB: ${Date.now() - tTmdb}ms`);
+
   if (!seasonDetails) return c.json({ error: `Season ${seasonNumber} not found for TMDb ID ${tmdbId}` }, 404);
 
   await cacheService.set(cacheKey, seasonDetails, 86400);
@@ -42,9 +45,8 @@ moviesRouter.get('/:media_type/:tmdb_id', async (c) => {
   const mediaTypeParam = c.req.param('media_type').toLowerCase();
   const tmdbId = Number(c.req.param('tmdb_id'));
 
-  if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv') {
+  if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv')
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
-  }
 
   if (isNaN(tmdbId) || tmdbId <= 0) return c.json({ error: 'Invalid tmdb_id parameter (must be numeric TMDb ID).' }, 400); 
 
@@ -61,13 +63,12 @@ moviesRouter.get('/:media_type/:tmdb_id', async (c) => {
     c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');
     return c.json(cached);
   }
-
+  const tTmdb = Date.now();
   const catalog = new CatalogService(c.env);
   const movieDetails = await catalog.getSingleMovie(tmdbId, mediaTypeParam);
+  if (trace) trace.add(`TMDB: ${Date.now() - tTmdb}ms`);
 
-  if (!movieDetails) {
-    return c.json({ error: 'Movie not found' }, 404);
-  }
+  if (!movieDetails) return c.json({ error: 'Movie not found' }, 404);
 
   await cacheService.set(cacheKey, movieDetails, 86400);
   c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');

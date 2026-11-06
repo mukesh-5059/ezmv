@@ -34,22 +34,16 @@ export class TraktSearchService {
     if (!cleanQuery) return emptyResponse;
 
     let endpointType = 'movie,show';
-    if (filters?.media_type === 'movie') {
-      endpointType = 'movie';
-    } else if (filters?.media_type === 'tv') {
-      endpointType = 'show';
-    }
+    if (filters?.media_type === 'movie')   endpointType = 'movie';
+    else if (filters?.media_type === 'tv') endpointType = 'show';
 
     let url = `${this.baseUrl}/search/${endpointType}?query=${encodeURIComponent(cleanQuery)}&page=${page}&limit=${limit}`;
-    if (filters?.genre) {
-      url += `&genres=${encodeURIComponent(filters.genre)}`;
-    }
-    if (filters?.year) {
-      url += `&years=${encodeURIComponent(String(filters.year))}`;
-    }
+    if (filters?.genre) url += `&genres=${encodeURIComponent(filters.genre)}`;
+    if (filters?.year)  url += `&years=${encodeURIComponent(String(filters.year))}`;
 
     try {
       if (!this.clientId) throw new Error('Missing TRAKT_CLIENT_ID');
+      const tTrakt = Date.now();
       const resp = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
@@ -71,28 +65,22 @@ export class TraktSearchService {
 
       const rawItems: TraktSearchItem[] = await resp.json();
       const imdbIds: string[] = [];
+      if (trace) trace.add(`trakt search: ${rawItems.length} items ${Date.now() - tTrakt}ms`);
 
       for (const item of rawItems) {
         const payload = item.movie || item.show;
         const imdbId = payload?.ids?.imdb;
-        if (imdbId && imdbId.startsWith('tt')) {
-          imdbIds.push(imdbId);
-        }
+        if (imdbId && imdbId.startsWith('tt')) imdbIds.push(imdbId);
       }
 
-      if (!imdbIds.length) {
-        return this.searchTmdb(cleanQuery, page, filters, trace);
-      }
+      if (!imdbIds.length) return emptyResponse;
 
       let movies = await this.catalog.resolveMovies(imdbIds, trace, filters?.media_type);
 
-      if (filters?.min_rating !== undefined && filters.min_rating > 0) {
+      if (filters?.min_rating !== undefined && filters.min_rating > 0)
         movies = movies.filter((m) => m.rating_score >= filters.min_rating!);
-      }
 
-      if (movies.length === 0) {
-        return this.searchTmdb(cleanQuery, page, filters, trace);
-      }
+      if (movies.length === 0) return emptyResponse;
 
       const hasMore = pageHeader < totalPages;
       return {
@@ -137,11 +125,13 @@ export class TraktSearchService {
     }
 
     try {
+      const tTmdb = Date.now();
       const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
       if (!resp.ok) return emptyResponse;
 
       const data: any = await resp.json();
       const results: any[] = data.results || [];
+      if (trace) trace.add(`tmdb search: ${results.length} items ${Date.now() - tTmdb}ms`);
       const tmdbItems: Array<{ id: number; media_type: 'movie' | 'tv' }> = [];
 
       for (const item of results) {

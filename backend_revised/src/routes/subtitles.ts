@@ -14,22 +14,20 @@ async function handleSubtitles(
   episodeParam?: string,
   langFilterParam?: string
 ) {
-  if (!imdbId || !imdbId.startsWith('tt')) {
+  if (!imdbId || !imdbId.startsWith('tt'))
     return c.json({ error: 'Missing or invalid imdb_id parameter (must start with "tt")' }, 400);
-  }
 
   const mediaTypeLower = (mediaTypeParam || 'movie').toLowerCase();
-  if (mediaTypeLower !== 'movie' && mediaTypeLower !== 'tv') {
+  if (mediaTypeLower !== 'movie' && mediaTypeLower !== 'tv')
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
-  }
+
   const mediaType: 'movie' | 'tv' = mediaTypeLower as 'movie' | 'tv';
 
   const season = seasonParam ? Number(seasonParam) : undefined;
   const episode = episodeParam ? Number(episodeParam) : undefined;
 
-  if (mediaType === 'tv' && (season === undefined || episode === undefined || isNaN(season) || isNaN(episode))) {
+  if (mediaType === 'tv' && (season === undefined || episode === undefined || isNaN(season) || isNaN(episode)))
     return c.json({ error: 'For tv media_type, both "season" and "episode" parameters are required.' }, 400);
-  }
 
   const langFilter = langFilterParam?.trim().toLowerCase();
 
@@ -52,22 +50,20 @@ async function handleSubtitles(
   }
 
   let stremioUrl: string;
-  if (mediaType === 'tv' && season && episode) {
+  if (mediaType === 'tv' && season && episode)
     stremioUrl = `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${season}:${episode}.json`;
-  } else {
-    stremioUrl = `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`;
-  }
+  else stremioUrl = `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`;
 
   let stremioData: any;
+  const tSub = Date.now();
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
     const response = await fetch(stremioUrl, { signal: controller.signal });
     clearTimeout(timeoutId);
 
-    if (response.ok) {
-      stremioData = await response.json();
-    }
+    if (response.ok) stremioData = await response.json();
+
   } catch (_) {}
 
   const rawSubs = Array.isArray(stremioData?.subtitles) ? stremioData.subtitles : [];
@@ -76,10 +72,9 @@ async function handleSubtitles(
   for (const sub of rawSubs) {
     if (!sub.url) continue;
 
-    const rawLang = (sub.lang || '').toLowerCase();
-    let language = rawLang;
+    let language = (sub.lang || '').toLowerCase();
     try {
-      language = langNames.of(rawLang) || rawLang;
+      language = langNames.of(language) || language;
     } catch (_) {}
 
     const name =
@@ -98,6 +93,7 @@ async function handleSubtitles(
   }
 
   tracks.sort((a, b) => b.popularity - a.popularity);
+  if (trace) trace.add(`subtitles: ${tracks.length} items ${Date.now() - tSub}ms`);
   if(tracks.length > 0) await cacheService.set(cacheKey, tracks, 86400);
 
   let responseData = tracks;
@@ -116,18 +112,6 @@ subtitlesRouter.get('/:media_type/:imdb_id', async (c) => {
     c,
     c.req.param('media_type'),
     c.req.param('imdb_id'),
-    c.req.query('season'),
-    c.req.query('episode'),
-    c.req.query('language')
-  );
-});
-
-// Query parameter route for backward compatibility: GET /api/v1/subtitles?imdb_id=...&media_type=...
-subtitlesRouter.get('/', async (c) => {
-  return handleSubtitles(
-    c,
-    c.req.query('media_type') || 'movie',
-    c.req.query('imdb_id') || '',
     c.req.query('season'),
     c.req.query('episode'),
     c.req.query('language')

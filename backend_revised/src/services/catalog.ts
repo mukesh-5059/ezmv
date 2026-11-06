@@ -49,9 +49,7 @@ export class CatalogService {
       }
     }
     const d1ReadDuration = Date.now() - tD1;
-    if (trace) {
-      trace.add(`d1_read: HIT ${lookup.size}/${cleanIds.length} in ${d1ReadDuration}ms`);
-    }
+    if (trace) trace.add(`d1_read: HIT ${lookup.size}/${cleanIds.length} in ${d1ReadDuration}ms`);
 
     for (const id of cleanIds) if (!lookup.has(id)) missingIds.push(id);
 
@@ -106,8 +104,7 @@ export class CatalogService {
       }
     }
 
-    const d1ReadDuration = Date.now() - tD1;
-    if (trace) trace.add(`d1_read_tmdb: HIT ${lookup.size}/${items.length} in ${d1ReadDuration}ms`);
+    if (trace) trace.add(`d1_read_tmdb: HIT ${lookup.size}/${items.length} in ${Date.now() - tD1}ms`);
 
     const missingItems: Array<{ id: number; media_type: 'movie' | 'tv' }> = [];
     for (const it of items) {

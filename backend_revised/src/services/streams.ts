@@ -62,9 +62,7 @@ export class StreamsService {
 
     const primaryResults = await Promise.allSettled(primaryFetches);
     const streams: StreamSource[] = [];
-    for (const res of primaryResults) {
-      if (res.status === 'fulfilled') streams.push(...res.value);
-    }
+    for (const res of primaryResults) if (res.status === 'fulfilled') streams.push(...res.value);
 
     // 2. Fallback to Tier 2 (PenguPlay + NoTorrent) if primary streams < 3
     if (streams.length < 3) {
@@ -73,9 +71,7 @@ export class StreamsService {
       if (notorrentBase) secondaryFetches.push(fetchAddon(notorrentBase, 'notorrent'));
 
       const secondaryResults = await Promise.allSettled(secondaryFetches);
-      for (const res of secondaryResults) {
-        if (res.status === 'fulfilled') streams.push(...res.value);
-      }
+      for (const res of secondaryResults) if (res.status === 'fulfilled') streams.push(...res.value);
     }
 
     // 3. Deduplicate by exact URL and (filename + size_bytes)

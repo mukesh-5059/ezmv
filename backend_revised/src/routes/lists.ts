@@ -25,8 +25,10 @@ listsRouter.get('/popular', async (c) => {
     });
   }
 
+  const tTrakt = Date.now();
   const listsService = new ListsService(c.env);
   const result = await listsService.getPopularLists(page, PAGE_SIZE);
+  if (trace) trace.add(`trakt fetch: ${result.items.length} items ${Date.now() - tTrakt}ms`);
 
   if (result.items.length > 0) await cacheService.set(cacheKey, result, 43200);
 
@@ -41,9 +43,7 @@ listsRouter.get('/search', async (c) => {
   const page = Math.max(1, Number(c.req.query('page') || 1));
   const PAGE_SIZE = 50;
 
-  if (!query) {
-    return c.redirect(`/api/v1/lists/popular?page=${page}`);
-  }
+  if (!query) return c.redirect(`/api/v1/lists/popular?page=${page}`);
 
   const origin = new URL(c.req.url).origin;
   const cacheKey = `${origin}/api/v1/lists/search?q=${encodeURIComponent(query)}&page=${page}`;
@@ -60,8 +60,10 @@ listsRouter.get('/search', async (c) => {
     });
   }
 
+  const tTrakt = Date.now();
   const listsService = new ListsService(c.env);
   const result = await listsService.searchLists(query, page, PAGE_SIZE);
+  if (trace) trace.add(`trakt fetch: ${result.items.length} items ${Date.now() - tTrakt}ms`);
 
   if (result.items.length > 0) await cacheService.set(cacheKey, result, 43200);
 
@@ -123,9 +125,7 @@ listsRouter.get('/:list_id/items', async (c) => {
   const listsService = new ListsService(c.env);
   const result = await listsService.getListItems(listId, page, PAGE_SIZE, filters, trace);
 
-  if (result.items.length > 0) {
-    await cacheService.set(cacheKey, result, 43200);
-  }
+  if (result.items.length > 0) await cacheService.set(cacheKey, result, 43200);
 
   return c.json(result, 200, {
     'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
