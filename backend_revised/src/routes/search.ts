@@ -46,9 +46,12 @@ searchRouter.get('/', async (c) => {
 
   if (result.items.length > 0) {
     await cacheService.set(cacheKey, result, 43200);
+    return c.json(result, 200, {
+      'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
+    });
   }
 
   return c.json(result, 200, {
-    'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
   });
 });

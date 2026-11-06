@@ -98,7 +98,7 @@ async function handleSubtitles(
   }
 
   tracks.sort((a, b) => b.popularity - a.popularity);
-  await cacheService.set(cacheKey, tracks, 86400);
+  if(tracks.length > 0) await cacheService.set(cacheKey, tracks, 86400);
 
   let responseData = tracks;
   if (langFilter) {

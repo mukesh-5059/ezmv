@@ -102,9 +102,7 @@ dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
   const lanesService = new LanesService(c.env);
   const result = await lanesService.getLaneItems(lane, page, PAGE_SIZE, filters, trace);
 
-  if (result.items.length > 0) {
-    await cacheService.set(cacheKey, result, 43200);
-  }
+  if (result.items.length > 0) await cacheService.set(cacheKey, result, 43200);
 
   return c.json(result, 200, {
     'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',

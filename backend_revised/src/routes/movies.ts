@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { Bindings, MovieDetails, TvSeasonResponse, Variables } from '../types';
+import { Bindings, AdditionalMovieDetails, TvSeasonResponse, Variables } from '../types';
 import { CatalogService } from '../services/catalog';
 import { CacheService } from '../services/cache';
 
@@ -38,25 +38,23 @@ moviesRouter.get('/tv/:tmdb_id/season/:season_number', async (c) => {
 });
 
 // GET /api/v1/movies/:media_type/:imdb_id
-moviesRouter.get('/:media_type/:imdb_id', async (c) => {
+moviesRouter.get('/:media_type/:tmdb_id', async (c) => {
   const mediaTypeParam = c.req.param('media_type').toLowerCase();
-  const imdbId = c.req.param('imdb_id').trim();
+  const tmdbId = Number(c.req.param('tmdb_id'));
 
   if (mediaTypeParam !== 'movie' && mediaTypeParam !== 'tv') {
     return c.json({ error: 'Invalid media_type. Must be "movie" or "tv".' }, 400);
   }
 
-  if (!imdbId.startsWith('tt')) {
-    return c.json({ error: 'Invalid imdb_id parameter (must start with "tt").' }, 400);
-  }
+  if (isNaN(tmdbId) || tmdbId <= 0) return c.json({ error: 'Invalid tmdb_id parameter (must be numeric TMDb ID).' }, 400); 
 
   const origin = new URL(c.req.url).origin;
-  const cacheKey = `${origin}/api/v1/movies/${mediaTypeParam}/${imdbId}`;
+  const cacheKey = `${origin}/api/v1/movies/${mediaTypeParam}/${tmdbId}`;
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
   const tCache = Date.now();
-  const cached = await cacheService.get<MovieDetails>(cacheKey);
+  const cached = await cacheService.get<AdditionalMovieDetails>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
@@ -65,7 +63,7 @@ moviesRouter.get('/:media_type/:imdb_id', async (c) => {
   }
 
   const catalog = new CatalogService(c.env);
-  const movieDetails = await catalog.getSingleMovie(imdbId);
+  const movieDetails = await catalog.getSingleMovie(tmdbId, mediaTypeParam);
 
   if (!movieDetails) {
     return c.json({ error: 'Movie not found' }, 404);

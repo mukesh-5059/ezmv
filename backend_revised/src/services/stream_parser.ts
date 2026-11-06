@@ -191,6 +191,8 @@ export function parseStreamItem(
   }
 
   const quality = parseQuality(fullText);
+  if (quality === '4K UHD') return null;
+
   const languages = parseLanguages(fullText, defaultLanguage);
 
   const sizeBytes =

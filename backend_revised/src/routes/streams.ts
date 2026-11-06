@@ -52,7 +52,7 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
   });
   if (trace) trace.add(`streams: ${data.streams.length} links ${Date.now() - tFetch}ms`);
 
-  await cacheService.set(cacheKey, data, 900);
+  if (data.streams.length > 0) await cacheService.set(cacheKey, data, 900);
 
   return c.json(data);
 });

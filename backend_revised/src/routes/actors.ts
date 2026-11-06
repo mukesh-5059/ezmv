@@ -34,9 +34,7 @@ actorsRouter.get('/:tmdb_id', async (c) => {
   const actorsService = new ActorsService(c.env);
   const personDetails = await actorsService.getPersonDetails(personId, trace);
 
-  if (!personDetails) {
-    return c.json({ error: `Person ${personId} not found.` }, 404);
-  }
+  if (!personDetails) return c.json({ error: `Person ${personId} not found.` }, 404);
 
   await cacheService.set(cacheKey, personDetails, 604800);
   c.header('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');

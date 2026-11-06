@@ -4,11 +4,13 @@ import { CatalogService } from './catalog';
 
 export class TraktSearchService {
   private clientId: string;
+  private tmdbApiKey: string;
   private catalog: CatalogService;
   private baseUrl = 'https://api.trakt.tv';
 
   constructor(env: Bindings) {
     this.clientId = env.TRAKT_CLIENT_ID || '';
+    this.tmdbApiKey = env.TMDB_API_KEY || '';
     this.catalog = new CatalogService(env);
   }
 
@@ -29,7 +31,7 @@ export class TraktSearchService {
       next_page: null,
     };
 
-    if (!cleanQuery || !this.clientId) return emptyResponse;
+    if (!cleanQuery) return emptyResponse;
 
     let endpointType = 'movie,show';
     if (filters?.media_type === 'movie') {
@@ -47,6 +49,7 @@ export class TraktSearchService {
     }
 
     try {
+      if (!this.clientId) throw new Error('Missing TRAKT_CLIENT_ID');
       const resp = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
@@ -57,7 +60,10 @@ export class TraktSearchService {
         signal: AbortSignal.timeout(10000),
       });
 
-      if (!resp.ok) return emptyResponse;
+      if (!resp.ok) {
+        console.warn(`[Trakt search error] HTTP ${resp.status} for ${url}, falling back to TMDb`);
+        return this.searchTmdb(cleanQuery, page, filters, trace);
+      }
 
       const pageHeader = Number(resp.headers.get('x-pagination-page')) || page;
       const totalPages = Number(resp.headers.get('x-pagination-page-count')) || 0;
@@ -74,12 +80,18 @@ export class TraktSearchService {
         }
       }
 
-      if (!imdbIds.length) return emptyResponse;
+      if (!imdbIds.length) {
+        return this.searchTmdb(cleanQuery, page, filters, trace);
+      }
 
       let movies = await this.catalog.resolveMovies(imdbIds, trace, filters?.media_type);
 
       if (filters?.min_rating !== undefined && filters.min_rating > 0) {
         movies = movies.filter((m) => m.rating_score >= filters.min_rating!);
+      }
+
+      if (movies.length === 0) {
+        return this.searchTmdb(cleanQuery, page, filters, trace);
       }
 
       const hasMore = pageHeader < totalPages;
@@ -92,7 +104,74 @@ export class TraktSearchService {
         next_page: hasMore ? pageHeader + 1 : null,
       };
     } catch (err: any) {
-      console.warn(`[Trakt search error] ${cleanQuery}:`, err.message);
+      console.warn(`[Trakt search error] ${cleanQuery}:`, err.message, 'falling back to TMDb');
+      return this.searchTmdb(cleanQuery, page, filters, trace);
+    }
+  }
+
+  private async searchTmdb(
+    cleanQuery: string,
+    page = 1,
+    filters?: SearchFilters,
+    trace?: RequestTrace
+  ): Promise<PaginatedMoviesResponse> {
+    const emptyResponse: PaginatedMoviesResponse = {
+      items: [],
+      page,
+      total_pages: 0,
+      total_items: 0,
+      has_more: false,
+      next_page: null,
+    };
+
+    if (!this.tmdbApiKey) return emptyResponse;
+
+    let path = 'search/multi';
+    if (filters?.media_type === 'movie') path = 'search/movie';
+    else if (filters?.media_type === 'tv') path = 'search/tv';
+
+    let url = `https://api.themoviedb.org/3/${path}?query=${encodeURIComponent(cleanQuery)}&page=${page}&api_key=${this.tmdbApiKey}`;
+    if (filters?.year) {
+      if (filters.media_type === 'tv') url += `&first_air_date_year=${filters.year}`;
+      else url += `&year=${filters.year}`;
+    }
+
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) return emptyResponse;
+
+      const data: any = await resp.json();
+      const results: any[] = data.results || [];
+      const tmdbItems: Array<{ id: number; media_type: 'movie' | 'tv' }> = [];
+
+      for (const item of results) {
+        const mType = item.media_type || (filters?.media_type === 'tv' ? 'tv' : 'movie');
+        if (mType === 'movie' || mType === 'tv') {
+          tmdbItems.push({ id: item.id, media_type: mType });
+        }
+      }
+
+      if (!tmdbItems.length) return emptyResponse;
+
+      let movies = await this.catalog.resolveByTmdbItems(tmdbItems, trace);
+      if (filters?.min_rating !== undefined && filters.min_rating > 0) {
+        movies = movies.filter((m) => m.rating_score >= filters.min_rating!);
+      }
+
+      const totalPages = data.total_pages || 1;
+      const totalItems = data.total_results || movies.length;
+      const hasMore = page < totalPages;
+
+      return {
+        items: movies,
+        page,
+        total_pages: totalPages,
+        total_items: totalItems,
+        has_more: hasMore,
+        next_page: hasMore ? page + 1 : null,
+      };
+    } catch (err: any) {
+      console.warn(`[TMDB fallback search error] ${cleanQuery}:`, err.message);
       return emptyResponse;
     }
   }

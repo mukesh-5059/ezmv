@@ -45,6 +45,8 @@ export interface MovieSummary {
   vote_count: number;
   media_type: 'movie' | 'tv';
   genres: Genre[];
+  original_language: string;
+  runtime: number;
 }
 
 export interface TvEpisodeSummary {
@@ -67,13 +69,11 @@ export interface TvSeasonResponse extends TvSeasonSummary{
   episodes: TvEpisodeSummary[];
 }
 
-export interface MovieDetails extends MovieSummary {
-  runtime?: number | null;
+export interface AdditionalMovieDetails {
   cast?: CastMember[];
   seasons?: TvSeasonSummary[];
   status?: string | null;
   is_ongoing?: boolean;
-  original_language?: string | null;
 }
 
 export interface LaneFilters {

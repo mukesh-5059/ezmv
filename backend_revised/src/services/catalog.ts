@@ -1,4 +1,4 @@
-import { Bindings, MovieDetails, MovieSummary, Genre, RequestTrace, TvEpisodeSummary, TvSeasonResponse } from '../types/api';
+import { Bindings, AdditionalMovieDetails, MovieSummary, Genre, RequestTrace, TvEpisodeSummary, TvSeasonResponse } from '../types/api';
 import { CompositeRating, MdblistItem } from '../types/upstream';
 import { MdblistService } from './mdblist';
 import { ConfigService } from './config';
@@ -137,35 +137,13 @@ export class CatalogService {
   }
 
   // Single movie details lookup: strictly D1 summary + TMDb for cast & extra details. Zero fallbacks.
-  async getSingleMovie(imdbId: string): Promise<MovieDetails | null> {
-    let row = await this.db
-      .prepare('SELECT * FROM v_movies WHERE imdb_id = ? LIMIT 1')
-      .bind(imdbId)
-      .first<any>();
-
-    if (!row) {
-      await this.resolveMovies([imdbId]);
-      row = await this.db
-        .prepare('SELECT * FROM v_movies WHERE imdb_id = ? LIMIT 1')
-        .bind(imdbId)
-        .first<any>();
-    }
-
-    if (!row) return null;
-
-    const details: MovieDetails = {
-      ...rowToMovieSummary(row),
-      runtime: row.runtime || null,
-      cast: [],
-      seasons: [],
-      original_language: row.original_language || null,
-    };
-
+  async getSingleMovie(tmdb_id: number, media_type: string): Promise<AdditionalMovieDetails | null> {
+    let details = <AdditionalMovieDetails>{};
     // Fetch credits & seasons from TMDb if tmdb_id exists
-    if (details.tmdb_id && this.tmdbApiKey) {
+    if (tmdb_id && this.tmdbApiKey) {
       try {
-        const mediaEndpoint = details.media_type === 'tv' ? 'tv' : 'movie';
-        const url = `https://api.themoviedb.org/3/${mediaEndpoint}/${details.tmdb_id}?api_key=${this.tmdbApiKey}&append_to_response=credits`;
+        const mediaEndpoint = media_type === 'tv' ? 'tv' : 'movie';
+        const url = `https://api.themoviedb.org/3/${mediaEndpoint}/${tmdb_id}?api_key=${this.tmdbApiKey}&append_to_response=credits`;
         const resp = await fetch(url, {
           headers: { Accept: 'application/json', 'User-Agent': 'CloudflareWorker/1.0' },
           signal: AbortSignal.timeout(6000),
@@ -173,15 +151,6 @@ export class CatalogService {
 
         if (resp.ok) {
           const tmdbData: any = await resp.json();
-          if (!details.original_language && tmdbData.original_language) {
-            details.original_language = tmdbData.original_language;
-          }
-          if (!details.backdrop_path && tmdbData.backdrop_path) {
-            details.backdrop_path = `https://image.tmdb.org/t/p/w1920_and_h800_multi_faces${tmdbData.backdrop_path}`;
-          }
-          if (!details.poster_path && tmdbData.poster_path) {
-            details.poster_path = `https://image.tmdb.org/t/p/original${tmdbData.poster_path}`;
-          }
           if (Array.isArray(tmdbData.credits?.cast)) {
             details.cast = tmdbData.credits.cast.slice(0, 20).map((c: any) => ({
               tmdb_id: c.id,
@@ -191,7 +160,7 @@ export class CatalogService {
               order: c.order,
             }));
           }
-          if (details.media_type === 'tv') {
+          if (media_type === 'tv') {
             details.status = tmdbData.status || null;
             details.is_ongoing = tmdbData.status === 'Returning Series' || Boolean(tmdbData.in_production);
             if (Array.isArray(tmdbData.seasons)) {
@@ -204,13 +173,14 @@ export class CatalogService {
                 }));
             }
           }
+          return details;
         }
+        
       } catch (err: any) {
-        console.warn(`[TMDb credits error for ${imdbId}]:`, err.message);
+        console.warn(`[TMDb credits error for ${media_type}:${tmdb_id}]:`, err.message);
       }
     }
-
-    return details;
+    return null;
   }
 
   async getTvSeason(tmdbId: number, seasonNumber: number): Promise<TvSeasonResponse | null> {
@@ -359,6 +329,8 @@ export class CatalogService {
       vote_count: comp.votes,
       media_type: item.type === 'show' ? 'tv' : 'movie',
       genres,
+      original_language: item.language || '',
+      runtime: item.runtime ?? 0
     };
   }
 }
@@ -381,5 +353,7 @@ export function rowToMovieSummary(row: any): MovieSummary {
     vote_count: row.votes,
     media_type: row.media_type,
     genres,
+    original_language: row.original_language || '',
+    runtime: row.runtime ?? 0
   };
 }

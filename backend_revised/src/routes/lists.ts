@@ -28,9 +28,7 @@ listsRouter.get('/popular', async (c) => {
   const listsService = new ListsService(c.env);
   const result = await listsService.getPopularLists(page, PAGE_SIZE);
 
-  if (result.items.length > 0) {
-    await cacheService.set(cacheKey, result, 43200);
-  }
+  if (result.items.length > 0) await cacheService.set(cacheKey, result, 43200);
 
   return c.json(result, 200, {
     'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
@@ -65,9 +63,7 @@ listsRouter.get('/search', async (c) => {
   const listsService = new ListsService(c.env);
   const result = await listsService.searchLists(query, page, PAGE_SIZE);
 
-  if (result.items.length > 0) {
-    await cacheService.set(cacheKey, result, 43200);
-  }
+  if (result.items.length > 0) await cacheService.set(cacheKey, result, 43200);
 
   return c.json(result, 200, {
     'Cache-Control': 'public, max-age=43200, stale-while-revalidate=86400',
