@@ -9,10 +9,11 @@ import '../tv_focus_button.dart';
 ///
 /// Features:
 /// - Selection heuristic:
-///   1. Intersect `new_ott` ∩ `trending` with `comedy` genre.
-///   2. Fallback: `trending` with `comedy` genre.
-///   3. Fallback: top items in `trending`.
-///   4. Fallback: first available high-rated titles.
+///   1. Intersect `new_ott` ∩ `trending` with comedy genre.
+///   2. Fallback: (`trending` + `new_ott`) filtered to comedy genre.
+///   3. Fallback: `trending` filtered to comedy genre.
+///   4. Fallback: All dashboard titles filtered to comedy genre.
+///   5. Fallback: Top 5 rated/popular titles in that dashboard (when zero comedy titles exist).
 /// - Auto-scroll timer with auto-pause on focus and cancel on vertical scroll.
 /// - Display typography (38sp bold), rating badge, release year, overview.
 /// - Dual CTA: "Play Now" (primary red) and "Details" (tonal).
@@ -127,7 +128,7 @@ class _TvBillboardState extends State<TvBillboard> {
 
     List<MovieSummary> candidates = [];
 
-    // Heuristic 1: Intersect new_ott ∩ trending with comedy genre
+    // Stage 1: Intersect new_ott ∩ trending with comedy genre
     if (newOttLane != null && trendingLane != null) {
       final trendingMap = {for (final m in trendingLane.items) m.imdbId: m};
       for (final m in newOttLane.items) {
@@ -137,17 +138,44 @@ class _TvBillboardState extends State<TvBillboard> {
       }
     }
 
-    // Heuristic 2: Fallback: trending with comedy genre
+    // Stage 2 Fallback: (trending + new_ott) filtered to comedy genre
+    if (candidates.isEmpty) {
+      final seenIds = <String>{};
+      if (trendingLane != null) {
+        for (final m in trendingLane.items) {
+          if (isComedy(m) && seenIds.add(m.imdbId)) {
+            candidates.add(m);
+          }
+        }
+      }
+      if (newOttLane != null) {
+        for (final m in newOttLane.items) {
+          if (isComedy(m) && seenIds.add(m.imdbId)) {
+            candidates.add(m);
+          }
+        }
+      }
+    }
+
+    // Stage 3 Fallback: trending filtered to comedy genre
     if (candidates.isEmpty && trendingLane != null) {
       candidates = trendingLane.items.where(isComedy).toList();
     }
 
-    // Heuristic 3: Fallback: top items in trending
-    if (candidates.isEmpty && trendingLane != null && trendingLane.items.isNotEmpty) {
-      candidates = trendingLane.items.take(5).toList();
+    // Stage 4 Fallback: All dashboard titles filtered to comedy genre
+    if (candidates.isEmpty) {
+      final seenIds = <String>{};
+      for (final lane in widget.lanes) {
+        for (final item in lane.items) {
+          if (isComedy(item) && seenIds.add(item.imdbId)) {
+            candidates.add(item);
+          }
+        }
+      }
     }
 
-    // Heuristic 4: Fallback: first available high-rated titles across all lanes
+    // Stage 5 Fallback: If and only if zero comedy titles in the entire dashboard,
+    // fallback to top 5 highest rated/popular titles in the dashboard
     if (candidates.isEmpty) {
       final allItems = <MovieSummary>[];
       final seenIds = <String>{};
@@ -159,21 +187,19 @@ class _TvBillboardState extends State<TvBillboard> {
         }
       }
       allItems.sort((a, b) {
-        final cmp = b.voteCount.compareTo(a.voteCount);
+        final cmp = b.ratingScore.compareTo(a.ratingScore);
         if (cmp != 0) return cmp;
-        return b.ratingScore.compareTo(a.ratingScore);
+        return b.voteCount.compareTo(a.voteCount);
       });
       candidates = allItems.take(5).toList();
     }
 
-    // Sort all billboard candidates primarily by popularity (voteCount descending)
-    candidates.sort((a, b) {
-      final cmp = b.voteCount.compareTo(a.voteCount);
-      if (cmp != 0) return cmp;
-      return b.ratingScore.compareTo(a.ratingScore);
-    });
-
+    // Popularity Sort Directive:
+    // Before picking the top 5 featured movies from whichever candidate tier matches,
+    // order the candidates by their popularity (voteCount descending).
+    candidates.sort((a, b) => b.voteCount.compareTo(a.voteCount));
     _featuredMovies = candidates.take(5).toList();
+
     if (_currentIndex >= _featuredMovies.length) {
       _currentIndex = 0;
     }

@@ -193,6 +193,88 @@ void main() {
       expect(detailsMovie?.imdbId, 'tt111');
     });
 
+    testWidgets('TvBillboard falls back through comedy stages correctly',
+        (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      // Stage 2: new_ott ∩ trending has no comedy, but trending has comedy
+      final comedyAction = const MovieSummary(
+        imdbId: 'tt333',
+        tmdbId: 103,
+        title: 'Only Trending Comedy',
+        overview: 'Comedy in trending only.',
+        releaseDate: '2024-01-01',
+        posterPath: '/c1.jpg',
+        backdropPath: '/c1_bg.jpg',
+        ratingScore: 7.0,
+        voteCount: 5000,
+        mediaType: 'movie',
+        genres: [Genre(slug: 'comedy', name: 'Comedy')],
+      );
+
+      final nonComedyOtt = const MovieSummary(
+        imdbId: 'tt444',
+        tmdbId: 104,
+        title: 'Action OTT',
+        overview: 'Action OTT.',
+        releaseDate: '2024-01-01',
+        posterPath: '/c2.jpg',
+        backdropPath: '/c2_bg.jpg',
+        ratingScore: 8.0,
+        voteCount: 2000,
+        mediaType: 'movie',
+        genres: [Genre(slug: 'action', name: 'Action')],
+      );
+
+      final fallbackLanes = [
+        DashboardLane(
+          id: 'trending',
+          title: 'Trending',
+          items: [comedyAction],
+        ),
+        DashboardLane(
+          id: 'new_ott',
+          title: 'New Releases',
+          items: [nonComedyOtt],
+        ),
+      ];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TVTheme.darkTheme,
+          home: Scaffold(
+            body: TvBillboard(
+              lanes: fallbackLanes,
+              onPlay: (_) {},
+              onDetails: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Only Trending Comedy'), findsOneWidget);
+    });
+
+    testWidgets('TvBillboard handles empty lanes without errors', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TVTheme.darkTheme,
+          home: Scaffold(
+            body: TvBillboard(
+              lanes: const [],
+              onPlay: (_) {},
+              onDetails: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(TvBillboard), findsOneWidget);
+    });
+
     testWidgets('TvContinueWatchingLane is completely hidden when empty', (tester) async {
       SharedPreferences.setMockInitialValues({});
 
