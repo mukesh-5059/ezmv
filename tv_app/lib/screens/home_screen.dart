@@ -230,35 +230,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _handleResumeWatching(ContinueWatchingEntry entry) async {
-    try {
-      final streams = await ApiClient.instance.getStreams(
-        entry.mediaType,
-        entry.imdbId,
-        season: entry.season,
-        episode: entry.episode,
-      );
-      if (!mounted) return;
-
-      if (streams.isNotEmpty) {
-        final topStream = streams.first;
-        Navigator.pushNamed(
-          context,
-          '/player',
-          arguments: {
-            'streamUrl': topStream.url,
-            'movieTitle': entry.title,
-            'tmdbId': 0,
-            'mediaType': entry.mediaType,
-            'season': entry.season,
-            'episode': entry.episode,
-            'quality': topStream.quality,
-            'provider': topStream.provider,
-            'initialPositionSeconds': entry.positionMs ~/ 1000,
-          },
-        );
-      }
-    } catch (_) {}
+  void _handleResumeWatching(ContinueWatchingEntry entry) {
+    final movie = MovieSummary(
+      imdbId: entry.imdbId,
+      tmdbId: entry.tmdbId,
+      title: entry.title,
+      overview: '',
+      releaseDate: '',
+      posterPath: entry.posterPath ?? '',
+      backdropPath: entry.backdropPath ?? '',
+      ratingScore: 0.0,
+      voteCount: 0,
+      mediaType: entry.mediaType,
+      genres: [],
+    );
+    _navigateToDetails(movie);
   }
 
   void _navigateToDetails(MovieSummary movie) async {

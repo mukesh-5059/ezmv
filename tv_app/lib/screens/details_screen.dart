@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
@@ -11,16 +12,19 @@ import 'player_screen.dart';
 class DetailsScreen extends StatefulWidget {
   final String imdbId;
   final String mediaType;
+  final int? tmdbId;
   final MovieSummary? initialMovie;
 
   DetailsScreen({
     super.key,
     String? imdbId,
     String? mediaType,
+    int? tmdbId,
     MovieSummary? movie,
     MovieSummary? initialMovie,
-  })  : imdbId = imdbId ?? movie?.imdbId ?? '',
-        mediaType = mediaType ?? movie?.mediaType ?? 'movie',
+  })  : imdbId = imdbId ?? movie?.imdbId ?? initialMovie?.imdbId ?? '',
+        mediaType = mediaType ?? movie?.mediaType ?? initialMovie?.mediaType ?? 'movie',
+        tmdbId = tmdbId ?? movie?.tmdbId ?? initialMovie?.tmdbId,
         initialMovie = initialMovie ?? movie;
 
   factory DetailsScreen.fromMovie(MovieSummary movie, {Key? key}) {
@@ -28,6 +32,7 @@ class DetailsScreen extends StatefulWidget {
       key: key,
       imdbId: movie.imdbId,
       mediaType: movie.mediaType,
+      tmdbId: movie.tmdbId,
       initialMovie: movie,
     );
   }
@@ -44,8 +49,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   // Streams state
   List<StreamSource> _streams = [];
-  bool _isLoadingStreams = false;
-  bool _streamsFetched = false;
 
   // TV state
   int _selectedSeasonNumber = 1;
@@ -84,7 +87,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
 
     try {
-      final details = await ApiClient.instance.getMovieDetails(widget.mediaType, widget.imdbId);
+      final id = (widget.tmdbId != null && widget.tmdbId! > 0)
+          ? widget.tmdbId
+          : (widget.initialMovie?.tmdbId != null && widget.initialMovie!.tmdbId! > 0)
+              ? widget.initialMovie!.tmdbId
+              : widget.imdbId;
+      final details = await ApiClient.instance.getMovieDetails(
+        widget.mediaType,
+        id,
+        initialMovie: widget.initialMovie,
+      );
       if (mounted) {
         setState(() {
           _details = details;
@@ -94,7 +106,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
         // If TV, load initial season
         if (_isTv && details.seasons.isNotEmpty) {
           final firstSeasonNum = details.seasons.first.seasonNumber;
-          _loadSeason(firstSeasonNum, details.tmdbId ?? 0);
+          final resolvedTmdbId = details.tmdbId ?? widget.tmdbId ?? widget.initialMovie?.tmdbId ?? 0;
+          _loadSeason(firstSeasonNum, resolvedTmdbId);
         }
       }
     } catch (e) {
@@ -102,33 +115,6 @@ class _DetailsScreenState extends State<DetailsScreen> {
         setState(() {
           _isLoading = false;
           _errorMessage = 'Failed to load details: $e';
-        });
-      }
-    }
-
-    // Prefetch streams for movies
-    if (!_isTv && widget.imdbId.isNotEmpty) {
-      _fetchStreams();
-    }
-  }
-
-  Future<void> _fetchStreams() async {
-    if (_isLoadingStreams) return;
-    setState(() => _isLoadingStreams = true);
-    try {
-      final streams = await ApiClient.instance.getStreams(widget.mediaType, widget.imdbId);
-      if (mounted) {
-        setState(() {
-          _streams = streams;
-          _streamsFetched = true;
-          _isLoadingStreams = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _streamsFetched = false;
-          _isLoadingStreams = false;
         });
       }
     }
@@ -170,96 +156,76 @@ class _DetailsScreenState extends State<DetailsScreen> {
     }
   }
 
-  Future<void> _playTopStream() async {
-    List<StreamSource> availableStreams = _streams;
-    if (availableStreams.isEmpty && !_streamsFetched) {
-      setState(() => _isLoadingStreams = true);
-      try {
-        availableStreams = await ApiClient.instance.getStreams(widget.mediaType, widget.imdbId);
-        if (mounted) {
-          setState(() {
-            _streams = availableStreams;
-            _streamsFetched = true;
-          });
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() => _streamsFetched = true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to fetch streams: $e'),
-              backgroundColor: Colors.red.shade800,
-            ),
-          );
-        }
-        return;
-      } finally {
-        if (mounted) setState(() => _isLoadingStreams = false);
-      }
-    }
+  DateTime? _lastResumedFromPlayerAt;
 
-    if (availableStreams.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No playable streams found for this title.'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+  Future<void> _playTopStream() async {
+    if (_streams.isNotEmpty) {
+      _launchPlayer(_streams.first, _streams);
       return;
     }
 
-    final topStream = availableStreams.first;
-    _launchPlayer(topStream, availableStreams);
-  }
-
-  void _openManualSources() async {
-    List<StreamSource> availableStreams = _streams;
-    if (availableStreams.isEmpty && !_streamsFetched) {
-      setState(() => _isLoadingStreams = true);
-      try {
-        availableStreams = await ApiClient.instance.getStreams(widget.mediaType, widget.imdbId);
+    final selected = await StreamSelector.showModal(
+      context: context,
+      title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
+      streams: _streams,
+      imdbId: widget.imdbId,
+      mediaType: widget.mediaType,
+      autoPlay: true,
+      onStreamsLoaded: (streams) {
+        if (mounted) setState(() => _streams = streams);
+      },
+      onError: (err) {
         if (mounted) {
-          setState(() {
-            _streams = availableStreams;
-            _streamsFetched = true;
-          });
-        }
-      } catch (e) {
-        if (mounted) {
-          setState(() => _streamsFetched = true);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Failed to load sources: $e'),
+              content: Text('Failed to fetch streams: $err'),
               backgroundColor: Colors.red.shade800,
             ),
           );
         }
-        return;
-      } finally {
-        if (mounted) setState(() => _isLoadingStreams = false);
-      }
-    }
-
-    if (!mounted) return;
-    final selected = await StreamSelector.showModal(
-      context: context,
-      streams: availableStreams,
-      title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
+      },
     );
 
     if (selected != null && mounted) {
-      _launchPlayer(selected, availableStreams);
+      _launchPlayer(selected, _streams);
     }
   }
 
-  void _launchPlayer(StreamSource stream, List<StreamSource> allStreams, {int? season, int? episode}) {
+  void _openManualSources() async {
+    final selected = await StreamSelector.showModal(
+      context: context,
+      title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
+      streams: _streams,
+      imdbId: widget.imdbId,
+      mediaType: widget.mediaType,
+      autoPlay: false,
+      onStreamsLoaded: (streams) {
+        if (mounted) setState(() => _streams = streams);
+      },
+    );
+
+    if (selected != null && mounted) {
+      _launchPlayer(selected, _streams);
+    }
+  }
+
+  Future<void> _launchPlayer(StreamSource stream, List<StreamSource> allStreams, {int? season, int? episode}) async {
     final title = _details?.title ?? widget.initialMovie?.title ?? 'Playback';
     final poster = _details?.posterPath ?? widget.initialMovie?.posterPath;
     final backdrop = _details?.backdropPath ?? widget.initialMovie?.backdropPath;
 
-    Navigator.of(context).push(
+    int initialPosSec = 0;
+    try {
+      final savedEntry = await StorageService.instance.getContinueWatchingEntry(widget.imdbId);
+      if (savedEntry != null && savedEntry.progress < 0.92) {
+        if (!_isTv || (savedEntry.season == season && savedEntry.episode == episode)) {
+          initialPosSec = savedEntry.positionMs ~/ 1000;
+        }
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           streamUrl: stream.url,
@@ -270,14 +236,17 @@ class _DetailsScreenState extends State<DetailsScreen> {
           mediaType: widget.mediaType,
           season: season,
           episode: episode,
+          initialPositionSeconds: initialPosSec,
           posterPath: poster,
           backdropPath: backdrop,
           availableStreams: allStreams,
           provider: stream.provider,
           quality: stream.quality,
+          seasons: _details?.seasons,
         ),
       ),
     );
+    _lastResumedFromPlayerAt = DateTime.now();
   }
 
   void _playEpisode(TvEpisode episode) async {
@@ -293,6 +262,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
           _launchPlayer(
             stream,
             [stream],
+            season: _selectedSeasonNumber,
+            episode: episode.episodeNumber,
+          );
+        },
+        onStreamSelectedWithAll: (stream, allStreams) {
+          _launchPlayer(
+            stream,
+            allStreams,
             season: _selectedSeasonNumber,
             episode: episode.episodeNumber,
           );
@@ -322,7 +299,20 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final genres = _details?.genreNamesString ??
         widget.initialMovie?.genres.map((g) => g.name).join(', ') ?? '';
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        final now = DateTime.now();
+        if (_lastResumedFromPlayerAt != null &&
+            now.difference(_lastResumedFromPlayerAt!).inMilliseconds < 500) {
+          return;
+        }
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       backgroundColor: TVTheme.background,
       body: _isLoading && _details == null && widget.initialMovie == null
           ? const Center(
@@ -353,10 +343,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
           // Background Backdrop Layer
           if (backdropUrl.isNotEmpty)
             Positioned.fill(
-              child: Image.network(
-                backdropUrl,
+              child: CachedNetworkImage(
+                imageUrl: backdropUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                memCacheWidth: 1280,
+                memCacheHeight: 720,
+                maxWidthDiskCache: 1280,
+                maxHeightDiskCache: 720,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
+                errorWidget: (_, __, ___) => const SizedBox.shrink(),
               ),
             ),
 
@@ -401,10 +397,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
                             width: 200,
                             height: 300,
                             color: TVTheme.surface,
-                            child: Image.network(
-                              posterUrl,
+                            child: CachedNetworkImage(
+                              imageUrl: posterUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
+                              memCacheWidth: 400,
+                              memCacheHeight: 600,
+                              maxWidthDiskCache: 400,
+                              maxHeightDiskCache: 600,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              errorWidget: (_, __, ___) => const Center(
                                 child: Icon(Icons.movie, size: 54, color: Colors.white38),
                               ),
                             ),
@@ -530,11 +532,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                   icon: Icons.play_arrow,
                                   onPressed: () {
                                     if (_isTv) {
-                                      _scrollController.animateTo(
-                                        340,
-                                        duration: const Duration(milliseconds: 300),
-                                        curve: Curves.easeOutCubic,
-                                      );
+                                      _scrollController.jumpTo(340);
                                     } else {
                                       _playTopStream();
                                     }
@@ -585,7 +583,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildTvSeasonSelector() {
@@ -714,8 +713,7 @@ class _EpisodeCardState extends State<_EpisodeCard> {
             Scrollable.ensureVisible(
               context,
               alignment: 0.5,
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
+              duration: Duration.zero,
             );
           }
         },
@@ -750,18 +748,32 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                         fit: StackFit.expand,
                         children: [
                           if (stillUrl.isNotEmpty)
-                            Image.network(
-                              stillUrl,
+                            CachedNetworkImage(
+                              imageUrl: stillUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
+                              memCacheWidth: 420,
+                              memCacheHeight: 236,
+                              maxWidthDiskCache: 420,
+                              maxHeightDiskCache: 236,
+                              placeholder: (_, __) => Container(
                                 color: TVTheme.surfaceElevated,
-                                child: const Icon(Icons.tv, size: 40, color: Colors.white38),
+                                child: const Center(
+                                  child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => Container(
+                                color: TVTheme.surfaceElevated,
+                                child: const Center(
+                                  child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),
+                                ),
                               ),
                             )
                           else
                             Container(
                               color: TVTheme.surfaceElevated,
-                              child: const Icon(Icons.tv, size: 40, color: Colors.white38),
+                              child: const Center(
+                                child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),
+                              ),
                             ),
                           if (!ep.isReleased)
                             Positioned(

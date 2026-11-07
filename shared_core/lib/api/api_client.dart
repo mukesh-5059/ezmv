@@ -103,9 +103,18 @@ class ApiClient {
     return DashboardLane.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<MovieDetails> getMovieDetails(String mediaType, String imdbId) async {
-    final data = await _get('/api/v1/movies/$mediaType/$imdbId');
-    return MovieDetails.fromJson(data as Map<String, dynamic>);
+  Future<MovieDetails> getMovieDetails(
+    String mediaType,
+    dynamic id, {
+    MovieSummary? initialMovie,
+    bool refresh = false,
+  }) async {
+    final queryParams = refresh ? <String, String>{'refresh': 'true'} : null;
+    final data = await _get('/api/v1/movies/$mediaType/$id', queryParams);
+    return MovieDetails.fromAdditional(
+      data as Map<String, dynamic>,
+      summary: initialMovie,
+    );
   }
 
   Future<TvSeason> getTvSeason(int tmdbId, int seasonNumber) async {
@@ -155,6 +164,22 @@ class ApiClient {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await response.stream.bytesToString();
       yield StreamProgressEvent.error('HTTP ${response.statusCode}: $body');
+      return;
+    }
+
+    final contentType = response.headers['content-type'] ?? '';
+    if (!contentType.contains('text/event-stream')) {
+      final body = await response.stream.bytesToString();
+      try {
+        final parsed = json.decode(body) as Map<String, dynamic>;
+        final rawStreams = parsed['streams'] as List? ?? [];
+        final streams = rawStreams
+            .map((s) => StreamSource.fromJson(s as Map<String, dynamic>))
+            .toList();
+        yield StreamProgressEvent.done(streams);
+      } catch (e) {
+        yield StreamProgressEvent.error('Failed to parse streams: $e');
+      }
       return;
     }
 

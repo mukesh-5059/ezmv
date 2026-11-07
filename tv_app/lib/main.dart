@@ -42,6 +42,7 @@ class EzMVApp extends StatelessWidget {
                   builder: (_) => DetailsScreen(
                     imdbId: args.imdbId,
                     mediaType: args.mediaType,
+                    tmdbId: args.tmdbId,
                     initialMovie: args,
                   ),
                 );
@@ -50,6 +51,7 @@ class EzMVApp extends StatelessWidget {
                   builder: (_) => DetailsScreen(
                     imdbId: args['imdbId'] as String? ?? '',
                     mediaType: args['mediaType'] as String? ?? 'movie',
+                    tmdbId: args['tmdbId'] as int?,
                   ),
                 );
               }

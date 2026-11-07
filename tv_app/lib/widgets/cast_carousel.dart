@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../screens/actor_screen.dart';
@@ -79,8 +80,7 @@ class _CastCardState extends State<_CastCard> {
             Scrollable.ensureVisible(
               context,
               alignment: 0.5,
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
+              duration: Duration.zero,
             );
           }
         },
@@ -133,10 +133,16 @@ class _CastCardState extends State<_CastCard> {
                       child: Container(
                         color: TVTheme.surface,
                         child: member.profileUrl.isNotEmpty
-                            ? Image.network(
-                                member.profileUrl,
+                            ? CachedNetworkImage(
+                                imageUrl: member.profileUrl,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Icon(
+                                memCacheWidth: 160,
+                                memCacheHeight: 160,
+                                maxWidthDiskCache: 200,
+                                maxHeightDiskCache: 200,
+                                fadeInDuration: Duration.zero,
+                                fadeOutDuration: Duration.zero,
+                                errorWidget: (_, __, ___) => const Icon(
                                   Icons.person,
                                   color: Colors.white54,
                                   size: 44,

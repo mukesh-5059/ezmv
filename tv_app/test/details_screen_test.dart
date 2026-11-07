@@ -151,7 +151,8 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         if (request.url.path.contains('/api/v1/streams/movie/tt1375666')) {
@@ -245,7 +246,8 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         return http.Response('{"streams":[]}', 200);
@@ -296,7 +298,8 @@ void main() {
       expect(await StorageService.instance.isWatchlisted('tt1375666'), isTrue);
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         return http.Response('{"streams":[]}', 200);
@@ -330,7 +333,8 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         if (request.url.path.contains('/api/v1/streams/movie/tt1375666')) {
@@ -376,7 +380,8 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         if (request.url.path.contains('/api/v1/streams/movie/tt1375666')) {
@@ -420,7 +425,8 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         if (request.url.path.contains('/api/v1/streams/movie/tt1375666')) {
@@ -447,8 +453,7 @@ void main() {
 
       // Tap Play Now button
       await tester.tap(find.text('⚡ Play Now'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
 
       expect(find.byType(PlayerScreen), findsOneWidget);
     });
@@ -657,7 +662,8 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final client = MockClient((request) async {
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response(json.encode(testMovieDetails.toJson()), 200);
         }
         if (request.url.path.contains('/api/v1/streams/movie/tt1375666')) {

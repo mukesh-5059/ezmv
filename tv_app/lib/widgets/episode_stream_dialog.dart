@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
@@ -10,6 +11,7 @@ class EpisodeStreamDialog extends StatefulWidget {
   final int seasonNumber;
   final TvEpisode episode;
   final void Function(StreamSource stream)? onStreamSelected;
+  final void Function(StreamSource stream, List<StreamSource> allStreams)? onStreamSelectedWithAll;
 
   const EpisodeStreamDialog({
     super.key,
@@ -18,6 +20,7 @@ class EpisodeStreamDialog extends StatefulWidget {
     required this.seasonNumber,
     required this.episode,
     this.onStreamSelected,
+    this.onStreamSelectedWithAll,
   });
 
   @override
@@ -28,6 +31,9 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
   List<StreamSource> _streams = [];
   bool _isLoading = true;
   String _statusMessage = 'Connecting to scrapers...';
+  StreamSubscription<StreamProgressEvent>? _sseSubscription;
+  final Map<String, ({StreamProgressStatus status, int count})> _providerStatuses = {};
+  int _totalStreamsDiscovered = 0;
 
   final FocusNode _firstStreamFocusNode = FocusNode();
   final FocusNode _retryFocusNode = FocusNode();
@@ -41,6 +47,7 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
 
   @override
   void dispose() {
+    _sseSubscription?.cancel();
     _firstStreamFocusNode.dispose();
     _retryFocusNode.dispose();
     _closeFocusNode.dispose();
@@ -48,39 +55,88 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
   }
 
   Future<void> _fetchStreams() async {
+    _sseSubscription?.cancel();
     setState(() {
       _isLoading = true;
-      _statusMessage = 'Fetching streams for S${widget.seasonNumber}E${widget.episode.episodeNumber}...';
+      _providerStatuses.clear();
+      _totalStreamsDiscovered = 0;
+      _statusMessage = 'Connecting to scrapers for S${widget.seasonNumber}E${widget.episode.episodeNumber}...';
     });
 
-    try {
-      final streams = await ApiClient.instance.getStreams(
-        'tv',
-        widget.imdbId,
-        season: widget.seasonNumber,
-        episode: widget.episode.episodeNumber,
-      );
-      if (!mounted) return;
-      setState(() {
-        _streams = streams;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _statusMessage = 'Failed to load streams: $e';
-      });
-    }
+    _sseSubscription = ApiClient.instance.getStreamsProgressive(
+      'tv',
+      widget.imdbId,
+      season: widget.seasonNumber,
+      episode: widget.episode.episodeNumber,
+    ).listen(
+      (event) {
+        if (!mounted) return;
+        if (event.isDone) {
+          final resolvedStreams = event.streams ?? [];
+          setState(() {
+            _streams = resolvedStreams;
+            _isLoading = false;
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_streams.isNotEmpty) {
+              _firstStreamFocusNode.requestFocus();
+            } else {
+              _retryFocusNode.requestFocus();
+            }
+          });
+          return;
+        }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_streams.isNotEmpty) {
-        _firstStreamFocusNode.requestFocus();
-      } else {
-        _retryFocusNode.requestFocus();
-      }
-    });
+        if (event.status == StreamProgressStatus.error) {
+          if (event.provider != 'all') {
+            setState(() {
+              _providerStatuses[event.provider] = (status: StreamProgressStatus.error, count: 0);
+            });
+          }
+          return;
+        }
+
+        if (event.provider != 'all') {
+          setState(() {
+            _providerStatuses[event.provider] = (
+              status: event.status,
+              count: event.count ?? _providerStatuses[event.provider]?.count ?? 0,
+            );
+            if (event.status == StreamProgressStatus.searching) {
+              _statusMessage = 'Searching ${event.provider}...';
+            } else if (event.status == StreamProgressStatus.resolved) {
+              _statusMessage = '${event.provider}: ${event.count ?? 0} stream(s) found';
+              _totalStreamsDiscovered = _providerStatuses.values.fold(0, (acc, p) => acc + p.count);
+            }
+          });
+        }
+      },
+      onError: (err) {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Failed to load streams: $err';
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _retryFocusNode.requestFocus();
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        if (_isLoading) {
+          setState(() => _isLoading = false);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_streams.isNotEmpty) {
+              _firstStreamFocusNode.requestFocus();
+            } else {
+              _retryFocusNode.requestFocus();
+            }
+          });
+        }
+      },
+    );
   }
 
   @override
@@ -281,17 +337,130 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
             // Sources List / Loading / Empty
             if (_isLoading)
               Container(
-                height: 180,
-                alignment: Alignment.center,
+                height: 200,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12),
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const CircularProgressIndicator(color: TVTheme.primary, strokeWidth: 2.5),
-                    const SizedBox(height: 14),
-                    Text(
-                      _statusMessage,
-                      style: const TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: TVTheme.primary,
+                            strokeWidth: 2.5,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Flexible(
+                          child: Text(
+                            _statusMessage,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        if (_totalStreamsDiscovered > 0) ...[
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: TVTheme.primary.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: TVTheme.primary.withValues(alpha: 0.4)),
+                            ),
+                            child: Text(
+                              '$_totalStreamsDiscovered found',
+                              style: const TextStyle(
+                                color: TVTheme.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: const LinearProgressIndicator(
+                        minHeight: 4,
+                        color: TVTheme.primary,
+                        backgroundColor: Colors.white12,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    if (_providerStatuses.isNotEmpty)
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        alignment: WrapAlignment.center,
+                        children: _providerStatuses.entries.map((entry) {
+                          final provider = entry.key;
+                          final info = entry.value;
+                          final isSearching = info.status == StreamProgressStatus.searching;
+                          final isResolved = info.status == StreamProgressStatus.resolved;
+
+                          final badgeColor = isSearching
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : (isResolved && info.count > 0
+                                  ? Colors.green.withValues(alpha: 0.15)
+                                  : Colors.white.withValues(alpha: 0.04));
+
+                          final icon = isSearching
+                              ? const SizedBox(
+                                  width: 10,
+                                  height: 10,
+                                  child: CircularProgressIndicator(color: Colors.white70, strokeWidth: 1.5),
+                                )
+                              : Icon(
+                                  info.count > 0 ? Icons.check_circle_rounded : Icons.remove_circle_outline_rounded,
+                                  size: 13,
+                                  color: info.count > 0 ? Colors.greenAccent : Colors.white38,
+                                );
+
+                          final text = isSearching
+                              ? '$provider: searching...'
+                              : (info.count > 0 ? '$provider: ${info.count}' : '$provider: none');
+
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: badgeColor,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.white12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                icon,
+                                const SizedBox(width: 6),
+                                Text(
+                                  text,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isResolved && info.count > 0 ? Colors.greenAccent : Colors.white70,
+                                    fontWeight: isResolved && info.count > 0 ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
                   ],
                 ),
               )
@@ -346,6 +515,7 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
                       onSelect: () {
                         Navigator.of(context).pop(stream);
                         widget.onStreamSelected?.call(stream);
+                        widget.onStreamSelectedWithAll?.call(stream, _streams);
                       },
                     );
                   },

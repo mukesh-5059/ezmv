@@ -152,6 +152,55 @@ void main() {
       expect(details.formattedRuntime, '2h 22m');
     });
 
+    test('getMovieDetails with numeric tmdbId and initialMovie merges AdditionalMovieDetails', () async {
+      const summary = MovieSummary(
+        imdbId: 'tt0111161',
+        tmdbId: 278,
+        title: 'The Shawshank Redemption',
+        overview: 'Two imprisoned men bond over a number of years...',
+        releaseDate: '1994-09-23',
+        posterPath: '/q6y0Go1tsGEsmtFryDOJo3dEmqu.jpg',
+        backdropPath: '/kXfqcdQKsToO0OUXHcrrNCHDBzO.jpg',
+        ratingScore: 9.3,
+        voteCount: 26000,
+        mediaType: 'movie',
+        genres: [Genre(slug: 'drama', name: 'Drama')],
+      );
+
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/api/v1/movies/movie/278');
+        return http.Response(
+          json.encode({
+            'cast': [
+              {
+                'tmdb_id': 504,
+                'name': 'Tim Robbins',
+                'character': 'Andy Dufresne',
+                'profile_path': 'https://image.tmdb.org/t/p/w185/djXJ45.jpg',
+                'order': 0,
+              },
+            ],
+            'seasons': [],
+            'status': null,
+            'is_ongoing': false,
+            'runtime': 142,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final api = ApiClient(client: mockClient);
+      final details = await api.getMovieDetails('movie', 278, initialMovie: summary);
+      expect(details.imdbId, 'tt0111161');
+      expect(details.tmdbId, 278);
+      expect(details.title, 'The Shawshank Redemption');
+      expect(details.cast.length, 1);
+      expect(details.cast.first.name, 'Tim Robbins');
+      expect(details.genres.first.name, 'Drama');
+      expect(details.formattedRuntime, '2h 22m');
+    });
+
     test('getTvSeason returns TvSeason', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/movies/tv/1399/season/1');

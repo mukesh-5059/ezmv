@@ -277,7 +277,15 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
     }
   }
 
+  DateTime? _lastBackPressTime;
+
   void _handleBack() {
+    final now = DateTime.now();
+    if (_lastBackPressTime != null && now.difference(_lastBackPressTime!).inMilliseconds < 400) {
+      return;
+    }
+    _lastBackPressTime = now;
+
     // Priority 1: Dismiss active filter strip
     if (_activeFilterDimension != null) {
       setState(() => _activeFilterDimension = null);
@@ -325,6 +333,7 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
   }
 
   void _closeFilterStrip() {
+    _lastBackPressTime = DateTime.now();
     setState(() => _activeFilterDimension = null);
     _lastFocusedPillNode?.requestFocus();
   }

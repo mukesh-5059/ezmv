@@ -1,5 +1,6 @@
 class ContinueWatchingEntry {
   final String imdbId;
+  final int? tmdbId;
   final String title;
   final String? posterPath;
   final String? backdropPath;
@@ -12,6 +13,7 @@ class ContinueWatchingEntry {
 
   const ContinueWatchingEntry({
     required this.imdbId,
+    this.tmdbId,
     required this.title,
     this.posterPath,
     this.backdropPath,
@@ -55,6 +57,7 @@ class ContinueWatchingEntry {
 
     return ContinueWatchingEntry(
       imdbId: json['imdb_id'] as String? ?? '',
+      tmdbId: (json['tmdb_id'] as num?)?.toInt(),
       title: json['title'] as String? ?? '',
       posterPath: json['poster_path'] as String?,
       backdropPath: json['backdrop_path'] as String?,
@@ -69,6 +72,7 @@ class ContinueWatchingEntry {
 
   Map<String, dynamic> toJson() => {
     'imdb_id': imdbId,
+    'tmdb_id': tmdbId,
     'title': title,
     'poster_path': posterPath,
     'backdrop_path': backdropPath,

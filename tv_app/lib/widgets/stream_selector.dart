@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
@@ -28,8 +29,13 @@ class StreamSelector extends StatelessWidget {
   /// Modal dialog for manual stream selection (quality, audio, provider)
   static Future<StreamSource?> showModal({
     required BuildContext context,
-    required List<StreamSource> streams,
     required String title,
+    List<StreamSource> streams = const [],
+    String? imdbId,
+    String mediaType = 'movie',
+    bool autoPlay = false,
+    ValueChanged<List<StreamSource>>? onStreamsLoaded,
+    ValueChanged<String>? onError,
   }) {
     return showDialog<StreamSource>(
       context: context,
@@ -37,7 +43,12 @@ class StreamSelector extends StatelessWidget {
       builder: (ctx) {
         return _StreamSelectorDialog(
           title: title,
-          streams: streams,
+          initialStreams: streams,
+          imdbId: imdbId,
+          mediaType: mediaType,
+          autoPlay: autoPlay,
+          onStreamsLoaded: onStreamsLoaded,
+          onError: onError,
         );
       },
     );
@@ -226,11 +237,22 @@ class _StreamItemButtonState extends State<_StreamItemButton> {
 
 class _StreamSelectorDialog extends StatefulWidget {
   final String title;
-  final List<StreamSource> streams;
+  final List<StreamSource> initialStreams;
+  final String? imdbId;
+  final String mediaType;
+  final bool autoPlay;
+  final ValueChanged<List<StreamSource>>? onStreamsLoaded;
+
+  final ValueChanged<String>? onError;
 
   const _StreamSelectorDialog({
     required this.title,
-    required this.streams,
+    this.initialStreams = const [],
+    this.imdbId,
+    this.mediaType = 'movie',
+    this.autoPlay = false,
+    this.onStreamsLoaded,
+    this.onError,
   });
 
   @override
@@ -238,11 +260,137 @@ class _StreamSelectorDialog extends StatefulWidget {
 }
 
 class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
+  late List<StreamSource> _streams;
+  late bool _isLoading;
+  String _statusMessage = 'Connecting to scrapers...';
+  StreamSubscription<StreamProgressEvent>? _sseSubscription;
+  final Map<String, ({StreamProgressStatus status, int count})> _providerStatuses = {};
   final FocusNode _firstItemFocus = FocusNode();
+  final FocusNode _retryFocus = FocusNode();
+  final FocusNode _cancelFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _streams = List.of(widget.initialStreams);
+    _isLoading = _streams.isEmpty && widget.imdbId != null && widget.imdbId!.isNotEmpty;
+    if (_isLoading) _startFetching();
+  }
+
+  void _startFetching() {
+    _sseSubscription?.cancel();
+    setState(() {
+      _isLoading = true;
+      _providerStatuses.clear();
+      _statusMessage = 'Connecting to scrapers for ${widget.title}...';
+    });
+
+    _sseSubscription = ApiClient.instance
+        .getStreamsProgressive(widget.mediaType, widget.imdbId!)
+        .listen(
+      (event) {
+        if (!mounted) return;
+        if (event.status == StreamProgressStatus.error) {
+          if (event.provider != 'all') {
+            setState(() {
+              _providerStatuses[event.provider] = (status: StreamProgressStatus.error, count: 0);
+            });
+          } else {
+            if (widget.autoPlay) {
+              Navigator.of(context).pop();
+              widget.onError?.call(event.error ?? 'Unknown error');
+              return;
+            }
+            setState(() {
+              _isLoading = false;
+              _statusMessage = event.error ?? 'Failed to load streams';
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _retryFocus.requestFocus();
+            });
+          }
+          return;
+        }
+
+        if (event.isDone) {
+          final resolvedStreams = event.streams ?? [];
+          _streams = resolvedStreams;
+          _isLoading = false;
+          widget.onStreamsLoaded?.call(resolvedStreams);
+
+          if (widget.autoPlay && resolvedStreams.isNotEmpty) {
+            Navigator.of(context).pop(resolvedStreams.first);
+            return;
+          }
+
+          setState(() {});
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_streams.isNotEmpty) {
+              _firstItemFocus.requestFocus();
+            } else {
+              _retryFocus.requestFocus();
+            }
+          });
+          return;
+        }
+
+        if (event.provider != 'all') {
+          setState(() {
+            _providerStatuses[event.provider] = (
+              status: event.status,
+              count: event.count ?? _providerStatuses[event.provider]?.count ?? 0,
+            );
+            if (event.status == StreamProgressStatus.searching) {
+              _statusMessage = 'Searching ${event.provider}...';
+            } else if (event.status == StreamProgressStatus.resolved) {
+              _statusMessage = '${event.provider}: ${event.count ?? 0} stream(s) found';
+            }
+          });
+        }
+      },
+      onError: (err) {
+        if (!mounted) return;
+        if (widget.autoPlay) {
+          Navigator.of(context).pop();
+          widget.onError?.call(err.toString());
+          return;
+        }
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'Failed to load streams: $err';
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _retryFocus.requestFocus();
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        if (_isLoading) {
+          setState(() => _isLoading = false);
+          if (widget.autoPlay && _streams.isNotEmpty) {
+            Navigator.of(context).pop(_streams.first);
+            return;
+          }
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_streams.isNotEmpty) {
+              _firstItemFocus.requestFocus();
+            } else {
+              _retryFocus.requestFocus();
+            }
+          });
+        }
+      },
+    );
+  }
 
   @override
   void dispose() {
+    _sseSubscription?.cancel();
     _firstItemFocus.dispose();
+    _retryFocus.dispose();
+    _cancelFocus.dispose();
     super.dispose();
   }
 
@@ -252,7 +400,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
       backgroundColor: TVTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: TVTheme.borderRadiusMd),
       child: Container(
-        width: 600,
+        width: 620,
         constraints: const BoxConstraints(maxHeight: 520),
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -261,11 +409,15 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
           children: [
             Row(
               children: [
-                const Icon(Icons.tune, color: TVTheme.primary, size: 24),
+                Icon(
+                  widget.autoPlay ? Icons.play_circle_filled : Icons.tune,
+                  color: TVTheme.primary,
+                  size: 24,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Select Stream: ${widget.title}',
+                    widget.autoPlay ? 'Fetching Streams: ${widget.title}' : 'Select Stream: ${widget.title}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -278,36 +430,99 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
               ],
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Select preferred quality, audio language, or source provider:',
-              style: TextStyle(fontSize: 13, color: TVTheme.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: widget.streams.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No streams available.',
-                        style: TextStyle(color: TVTheme.textMuted),
+            if (_isLoading) ...[
+              Text(
+                _statusMessage,
+                style: const TextStyle(fontSize: 13, color: TVTheme.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              const LinearProgressIndicator(
+                color: TVTheme.primary,
+                backgroundColor: Colors.white12,
+              ),
+              const SizedBox(height: 16),
+              if (_providerStatuses.isNotEmpty)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _providerStatuses.entries.map((entry) {
+                    final isResolved = entry.value.status == StreamProgressStatus.resolved;
+                    final isSearching = entry.value.status == StreamProgressStatus.searching;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isResolved
+                            ? TVTheme.primary.withValues(alpha: 0.2)
+                            : isSearching
+                                ? Colors.white12
+                                : Colors.red.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isResolved ? TVTheme.primary : Colors.white24,
+                        ),
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: widget.streams.length,
-                      itemBuilder: (ctx, idx) {
-                        final s = widget.streams[idx];
-                        return _DialogStreamRow(
-                          stream: s,
-                          autofocus: idx == 0,
-                          focusNode: idx == 0 ? _firstItemFocus : null,
-                          onSelect: () => Navigator.of(context).pop(s),
-                        );
-                      },
-                    ),
-            ),
+                      child: Text(
+                        '${entry.key}: ${isResolved ? "${entry.value.count} found" : isSearching ? "searching..." : "failed"}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: isResolved ? TVTheme.primary : Colors.white70,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              const Spacer(),
+            ] else ...[
+              const Text(
+                'Select preferred quality, audio language, or source provider:',
+                style: TextStyle(fontSize: 13, color: TVTheme.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _streams.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'No playable streams found.',
+                              style: TextStyle(color: TVTheme.textMuted, fontSize: 14),
+                            ),
+                            const SizedBox(height: 12),
+                            if (widget.imdbId != null && widget.imdbId!.isNotEmpty)
+                              ElevatedButton.icon(
+                                focusNode: _retryFocus,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: TVTheme.primary,
+                                  foregroundColor: Colors.black,
+                                ),
+                                onPressed: _startFetching,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _streams.length,
+                        itemBuilder: (ctx, idx) {
+                          final s = _streams[idx];
+                          return _DialogStreamRow(
+                            stream: s,
+                            autofocus: idx == 0,
+                            focusNode: idx == 0 ? _firstItemFocus : null,
+                            onSelect: () => Navigator.of(context).pop(s),
+                          );
+                        },
+                      ),
+              ),
+            ],
             const SizedBox(height: 16),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
+                focusNode: _cancelFocus,
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
               ),

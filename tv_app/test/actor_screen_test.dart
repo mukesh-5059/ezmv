@@ -272,7 +272,8 @@ void main() {
         if (request.url.path.contains('/api/v1/actors/6193')) {
           return http.Response(json.encode(testActorProfile.toJson()), 200);
         }
-        if (request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
+        if (request.url.path.contains('/api/v1/movies/movie/27205') ||
+            request.url.path.contains('/api/v1/movies/movie/tt1375666')) {
           return http.Response('{}', 200);
         }
         return http.Response('Not found', 404);

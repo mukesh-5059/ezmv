@@ -65,24 +65,37 @@ class MovieDetails extends MovieSummary {
     return '${m}m';
   }
 
-  factory MovieDetails.fromJson(Map<String, dynamic> json) {
-    final rawGenres = json['genres'] as List? ?? [];
+  factory MovieDetails.fromAdditional(
+    Map<String, dynamic> json, {
+    MovieSummary? summary,
+  }) {
+    final rawGenres = json['genres'] as List? ?? summary?.genres.map((g) => g.toJson()).toList() ?? [];
     final rawCast = json['cast'] as List? ?? [];
     final rawSeasons = json['seasons'] as List? ?? [];
 
     return MovieDetails(
-      imdbId: json['imdb_id'] as String? ?? '',
-      tmdbId: (json['tmdb_id'] as num?)?.toInt(),
-      title: json['title'] as String? ?? '',
-      overview: json['overview'] as String? ?? '',
-      releaseDate: json['release_date'] as String? ?? '',
-      posterPath: json['poster_path'] as String? ?? '',
-      backdropPath: json['backdrop_path'] as String? ?? '',
-      ratingScore: (json['rating_score'] as num?)?.toDouble() ?? 0.0,
-      voteCount: (json['vote_count'] as num?)?.toInt() ?? 0,
-      mediaType: json['media_type'] as String? ?? 'movie',
+      imdbId: json['imdb_id'] as String? ?? summary?.imdbId ?? '',
+      tmdbId: (json['tmdb_id'] as num?)?.toInt() ?? summary?.tmdbId,
+      title: (json['title'] as String?)?.isNotEmpty == true
+          ? json['title'] as String
+          : (summary?.title ?? ''),
+      overview: (json['overview'] as String?)?.isNotEmpty == true
+          ? json['overview'] as String
+          : (summary?.overview ?? ''),
+      releaseDate: (json['release_date'] as String?)?.isNotEmpty == true
+          ? json['release_date'] as String
+          : (summary?.releaseDate ?? ''),
+      posterPath: (json['poster_path'] as String?)?.isNotEmpty == true
+          ? json['poster_path'] as String
+          : (summary?.posterPath ?? ''),
+      backdropPath: (json['backdrop_path'] as String?)?.isNotEmpty == true
+          ? json['backdrop_path'] as String
+          : (summary?.backdropPath ?? ''),
+      ratingScore: (json['rating_score'] as num?)?.toDouble() ?? summary?.ratingScore ?? 0.0,
+      voteCount: (json['vote_count'] as num?)?.toInt() ?? summary?.voteCount ?? 0,
+      mediaType: json['media_type'] as String? ?? summary?.mediaType ?? 'movie',
       genres: rawGenres
-          .map((g) => Genre.fromJson(g as Map<String, dynamic>))
+          .map((g) => g is Genre ? g : Genre.fromJson(g as Map<String, dynamic>))
           .toList(),
       runtime: (json['runtime'] as num?)?.toInt(),
       cast: rawCast
@@ -96,6 +109,9 @@ class MovieDetails extends MovieSummary {
       originalLanguage: json['original_language'] as String?,
     );
   }
+
+  factory MovieDetails.fromJson(Map<String, dynamic> json) =>
+      MovieDetails.fromAdditional(json);
 
   @override
   Map<String, dynamic> toJson() {

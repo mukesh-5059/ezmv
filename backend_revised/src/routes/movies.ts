@@ -41,7 +41,7 @@ moviesRouter.get('/tv/:tmdb_id/season/:season_number', async (c) => {
   return c.json(seasonDetails);
 });
 
-// GET /api/v1/movies/:media_type/:imdb_id
+// GET /api/v1/movies/:media_type/:tmdb_id
 moviesRouter.get('/:media_type/:tmdb_id', async (c) => {
   const mediaTypeParam = c.req.param('media_type').toLowerCase();
   const tmdbId = Number(c.req.param('tmdb_id'));

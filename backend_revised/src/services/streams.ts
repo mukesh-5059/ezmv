@@ -1,6 +1,63 @@
 import { Bindings, StreamProgressPayload, StreamSource, StreamsResponse } from '../types';
 import { parseStreamItem } from './stream_parser';
 
+async function isStreamPlayable(stream: StreamSource): Promise<boolean> {
+  const url = stream.url;
+  if (!url || !url.startsWith('http')) return false;
+
+  const lowerUrl = url.toLowerCase();
+  if (
+    lowerUrl.includes('/embed/') ||
+    lowerUrl.includes('streamtape.com/e/') ||
+    lowerUrl.includes('doodstream.com/d/') ||
+    lowerUrl.includes('dood.to/d/') ||
+    lowerUrl.includes('dood.so/d/')
+  ) {
+    return false;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      ...(stream.headers || {}),
+    };
+
+    const res = await fetch(url, {
+      method: 'HEAD',
+      headers,
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    // Keep redirects (301, 302, 307, 308) and 403 (CF Worker datacenter IP block vs user residential IP)
+    if ([301, 302, 307, 308, 403].includes(res.status)) return true;
+
+    // Filter out explicit dead / missing / gateway errors
+    if ([404, 410, 500, 502, 503, 504].includes(res.status)) return false;
+
+    // Filter out HTML landing pages / Turnstile challenges
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
+      return false;
+    }
+
+    // Filter out explicit 0-byte or empty responses
+    const contentLength = res.headers.get('content-length');
+    if (contentLength !== null && parseInt(contentLength, 10) === 0) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    // If probe times out or encounters network/TLS issue on worker, retain the stream
+    return true;
+  }
+}
+
 export class StreamsService {
   private env: Bindings;
 
@@ -112,9 +169,30 @@ export class StreamsService {
       uniqueStreams.push(s);
     }
 
-    // Sort by priority ascending and cap at top 20
-    uniqueStreams.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
-    const cappedStreams = uniqueStreams.slice(0, 20);
+    // Sort by priority ascending (HDHub has absolute highest priority)
+    uniqueStreams.sort((a, b) => {
+      const aHdhub = a.provider.toLowerCase().includes('hdhub') ? 0 : 1;
+      const bHdhub = b.provider.toLowerCase().includes('hdhub') ? 0 : 1;
+      if (aHdhub !== bHdhub) return aHdhub - bHdhub;
+      return (a.priority ?? 100) - (b.priority ?? 100);
+    });
+
+    // Probe top 15 candidate streams concurrently to filter out dead links (caps subrequests well below CF Free limit of 50)
+    const candidates = uniqueStreams.slice(0, 15);
+    const probeResults = await Promise.allSettled(candidates.map((s) => isStreamPlayable(s)));
+    const playableStreams: StreamSource[] = [];
+
+    for (let i = 0; i < candidates.length; i++) {
+      const res = probeResults[i];
+      if (res.status === 'fulfilled' && res.value) {
+        playableStreams.push(candidates[i]);
+      }
+    }
+
+    const cappedStreams = [
+      ...playableStreams,
+      ...uniqueStreams.slice(15),
+    ].slice(0, 20);
 
     return {
       imdb_id: imdbId,

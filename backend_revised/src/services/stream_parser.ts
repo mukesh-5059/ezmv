@@ -124,7 +124,8 @@ export function calculatePriority(
 ): number {
   let score = 100;
   const pLow = provider.toLowerCase();
-  if (pLow === 'hdhub' || pLow === 'plaviohd') score -= 20;
+  if (pLow === 'hdhub') score -= 70;
+  else if (pLow === 'plaviohd') score -= 20;
   else if (pLow === 'penguplay') score -= 10;
 
   // Host speed weighting
