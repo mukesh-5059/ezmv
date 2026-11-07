@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
@@ -121,53 +120,44 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
           topLeft: Radius.circular(16),
           bottomLeft: Radius.circular(16),
         ),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            width: (size.width * 0.35).clamp(340.0, 440.0),
-            height: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xE0181818),
-              border: const Border(
-                left: BorderSide(color: Colors.white12, width: 1),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  blurRadius: 30,
-                  spreadRadius: 5,
-                ),
-              ],
+        child: Container(
+          width: (size.width * 0.35).clamp(340.0, 440.0),
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            color: Color(0xF707080B),
+            border: Border(
+              left: BorderSide(color: Color(0x33FFFFFF), width: 1.5),
             ),
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    Row(
-                      children: [
-                        const Icon(Icons.subtitles_rounded, color: TVTheme.accent, size: 24),
-                        const SizedBox(width: 12),
-                        const Text(
-                          'Subtitles',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      const Icon(Icons.subtitles_rounded, color: TVTheme.primary, size: 24),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Subtitles',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
                         ),
-                        const Spacer(),
-                        if (widget.isLoading)
-                          const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(color: TVTheme.accent, strokeWidth: 2),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
+                      ),
+                      const Spacer(),
+                      if (widget.isLoading)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(color: TVTheme.primary, strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
 
                     // Subtitle Adjustments Card (Size & Sync)
                     Container(
@@ -231,7 +221,7 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
                                 child: Text(
                                   '${_delay > 0 ? '+' : ''}${_delay.toStringAsFixed(1)}s',
                                   style: TextStyle(
-                                    color: _delay != 0.0 ? TVTheme.accent : Colors.white,
+                                    color: _delay != 0.0 ? TVTheme.primary : Colors.white,
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -320,7 +310,6 @@ class _SubtitlePickerDialogState extends State<SubtitlePickerDialog> {
             ),
           ),
         ),
-      ),
     );
   }
 }
@@ -362,7 +351,7 @@ class _MiniStepperButtonState extends State<_MiniStepperButton> {
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: _isFocused ? TVTheme.accent : Colors.white.withValues(alpha: 0.12),
+            color: _isFocused ? TVTheme.primary : Colors.white.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _isFocused ? Colors.white : Colors.white24,
@@ -371,7 +360,7 @@ class _MiniStepperButtonState extends State<_MiniStepperButton> {
             boxShadow: _isFocused
                 ? [
                     BoxShadow(
-                      color: TVTheme.accent.withValues(alpha: 0.5),
+                      color: TVTheme.primary.withValues(alpha: 0.5),
                       blurRadius: 10,
                       spreadRadius: 1,
                     )
@@ -436,10 +425,10 @@ class _SubtitleOptionTileState extends State<_SubtitleOptionTile> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             color: _isFocused
-                ? TVTheme.accent
+                ? TVTheme.primary
                 : widget.isSelected
-                    ? Colors.white10
-                    : Colors.transparent,
+                    ? TVTheme.surfaceElevated
+                    : TVTheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _isFocused ? Colors.white : Colors.transparent,
@@ -448,7 +437,7 @@ class _SubtitleOptionTileState extends State<_SubtitleOptionTile> {
             boxShadow: _isFocused
                 ? [
                     BoxShadow(
-                      color: TVTheme.accent.withValues(alpha: 0.4),
+                      color: TVTheme.primary.withValues(alpha: 0.4),
                       blurRadius: 12,
                       spreadRadius: 1,
                     ),
@@ -463,7 +452,7 @@ class _SubtitleOptionTileState extends State<_SubtitleOptionTile> {
                 color: _isFocused
                     ? Colors.white
                     : widget.isSelected
-                        ? TVTheme.accent
+                        ? TVTheme.primary
                         : Colors.white38,
               ),
               const SizedBox(width: 12),

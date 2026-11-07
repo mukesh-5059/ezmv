@@ -1,19 +1,20 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import 'stream_selector.dart';
+import 'tv_shortcuts.dart';
 
 class EpisodeStreamDialog extends StatefulWidget {
-  final Movie movie;
+  final String imdbId;
+  final String showTitle;
   final int seasonNumber;
   final TvEpisode episode;
-  final void Function(Map<String, dynamic> stream)? onStreamSelected;
+  final void Function(StreamSource stream)? onStreamSelected;
 
   const EpisodeStreamDialog({
     super.key,
-    required this.movie,
+    required this.imdbId,
+    required this.showTitle,
     required this.seasonNumber,
     required this.episode,
     this.onStreamSelected,
@@ -24,11 +25,9 @@ class EpisodeStreamDialog extends StatefulWidget {
 }
 
 class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
-  List<Map<String, dynamic>> _streams = [];
+  List<StreamSource> _streams = [];
   bool _isLoading = true;
-  int _cacheExpiresIn = 0;
   String _statusMessage = 'Connecting to scrapers...';
-  Timer? _cacheTimer;
 
   final FocusNode _firstStreamFocusNode = FocusNode();
   final FocusNode _retryFocusNode = FocusNode();
@@ -42,58 +41,35 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
 
   @override
   void dispose() {
-    _cacheTimer?.cancel();
     _firstStreamFocusNode.dispose();
     _retryFocusNode.dispose();
     _closeFocusNode.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchStreams({bool bypassCache = false}) async {
-    _cacheTimer?.cancel();
+  Future<void> _fetchStreams() async {
     setState(() {
       _isLoading = true;
-      _cacheExpiresIn = 0;
-      _statusMessage = 'Connecting to scrapers...';
+      _statusMessage = 'Fetching streams for S${widget.seasonNumber}E${widget.episode.episodeNumber}...';
     });
 
-    final response = await ApiClient.getStreamLinksWithProgress(
-      widget.movie.tmdbId,
-      mediaType: 'tv',
-      season: widget.seasonNumber,
-      episode: widget.episode.episodeNumber,
-      bypassCache: bypassCache,
-      onProgress: (msg) {
-        if (!mounted) return;
-        setState(() {
-          _statusMessage = msg;
-        });
-      },
-    );
-
-    if (!mounted) return;
-
-    setState(() {
-      final List streamList = response['streams'] ?? [];
-      _streams = List<Map<String, dynamic>>.from(streamList);
-      _streams.sort((a, b) => ((a['priority'] as num?) ?? 100).compareTo((b['priority'] as num?) ?? 100));
-      _cacheExpiresIn = response['cache_expires_in'] ?? 0;
-      _isLoading = false;
-    });
-
-    if (_cacheExpiresIn > 0) {
-      _cacheTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (!mounted) {
-          timer.cancel();
-          return;
-        }
-        setState(() {
-          if (_cacheExpiresIn > 0) {
-            _cacheExpiresIn--;
-          } else {
-            timer.cancel();
-          }
-        });
+    try {
+      final streams = await ApiClient.instance.getStreams(
+        'tv',
+        widget.imdbId,
+        season: widget.seasonNumber,
+        episode: widget.episode.episodeNumber,
+      );
+      if (!mounted) return;
+      setState(() {
+        _streams = streams;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'Failed to load streams: $e';
       });
     }
 
@@ -112,133 +88,420 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
     final sStr = widget.seasonNumber.toString().padLeft(2, '0');
     final eStr = widget.episode.episodeNumber.toString().padLeft(2, '0');
     final epCode = 'S${sStr}E$eStr';
+    final stillUrl = widget.episode.stillUrl;
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 30),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 60, vertical: 40),
       child: Container(
-        width: 860,
-        padding: const EdgeInsets.all(28),
+        width: 920,
+        padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: const Color(0xFF161618),
+          color: const Color(0xFF0C0D12),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white12, width: 1.5),
           boxShadow: const [
             BoxShadow(
               color: Colors.black87,
-              blurRadius: 30,
-              spreadRadius: 10,
+              blurRadius: 32,
+              spreadRadius: 8,
             ),
           ],
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header Row
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: TVTheme.accent,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      epCode,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        letterSpacing: 0.5,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Episode Banner
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Episode Still Thumbnail
+                if (stillUrl.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 160,
+                      height: 95,
+                      color: TVTheme.surface,
+                      child: Image.network(
+                        stillUrl,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.tv, size: 36, color: Colors.white24),
                       ),
                     ),
+                  )
+                else
+                  Container(
+                    width: 160,
+                    height: 95,
+                    decoration: BoxDecoration(
+                      color: TVTheme.surface,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.tv, size: 36, color: Colors.white24),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.episode.name.isNotEmpty ? widget.episode.name : 'Episode ${widget.episode.episodeNumber}',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                const SizedBox(width: 18),
+
+                // Episode Details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: TVTheme.primary,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              epCode,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
                           ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              widget.showTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (widget.episode.airDate != null && widget.episode.airDate!.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              widget.episode.airDate!,
+                              style: const TextStyle(color: TVTheme.textMuted, fontSize: 12),
+                            ),
+                          ],
+                          if (widget.episode.formattedRuntime.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              '• ${widget.episode.formattedRuntime}',
+                              style: const TextStyle(color: TVTheme.textMuted, fontSize: 12),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        widget.episode.name.isNotEmpty
+                            ? widget.episode.name
+                            : 'Episode ${widget.episode.episodeNumber}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
                         ),
-                        const SizedBox(height: 4),
+                      ),
+                      if (widget.episode.overview.isNotEmpty) ...[
+                        const SizedBox(height: 6),
                         Text(
-                          '${widget.movie.title}${widget.episode.formattedRuntime.isNotEmpty ? ' • ${widget.episode.formattedRuntime}' : ''}',
+                          widget.episode.overview,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 14,
-                            color: Colors.white70,
+                            fontSize: 12,
+                            color: Colors.white60,
+                            height: 1.3,
                           ),
                         ),
                       ],
-                    ),
+                    ],
                   ),
-                  Focus(
-                    focusNode: _closeFocusNode,
-                    onKeyEvent: (node, event) {
-                      if (event is KeyDownEvent &&
-                          (event.logicalKey == LogicalKeyboardKey.select ||
-                              event.logicalKey == LogicalKeyboardKey.enter ||
-                              event.logicalKey == LogicalKeyboardKey.space)) {
-                        Navigator.of(context).pop();
-                        return KeyEventResult.handled;
-                      }
-                      return KeyEventResult.ignored;
+                ),
+                const SizedBox(width: 12),
+
+                // Close Button
+                Focus(
+                  focusNode: _closeFocusNode,
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent &&
+                        (event.logicalKey == LogicalKeyboardKey.select ||
+                            event.logicalKey == LogicalKeyboardKey.enter ||
+                            event.logicalKey == LogicalKeyboardKey.space)) {
+                      Navigator.of(context).pop();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: Builder(
+                    builder: (ctx) {
+                      final focused = Focus.of(ctx).hasFocus;
+                      return IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: focused ? TVTheme.primary : Colors.white60,
+                          size: 26,
+                        ),
+                      );
                     },
-                    child: Builder(
-                      builder: (ctx) {
-                        final focused = Focus.of(ctx).hasFocus;
-                        return IconButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          icon: Icon(
-                            Icons.close_rounded,
-                            color: focused ? TVTheme.accent : Colors.white60,
-                            size: 26,
-                          ),
-                        );
-                      },
-                    ),
                   ),
-                ],
-              ),
-              if (widget.episode.overview.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Text(
-                  widget.episode.overview,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.white60,
-                    height: 1.4,
-                  ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
-              const SizedBox(height: 20),
-              const Divider(color: Colors.white12, height: 1),
-              const SizedBox(height: 20),
-              StreamSelector(
-                streams: _streams,
-                isLoading: _isLoading,
-                statusMessage: _statusMessage,
-                cacheExpiresIn: _cacheExpiresIn,
-                onRetry: () => _fetchStreams(bypassCache: false),
-                onForceRescrape: () => _fetchStreams(bypassCache: true),
-                onStreamSelected: (stream) {
-                  Navigator.of(context).pop(stream);
-                  widget.onStreamSelected?.call(stream);
-                },
-                firstStreamFocusNode: _firstStreamFocusNode,
-                retryFocusNode: _retryFocusNode,
+            ),
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white12, height: 1),
+            const SizedBox(height: 14),
+
+            // Sources Header
+            Row(
+              children: [
+                const Icon(Icons.stream_rounded, color: TVTheme.primary, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  _isLoading
+                      ? 'Searching Sources...'
+                      : 'Available Sources (${_streams.length})',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Sources List / Loading / Empty
+            if (_isLoading)
+              Container(
+                height: 180,
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: TVTheme.primary, strokeWidth: 2.5),
+                    const SizedBox(height: 14),
+                    Text(
+                      _statusMessage,
+                      style: const TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                    ),
+                  ],
+                ),
+              )
+            else if (_streams.isEmpty)
+              Container(
+                height: 160,
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off_rounded, size: 40, color: TVTheme.textMuted),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'No playable sources found for this episode.',
+                      style: TextStyle(color: TVTheme.textSecondary, fontSize: 14),
+                    ),
+                    const SizedBox(height: 14),
+                    Focus(
+                      focusNode: _retryFocusNode,
+                      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(event, onActivate: _fetchStreams),
+                      child: Builder(
+                        builder: (ctx) {
+                          final focused = Focus.of(ctx).hasFocus;
+                          return ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: focused ? Colors.white : TVTheme.surface,
+                              foregroundColor: focused ? Colors.black : Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            ),
+                            onPressed: _fetchStreams,
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Retry Fetching'),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _streams.length,
+                  itemBuilder: (ctx, idx) {
+                    final stream = _streams[idx];
+                    return _EpisodeStreamCard(
+                      stream: stream,
+                      autofocus: idx == 0,
+                      focusNode: idx == 0 ? _firstStreamFocusNode : null,
+                      onSelect: () {
+                        Navigator.of(context).pop(stream);
+                        widget.onStreamSelected?.call(stream);
+                      },
+                    );
+                  },
+                ),
               ),
-            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EpisodeStreamCard extends StatefulWidget {
+  final StreamSource stream;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final VoidCallback onSelect;
+
+  const _EpisodeStreamCard({
+    required this.stream,
+    this.autofocus = false,
+    this.focusNode,
+    required this.onSelect,
+  });
+
+  @override
+  State<_EpisodeStreamCard> createState() => _EpisodeStreamCardState();
+}
+
+class _EpisodeStreamCardState extends State<_EpisodeStreamCard> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.stream;
+    final langs = s.languages.isNotEmpty ? s.languages.join(', ') : 'Default';
+    final provider = s.provider.isNotEmpty ? s.provider.toUpperCase() : 'DIRECT';
+
+    return Focus(
+      autofocus: widget.autofocus,
+      focusNode: widget.focusNode,
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(event, onActivate: widget.onSelect),
+      child: GestureDetector(
+        onTap: widget.onSelect,
+        child: AnimatedScale(
+          scale: _isFocused ? 1.015 : 1.0,
+          duration: const Duration(milliseconds: 140),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: _isFocused ? TVTheme.surfaceElevated : const Color(0xFF14151C),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: _isFocused ? Colors.white : Colors.white12,
+                width: _isFocused ? 2 : 1,
+              ),
+              boxShadow: _isFocused ? TVTheme.focusShadows : TVTheme.restingShadows,
+            ),
+            child: Row(
+              children: [
+                // Quality Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: s.quality.toLowerCase().contains('1080')
+                        ? TVTheme.primary
+                        : Colors.white24,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    s.quality.isNotEmpty ? s.quality : 'HD',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // Stream Metadata
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white10,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              provider,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (s.formattedSize != null && s.formattedSize!.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Icon(Icons.folder_outlined, size: 13, color: _isFocused ? Colors.white70 : Colors.white54),
+                            const SizedBox(width: 3),
+                            Text(
+                              s.formattedSize!,
+                              style: TextStyle(
+                                color: _isFocused ? Colors.white : Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                          if (langs.isNotEmpty && langs != 'Default') ...[
+                            const SizedBox(width: 8),
+                            Icon(Icons.volume_up_outlined, size: 13, color: _isFocused ? Colors.white70 : Colors.white54),
+                            const SizedBox(width: 3),
+                            Text(
+                              langs,
+                              style: TextStyle(
+                                color: _isFocused ? Colors.white70 : Colors.white60,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (s.filename != null && s.filename!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          s.filename!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            color: _isFocused ? Colors.white70 : Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 10),
+                Icon(
+                  Icons.play_circle_filled,
+                  size: 24,
+                  color: _isFocused ? TVTheme.primary : Colors.white38,
+                ),
+              ],
+            ),
           ),
         ),
       ),

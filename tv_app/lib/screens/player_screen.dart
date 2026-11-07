@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:shared_core/shared_core.dart' hide SubtitleTrack;
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import '../widgets/focusable_button.dart';
 import '../widgets/player_hud.dart';
+import '../widgets/stream_selector.dart';
 import '../widgets/subtitle_picker_dialog.dart';
+import '../widgets/tv_shortcuts.dart';
 
-String formatDuration(int totalSeconds) {
+String _formatDuration(int totalSeconds) {
   if (totalSeconds <= 0) return '0:00';
   final int hours = totalSeconds ~/ 3600;
   final int minutes = (totalSeconds % 3600) ~/ 60;
@@ -27,27 +28,54 @@ class PlayerScreen extends StatefulWidget {
   final String streamUrl;
   final Map<String, String>? headers;
   final String movieTitle;
-  final int tmdbId;
+  final String imdbId;
+  final int? tmdbId;
   final String mediaType;
   final int? season;
   final int? episode;
   final String provider;
   final String quality;
   final int initialPositionSeconds;
+  final String? posterPath;
+  final String? backdropPath;
+  final List<StreamSource>? availableStreams;
 
   const PlayerScreen({
     super.key,
     required this.streamUrl,
     this.headers,
     required this.movieTitle,
-    required this.tmdbId,
+    required this.imdbId,
+    this.tmdbId,
     this.mediaType = 'movie',
     this.season,
     this.episode,
     this.provider = 'Direct',
     this.quality = 'HD',
     this.initialPositionSeconds = 0,
+    this.posterPath,
+    this.backdropPath,
+    this.availableStreams,
   });
+
+  factory PlayerScreen.fromMap(Map<String, dynamic> map) {
+    return PlayerScreen(
+      streamUrl: map['streamUrl'] as String? ?? '',
+      headers: (map['headers'] as Map?)?.map((k, v) => MapEntry(k.toString(), v.toString())),
+      movieTitle: map['movieTitle'] as String? ?? '',
+      imdbId: map['imdbId'] as String? ?? '',
+      tmdbId: (map['tmdbId'] as num?)?.toInt(),
+      mediaType: map['mediaType'] as String? ?? 'movie',
+      season: (map['season'] as num?)?.toInt(),
+      episode: (map['episode'] as num?)?.toInt(),
+      provider: map['provider'] as String? ?? 'Direct',
+      quality: map['quality'] as String? ?? 'HD',
+      initialPositionSeconds: (map['initialPositionSeconds'] as num?)?.toInt() ?? 0,
+      posterPath: map['posterPath'] as String?,
+      backdropPath: map['backdropPath'] as String?,
+      availableStreams: (map['availableStreams'] as List?)?.cast<StreamSource>(),
+    );
+  }
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -56,56 +84,61 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   late final Player _player;
   late final VideoController _videoController;
-  final FocusNode _focusNode = FocusNode();
+
+  final FocusNode _mainFocusNode = FocusNode();
   final PlayerHudController _hudController = PlayerHudController();
 
-  final FocusNode _backButtonFocus = FocusNode();
-  final FocusNode _subtitleButtonFocus = FocusNode();
-  final FocusNode _rewindButtonFocus = FocusNode();
+  // Position notifiers to prevent setState churn on PlayerScreen
+  final ValueNotifier<Duration> _positionNotifier = ValueNotifier(Duration.zero);
+  final ValueNotifier<Duration> _durationNotifier = ValueNotifier(Duration.zero);
+  final ValueNotifier<Duration> _bufferNotifier = ValueNotifier(Duration.zero);
+
+  // OSD Focus Nodes
   final FocusNode _playPauseButtonFocus = FocusNode();
-  final FocusNode _forwardButtonFocus = FocusNode();
-  final FocusNode _seekBarFocus = FocusNode();
+  final FocusNode _subtitlesButtonFocus = FocusNode();
+  final FocusNode _audioTrackButtonFocus = FocusNode();
+  final FocusNode _sourceSwitcherButtonFocus = FocusNode();
 
   Timer? _progressSaveTimer;
   Timer? _osdHideTimer;
   Timer? _seekCommitTimer;
-  DateTime? _seekStartTime;
   Duration? _pendingSeekPosition;
   int _accumulatedSeekDelta = 0;
   final List<StreamSubscription> _subscriptions = [];
+
   String? _errorMessage;
   bool _isExiting = false;
   bool _showOsd = false;
-
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
-  Duration _buffer = Duration.zero;
   bool _isPlaying = true;
   bool _isBuffering = false;
 
+  // Subtitles & Audio
   List<SubtitleTrackInfo> _subtitles = [];
   SubtitleTrackInfo? _selectedSubtitle;
   bool _isLoadingSubtitles = false;
-  double _subtitleFontSize = 44.0;
-  double _subtitleDelaySeconds = 0.0;
+  double _subtitleFontSize = 42.0;
+
+  late String _currentStreamUrl;
+  late String _currentQuality;
+  late String _currentProvider;
+  List<StreamSource> _availableStreams = [];
 
   Map<String, String> get _requestHeaders {
-    if (widget.headers != null) {
-      return {
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        ...widget.headers!,
-      };
-    }
     return {
       'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Range': 'bytes=0-',
+      if (widget.headers != null) ...widget.headers!,
     };
   }
 
   @override
   void initState() {
     super.initState();
+    _currentStreamUrl = widget.streamUrl;
+    _currentQuality = widget.quality;
+    _currentProvider = widget.provider;
+    _availableStreams = widget.availableStreams ?? [];
 
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -114,20 +147,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeRight,
     ]);
 
+    // Initialize media_kit Player with hardware decoding & buffering configuration
     _player = Player(
       configuration: const PlayerConfiguration(
-        bufferSize: 32 * 1024 * 1024,
+        bufferSize: 48 * 1024 * 1024,
       ),
     );
-    try {
-      final p = (_player.platform as dynamic);
-      p?.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_delay_max=10');
-      p?.setProperty('stream-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=10');
-      p?.setProperty('network-timeout', '45');
-      p?.setProperty('demuxer-readahead-secs', '60');
-      p?.setProperty('demuxer-max-bytes', '64MiB');
-      p?.setProperty('demuxer-max-back-bytes', '32MiB');
-    } catch (_) {}
+
+    _configureHardwareAndBuffer();
+
     _videoController = VideoController(
       _player,
       configuration: const VideoControllerConfiguration(
@@ -135,275 +163,169 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
 
-    LocalStorage.getSubtitleFontSize().then((size) {
+    StorageService.instance.getSubtitleFontSize().then((size) {
       if (mounted) setState(() => _subtitleFontSize = size);
     });
 
-    _initPlayerAndMedia();
+    _initPlayerListenersAndOpen();
   }
 
-  Future<void> _initPlayerAndMedia() async {
+  void _configureHardwareAndBuffer() {
+    try {
+      final p = (_player.platform as dynamic);
+      // Hardware decoding: Never fallback to CPU software decoding for 1080p
+      p?.setProperty('hwdec', 'mediacodec-copy');
+      p?.setProperty('vd-lavc-threads', '4');
+      p?.setProperty('framedrop', 'vo');
+
+      // Network & Buffer Stability for 1.5GB RAM Android TVs
+      p?.setProperty('cache', 'yes');
+      p?.setProperty('cache-secs', '30');
+      p?.setProperty('demuxer-readahead-secs', '25');
+      p?.setProperty('demuxer-max-bytes', '48MiB');
+      p?.setProperty('demuxer-max-back-bytes', '24MiB');
+      p?.setProperty('video-sync', 'audio');
+
+      // Reconnect & HTTP resilience
+      p?.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_delay_max=10');
+      p?.setProperty('stream-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=10');
+      p?.setProperty('network-timeout', '30');
+    } catch (_) {}
+  }
+
+  Future<void> _initPlayerListenersAndOpen() async {
+    // CRITICAL: Update ValueNotifier WITHOUT calling setState on PlayerScreen
     _subscriptions.add(
       _player.stream.position.listen((pos) {
-        if (mounted) setState(() => _position = pos);
+        if (_showOsd) {
+          _positionNotifier.value = pos;
+        }
       }),
     );
     _subscriptions.add(
       _player.stream.duration.listen((dur) {
-        if (mounted) setState(() => _duration = dur);
+        _durationNotifier.value = dur;
       }),
     );
     _subscriptions.add(
       _player.stream.buffer.listen((buf) {
-        if (mounted) setState(() => _buffer = buf);
+        if (_showOsd) {
+          _bufferNotifier.value = buf;
+        }
       }),
     );
     _subscriptions.add(
       _player.stream.playing.listen((playing) {
-        if (mounted) setState(() => _isPlaying = playing);
+        if (mounted && _isPlaying != playing) {
+          setState(() => _isPlaying = playing);
+        }
       }),
     );
     _subscriptions.add(
       _player.stream.buffering.listen((buffering) {
-        if (mounted) setState(() => _isBuffering = buffering);
+        if (mounted && _isBuffering != buffering) {
+          setState(() => _isBuffering = buffering);
+        }
       }),
     );
     _subscriptions.add(
       _player.stream.completed.listen((completed) {
         if (completed && mounted) {
-          LocalStorage.clearProgress(widget.tmdbId);
+          _saveProgress();
           _exitPlayer();
         }
       }),
     );
-    Timer? errorDebounceTimer;
     _subscriptions.add(
       _player.stream.error.listen((err) {
-        if (!mounted || err.isEmpty) return;
-        errorDebounceTimer?.cancel();
-        errorDebounceTimer = Timer(const Duration(milliseconds: 3500), () {
-          if (mounted && !_player.state.playing && _player.state.buffering) {
-            setState(() {
-              _errorMessage = err;
-            });
-          }
-        });
+        if (mounted && err.isNotEmpty) {
+          _hudController.triggerInfo('Playback warning: $err');
+        }
       }),
     );
 
     try {
       await _player.open(
         Media(
-          widget.streamUrl,
+          _currentStreamUrl,
           httpHeaders: _requestHeaders,
         ),
       );
 
       if (widget.initialPositionSeconds > 0) {
-        final startPosition = Duration(seconds: widget.initialPositionSeconds);
+        final startPos = Duration(seconds: widget.initialPositionSeconds);
         _player.stream.buffer.firstWhere((b) => b > Duration.zero).then((_) async {
           await Future.delayed(const Duration(milliseconds: 300));
           if (mounted) {
-            await _player.seek(startPosition);
+            await _player.seek(startPos);
             _hudController.triggerInfo(
-              'Resumed from ${formatDuration(widget.initialPositionSeconds)}',
+              'Resumed from ${_formatDuration(widget.initialPositionSeconds)}',
             );
           }
         }).catchError((_) {});
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _errorMessage = e.toString();
-        });
+        setState(() => _errorMessage = e.toString());
       }
     }
 
-    _loadInitialSubtitleSettings();
     _loadSubtitlesAsync();
     _progressSaveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
+      if (mounted) _mainFocusNode.requestFocus();
     });
   }
 
-  Future<void> _loadInitialSubtitleSettings() async {
-    final savedFontSize = await LocalStorage.getSubtitleFontSize();
-    final savedDelay = await LocalStorage.getSubtitleDelay(
-      widget.tmdbId,
-      mediaType: widget.mediaType,
-      season: widget.season,
-      episode: widget.episode,
-    );
-    if (mounted) {
-      setState(() {
-        _subtitleFontSize = savedFontSize;
-        _subtitleDelaySeconds = savedDelay;
-      });
-      if (savedDelay != 0.0) {
-        try {
-          (_player.platform as dynamic)?.setProperty('sub-delay', savedDelay.toStringAsFixed(3));
-        } catch (_) {}
-      }
-    }
-  }
-
   Future<void> _loadSubtitlesAsync() async {
-    if (!mounted) return;
+    if (widget.imdbId.isEmpty) return;
     setState(() => _isLoadingSubtitles = true);
     try {
-      final tracks = await ApiClient.getSubtitles(
-        widget.tmdbId,
-        mediaType: widget.mediaType,
+      final tracks = await ApiClient.instance.getSubtitles(
+        widget.mediaType,
+        widget.imdbId,
         season: widget.season,
         episode: widget.episode,
       );
       if (!mounted) return;
-
-      final savedChoice = await LocalStorage.getSubtitleChoice(
-        widget.tmdbId,
-        mediaType: widget.mediaType,
-        season: widget.season,
-        episode: widget.episode,
-      );
-
-      SubtitleTrackInfo? trackToSelect;
-      if (savedChoice == 'none') {
-        trackToSelect = null;
-      } else if (savedChoice != null && savedChoice.isNotEmpty) {
-        trackToSelect = tracks.cast<SubtitleTrackInfo?>().firstWhere(
-              (t) => t?.url == savedChoice,
-              orElse: () => null,
-            );
-      }
-
-      if (mounted) {
-        setState(() {
-          _subtitles = tracks;
-          _isLoadingSubtitles = false;
-        });
-        if (trackToSelect != null) {
-          await _selectSubtitle(trackToSelect, persistChoice: false);
-        }
-      }
+      setState(() {
+        _subtitles = tracks;
+        _isLoadingSubtitles = false;
+      });
     } catch (_) {
       if (mounted) setState(() => _isLoadingSubtitles = false);
     }
   }
 
-  Future<void> _selectSubtitle(SubtitleTrackInfo? track, {bool persistChoice = true}) async {
-    setState(() => _selectedSubtitle = track);
-    if (persistChoice) {
-      LocalStorage.saveSubtitleChoice(
-        widget.tmdbId,
-        track?.url,
-        mediaType: widget.mediaType,
-        season: widget.season,
-        episode: widget.episode,
-      );
-    }
-    if (track != null) {
-      try {
-        final uri = Uri.parse(track.url);
-        await _player.setSubtitleTrack(
-          SubtitleTrack.uri(
-            uri.toString(),
-            title: track.label,
-            language: track.language,
-          ),
-        );
-        _hudController.triggerSubtitle('Subtitles: ${track.label}');
-      } catch (e) {
-        _hudController.triggerSubtitle('Failed to load subtitle');
-      }
-    } else {
-      await _player.setSubtitleTrack(SubtitleTrack.no());
-      _hudController.triggerSubtitle('Subtitles: Off');
-    }
-  }
-
-  void _updateSubtitleFontSize(double newSize) {
-    setState(() => _subtitleFontSize = newSize);
-    LocalStorage.saveSubtitleFontSize(newSize);
-  }
-
-  void _updateSubtitleDelay(double newDelay) {
-    setState(() => _subtitleDelaySeconds = newDelay);
-    LocalStorage.saveSubtitleDelay(
-      widget.tmdbId,
-      newDelay,
-      mediaType: widget.mediaType,
-      season: widget.season,
-      episode: widget.episode,
-    );
-    try {
-      (_player.platform as dynamic)?.setProperty('sub-delay', newDelay.toStringAsFixed(3));
-      final sign = newDelay > 0 ? '+' : '';
-      _hudController.triggerInfo('Subtitle Sync: $sign${newDelay.toStringAsFixed(1)}s');
-    } catch (_) {}
-  }
-
-  void _showSubtitleDialog() async {
-    _hideOsdControls();
-    final result = await SubtitlePickerDialog.show(
-      context: context,
-      subtitles: _subtitles,
-      selectedSubtitle: _selectedSubtitle,
-      isLoading: _isLoadingSubtitles,
-      initialFontSize: _subtitleFontSize,
-      initialDelaySeconds: _subtitleDelaySeconds,
-      onFontSizeChanged: _updateSubtitleFontSize,
-      onDelayChanged: _updateSubtitleDelay,
-    );
-    if (result != null && mounted) {
-      if (result.isOff) {
-        await _selectSubtitle(null);
-      } else if (result.track != null) {
-        await _selectSubtitle(result.track);
-      }
-    }
-  }
-
   void _saveProgress() {
-    final pos = _player.state.position;
-    final dur = _player.state.duration;
-    if (dur.inSeconds > 30) {
-      // Check & auto-mark watched (remaining <= 300s or progress >= 92%)
-      LocalStorage.checkAndAutoMarkWatched(
-        widget.tmdbId,
-        pos.inSeconds,
-        dur.inSeconds,
+    final posMs = _player.state.position.inMilliseconds;
+    final durMs = _player.state.duration.inMilliseconds;
+
+    if (durMs > 30000 && widget.imdbId.isNotEmpty) {
+      final entry = ContinueWatchingEntry(
+        imdbId: widget.imdbId,
+        title: widget.movieTitle,
+        posterPath: widget.posterPath,
+        backdropPath: widget.backdropPath,
         mediaType: widget.mediaType,
         season: widget.season,
         episode: widget.episode,
+        positionMs: posMs,
+        durationMs: durMs,
+        updatedAt: DateTime.now(),
       );
-
-      // Clear timestamp only at the very end (remaining <= 30s or progress >= 98%)
-      final remaining = dur.inSeconds - pos.inSeconds;
-      final progressRatio = pos.inSeconds / dur.inSeconds;
-      if (remaining <= 30 || progressRatio >= 0.98) {
-        LocalStorage.clearProgress(
-          widget.tmdbId,
-          mediaType: widget.mediaType,
-          season: widget.season,
-          episode: widget.episode,
-        );
-      } else if (pos.inSeconds > 5) {
-        LocalStorage.saveProgress(
-          widget.tmdbId,
-          pos.inSeconds,
-          mediaType: widget.mediaType,
-          season: widget.season,
-          episode: widget.episode,
-          totalDurationSeconds: dur.inSeconds,
-        );
-      }
+      StorageService.instance.saveContinueWatching(entry);
     }
   }
+
+  // --- TV OSD HUD Control ---
 
   void _showOsdControls([FocusNode? targetFocus]) {
     setState(() => _showOsd = true);
+    _positionNotifier.value = _player.state.position;
+    _durationNotifier.value = _player.state.duration;
+    _bufferNotifier.value = _player.state.buffer;
     _resetOsdTimer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -415,17 +337,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _hideOsdControls() {
     _osdHideTimer?.cancel();
     setState(() => _showOsd = false);
-    _focusNode.requestFocus();
+    _mainFocusNode.requestFocus();
   }
 
   void _resetOsdTimer() {
     _osdHideTimer?.cancel();
-    _osdHideTimer = Timer(const Duration(milliseconds: 6000), () {
+    // Auto-hide after 4 seconds of inactivity
+    _osdHideTimer = Timer(const Duration(seconds: 4), () {
       if (mounted && _showOsd) {
         _hideOsdControls();
       }
     });
   }
+
+  // --- Remote D-Pad Navigation & Shortcuts ---
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
@@ -434,7 +359,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final key = event.logicalKey;
 
-    if (key == LogicalKeyboardKey.escape) {
+    // Back key
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.backspace) {
       if (_showOsd) {
         _hideOsdControls();
         return KeyEventResult.handled;
@@ -444,11 +372,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    if (key == LogicalKeyboardKey.select ||
-        key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter ||
-        key == LogicalKeyboardKey.space ||
-        key == LogicalKeyboardKey.mediaPlayPause) {
+    // Play / Pause toggle on D-pad Center
+    if (TvShortcuts.isActivateKey(key) || key == LogicalKeyboardKey.mediaPlayPause) {
       if (event is KeyRepeatEvent) return KeyEventResult.handled;
       final wasPlaying = _isPlaying;
       _player.playOrPause();
@@ -460,6 +385,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return KeyEventResult.handled;
     }
 
+    // D-Pad Up / Down toggles OSD
     if (key == LogicalKeyboardKey.arrowDown || key == LogicalKeyboardKey.arrowUp) {
       if (!_showOsd) {
         _showOsdControls(_playPauseButtonFocus);
@@ -467,6 +393,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
+    // D-Pad Left / Right seeks -10s / +10s
     if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.mediaRewind) {
       if (!_showOsd) {
         _seekDelta(-1);
@@ -481,41 +408,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    if (key == LogicalKeyboardKey.closedCaptionToggle ||
-        key == LogicalKeyboardKey.keyC ||
-        key == LogicalKeyboardKey.mediaAudioTrack) {
-      if (event is KeyRepeatEvent) return KeyEventResult.handled;
-      _showSubtitleDialog();
-      return KeyEventResult.handled;
-    }
-
     return KeyEventResult.ignored;
   }
 
-  int _getAcceleratedStep() {
-    if (_seekStartTime == null) {
-      _seekStartTime = DateTime.now();
-      return 10;
-    }
-    final elapsedMs = DateTime.now().difference(_seekStartTime!).inMilliseconds;
-    if (elapsedMs < 3000) {
-      return 10;
-    } else if (elapsedMs < 6000) {
-      return 30;
-    } else if (elapsedMs < 9000) {
-      return 60;
-    } else {
-      return 180;
-    }
-  }
-
   void _seekDelta(int direction) {
-    final step = _getAcceleratedStep() * direction;
-    _accumulatedSeekDelta += step;
+    const step = 10;
+    _accumulatedSeekDelta += (step * direction);
 
     final current = _pendingSeekPosition ?? _player.state.position;
     final duration = _player.state.duration;
-    final target = current + Duration(seconds: step);
+    final target = current + Duration(seconds: step * direction);
     final clamped = target < Duration.zero
         ? Duration.zero
         : (duration > Duration.zero && target > duration ? duration : target);
@@ -523,7 +425,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _pendingSeekPosition = clamped;
     _hudController.triggerSeek(
       deltaSeconds: _accumulatedSeekDelta,
-      targetTime: formatDuration(clamped.inSeconds),
+      targetTime: _formatDuration(clamped.inSeconds),
     );
 
     _seekCommitTimer?.cancel();
@@ -531,16 +433,137 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (_pendingSeekPosition != null) {
         _player.seek(_pendingSeekPosition!);
         _pendingSeekPosition = null;
-        _seekStartTime = null;
         _accumulatedSeekDelta = 0;
       }
     });
   }
 
+  // --- In-Player Dialogs ---
+
+  void _showSubtitleDialog() async {
+    _hideOsdControls();
+    final result = await SubtitlePickerDialog.show(
+      context: context,
+      subtitles: _subtitles,
+      selectedSubtitle: _selectedSubtitle,
+      isLoading: _isLoadingSubtitles,
+      initialFontSize: _subtitleFontSize,
+      onFontSizeChanged: (newSize) {
+        setState(() => _subtitleFontSize = newSize);
+        StorageService.instance.setSubtitleFontSize(newSize);
+      },
+    );
+
+    if (result != null && mounted) {
+      if (result.isOff) {
+        _selectedSubtitle = null;
+        await _player.setSubtitleTrack(SubtitleTrack.no());
+        _hudController.triggerSubtitle('Subtitles: Off');
+      } else if (result.track != null) {
+        _selectedSubtitle = result.track;
+        try {
+          await _player.setSubtitleTrack(
+            SubtitleTrack.uri(
+              result.track!.url,
+              title: result.track!.label,
+              language: result.track!.language,
+            ),
+          );
+          _hudController.triggerSubtitle('Subtitles: ${result.track!.label}');
+        } catch (_) {
+          _hudController.triggerSubtitle('Failed to load subtitle');
+        }
+      }
+    }
+  }
+
+  void _showAudioTrackDialog() async {
+    _hideOsdControls();
+    final tracks = _player.state.tracks.audio;
+    if (tracks.isEmpty) {
+      _hudController.triggerInfo('No alternative audio tracks');
+      return;
+    }
+
+    final selected = await showDialog<AudioTrack>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: TVTheme.surface,
+        title: const Text('Select Audio Track', style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 320,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: tracks.length,
+            itemBuilder: (c, idx) {
+              final t = tracks[idx];
+              final label = (t.title?.isNotEmpty == true)
+                  ? t.title!
+                  : (t.language?.isNotEmpty == true ? t.language! : 'Track #${t.id}');
+              return ListTile(
+                autofocus: idx == 0,
+                title: Text(label, style: const TextStyle(color: Colors.white)),
+                onTap: () => Navigator.of(ctx).pop(t),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    if (selected != null && mounted) {
+      await _player.setAudioTrack(selected);
+      _hudController.triggerInfo('Audio: ${selected.title ?? selected.language ?? selected.id}');
+    }
+  }
+
+  void _showSourceSwitcherDialog() async {
+    _hideOsdControls();
+    List<StreamSource> sources = _availableStreams;
+    if (sources.isEmpty && widget.imdbId.isNotEmpty) {
+      try {
+        sources = await ApiClient.instance.getStreams(
+          widget.mediaType,
+          widget.imdbId,
+          season: widget.season,
+          episode: widget.episode,
+        );
+        _availableStreams = sources;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    final selectedStream = await StreamSelector.showModal(
+      context: context,
+      streams: sources,
+      title: widget.movieTitle,
+    );
+
+    if (selectedStream != null && mounted && selectedStream.url != _currentStreamUrl) {
+      _saveProgress();
+      _hudController.triggerInfo('Switching to ${selectedStream.quality} (${selectedStream.provider})...');
+      setState(() {
+        _currentStreamUrl = selectedStream.url;
+        _currentQuality = selectedStream.quality;
+        _currentProvider = selectedStream.provider;
+      });
+
+      // Hardware Guardrail: Stop old pipeline before opening new stream
+      await _player.stop();
+      await _player.open(
+        Media(selectedStream.url, httpHeaders: _requestHeaders),
+      );
+    }
+  }
+
+  // --- Hardware Guardrail: Single-pipeline decoder cleanup ---
+
   void _exitPlayer() {
     if (_isExiting) return;
     _isExiting = true;
     _saveProgress();
+    // Immediately stop hardware decoder pipeline
+    _player.stop();
     if (mounted && Navigator.canPop(context)) {
       Navigator.pop(context);
     }
@@ -551,20 +574,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _osdHideTimer?.cancel();
     _progressSaveTimer?.cancel();
     _seekCommitTimer?.cancel();
+
     for (final sub in _subscriptions) {
       sub.cancel();
     }
     _subscriptions.clear();
+
     _saveProgress();
+
+    // Critical Hardware Guardrail for Amlogic & TV Decoders:
+    _player.stop();
     _player.dispose();
-    _focusNode.dispose();
-    _backButtonFocus.dispose();
-    _subtitleButtonFocus.dispose();
-    _rewindButtonFocus.dispose();
+
+    _mainFocusNode.dispose();
     _playPauseButtonFocus.dispose();
-    _forwardButtonFocus.dispose();
-    _seekBarFocus.dispose();
+    _subtitlesButtonFocus.dispose();
+    _audioTrackButtonFocus.dispose();
+    _sourceSwitcherButtonFocus.dispose();
     _hudController.dispose();
+
+    _positionNotifier.dispose();
+    _durationNotifier.dispose();
+    _bufferNotifier.dispose();
+
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([
@@ -572,6 +604,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
+
     super.dispose();
   }
 
@@ -590,13 +623,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Focus(
-          focusNode: _focusNode,
+          focusNode: _mainFocusNode,
           autofocus: true,
           onKeyEvent: _handleKeyEvent,
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Video Layer
+              // Hardware-accelerated Video Surface
               Video(
                 controller: _videoController,
                 controls: NoVideoControls,
@@ -608,26 +641,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     wordSpacing: 0.5,
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
-                    backgroundColor: const Color(0xB3000000),
+                    shadows: const [
+                      Shadow(offset: Offset(-1.5, -1.5), color: Colors.black),
+                      Shadow(offset: Offset(1.5, -1.5), color: Colors.black),
+                      Shadow(offset: Offset(1.5, 1.5), color: Colors.black),
+                      Shadow(offset: Offset(-1.5, 1.5), color: Colors.black),
+                    ],
                   ),
-                  padding: const EdgeInsets.fromLTRB(32.0, 0.0, 32.0, 36.0),
                 ),
               ),
 
-              // Quick HUD Toast Layer
-              PlayerHud(controller: _hudController),
-
               // Buffering indicator
-              if (_isBuffering)
+              if (_isBuffering && !_showOsd)
                 const Center(
-                  child: CircularProgressIndicator(color: TVTheme.accent, strokeWidth: 3),
+                  child: CircularProgressIndicator(color: TVTheme.primary, strokeWidth: 3),
                 ),
 
-              // 10-Foot TV OSD Overlay Layer
-              if (_showOsd) _buildTvOsdOverlay(),
+              // Error display
+              if (_errorMessage != null)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: TVTheme.primary),
+                    ),
+                    child: Text(
+                      _errorMessage!,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                  ),
+                ),
 
-              // Playback Error Overlay
-              if (_errorMessage != null) _buildErrorOverlay(),
+              // Quick TV OSD Action HUD
+              PlayerHud(controller: _hudController),
+
+              // Interactive TV OSD Layer
+              if (_showOsd) _buildOsdOverlay(),
             ],
           ),
         ),
@@ -635,258 +686,154 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildTvOsdOverlay() {
-    final posSeconds = _position.inSeconds;
-    final durSeconds = _duration.inSeconds;
-    final progressRatio = durSeconds > 0 ? (posSeconds / durSeconds).clamp(0.0, 1.0) : 0.0;
-    final bufferRatio = durSeconds > 0 ? (_buffer.inSeconds / durSeconds).clamp(0.0, 1.0) : 0.0;
-
+  Widget _buildOsdOverlay() {
     return GestureDetector(
       onTap: _resetOsdTimer,
-      behavior: HitTestBehavior.translucent,
       child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xCC000000),
-              Color(0x33000000),
-              Color(0xEE000000),
-            ],
-            stops: [0.0, 0.4, 1.0],
-          ),
+        color: Colors.black.withValues(alpha: 0.65),
+        padding: const EdgeInsets.symmetric(
+          horizontal: TVTheme.overscanMargin,
+          vertical: 32,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0),
         child: Column(
           children: [
-            // Top Bar
+            // Top Title Bar
             Row(
               children: [
-                _buildOsdIconButton(
-                  focusNode: _backButtonFocus,
-                  icon: Icons.arrow_back_rounded,
-                  label: 'Back',
-                  onTap: _exitPlayer,
+                IconButton(
+                  focusNode: FocusNode(canRequestFocus: false),
+                  onPressed: _exitPlayer,
+                  icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         widget.movieTitle,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: TVTheme.accent.withOpacity(0.3),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: TVTheme.accent, width: 1),
-                            ),
-                            child: Text(
-                              '${widget.provider} • ${widget.quality}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                              ),
-                            ),
-                          ),
-                          if (_selectedSubtitle != null) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.white12,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                'CC: ${_selectedSubtitle!.label}',
-                                style: const TextStyle(color: Colors.white70, fontSize: 11),
-                              ),
-                            ),
-                          ],
-                        ],
+                      const SizedBox(height: 4),
+                      Text(
+                        '$_currentProvider • $_currentQuality${widget.season != null ? " • S${widget.season}E${widget.episode}" : ""}',
+                        style: const TextStyle(fontSize: 13, color: TVTheme.textSecondary),
                       ),
                     ],
                   ),
                 ),
-                _buildOsdIconButton(
-                  focusNode: _subtitleButtonFocus,
-                  icon: _selectedSubtitle != null ? Icons.subtitles_rounded : Icons.subtitles_outlined,
-                  label: 'Subtitles',
-                  highlight: _selectedSubtitle != null,
-                  onTap: _showSubtitleDialog,
-                ),
               ],
             ),
-
             const Spacer(),
 
-            // Center Quick Controls
+            // Center Seek / Position Bar (Uses ValueListenableBuilder - Zero Parent Rebuilds)
+            ValueListenableBuilder<Duration>(
+              valueListenable: _positionNotifier,
+              builder: (ctx, pos, _) {
+                final dur = _durationNotifier.value;
+                final posSeconds = pos.inSeconds;
+                final durSeconds = dur.inSeconds;
+                final progress = durSeconds > 0 ? (posSeconds / durSeconds).clamp(0.0, 1.0) : 0.0;
+
+                return Column(
+                  children: [
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 4,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        activeTrackColor: TVTheme.primary,
+                        inactiveTrackColor: Colors.white24,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        value: progress,
+                        onChanged: (val) {
+                          _resetOsdTimer();
+                          final newSec = (val * durSeconds).toInt();
+                          _player.seek(Duration(seconds: newSec));
+                        },
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _formatDuration(posSeconds),
+                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                          Text(
+                            _formatDuration(durSeconds),
+                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Bottom TV Action Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildOsdIconButton(
-                  focusNode: _rewindButtonFocus,
-                  icon: Icons.replay_10_rounded,
-                  label: '-10s',
-                  size: 48,
-                  iconSize: 28,
-                  onTap: () {
-                    _resetOsdTimer();
-                    _seekDelta(-1);
-                  },
-                ),
-                const SizedBox(width: 24),
-                _buildOsdIconButton(
                   focusNode: _playPauseButtonFocus,
                   icon: _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   label: _isPlaying ? 'Pause' : 'Play',
-                  size: 64,
-                  iconSize: 40,
-                  isPrimary: true,
-                  onTap: () {
+                  nextFocus: _subtitlesButtonFocus,
+                  onPressed: () {
                     _resetOsdTimer();
-                    final wasPlaying = _isPlaying;
                     _player.playOrPause();
-                    if (wasPlaying) {
-                      _hudController.triggerPause();
-                    } else {
-                      _hudController.triggerPlay();
-                    }
                   },
                 ),
                 const SizedBox(width: 24),
                 _buildOsdIconButton(
-                  focusNode: _forwardButtonFocus,
-                  icon: Icons.forward_10_rounded,
-                  label: '+10s',
-                  size: 48,
-                  iconSize: 28,
-                  onTap: () {
+                  focusNode: _subtitlesButtonFocus,
+                  icon: Icons.subtitles_rounded,
+                  label: 'Subtitles',
+                  prevFocus: _playPauseButtonFocus,
+                  nextFocus: _audioTrackButtonFocus,
+                  onPressed: () {
                     _resetOsdTimer();
-                    _seekDelta(1);
+                    _showSubtitleDialog();
+                  },
+                ),
+                const SizedBox(width: 24),
+                _buildOsdIconButton(
+                  focusNode: _audioTrackButtonFocus,
+                  icon: Icons.audiotrack_rounded,
+                  label: 'Audio',
+                  prevFocus: _subtitlesButtonFocus,
+                  nextFocus: _sourceSwitcherButtonFocus,
+                  onPressed: () {
+                    _resetOsdTimer();
+                    _showAudioTrackDialog();
+                  },
+                ),
+                const SizedBox(width: 24),
+                _buildOsdIconButton(
+                  focusNode: _sourceSwitcherButtonFocus,
+                  icon: Icons.tune_rounded,
+                  label: 'Sources',
+                  prevFocus: _audioTrackButtonFocus,
+                  onPressed: () {
+                    _resetOsdTimer();
+                    _showSourceSwitcherDialog();
                   },
                 ),
               ],
             ),
-
-            const Spacer(),
-
-            // Bottom Progress & Seek Bar
-            Focus(
-              focusNode: _seekBarFocus,
-              onKeyEvent: (node, event) {
-                _resetOsdTimer();
-                if (event is KeyDownEvent || event is KeyRepeatEvent) {
-                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                    _seekDelta(-1);
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                    _seekDelta(1);
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.select ||
-                      event.logicalKey == LogicalKeyboardKey.enter ||
-                      event.logicalKey == LogicalKeyboardKey.space) {
-                    final wasPlaying = _isPlaying;
-                    _player.playOrPause();
-                    if (wasPlaying) {
-                      _hudController.triggerPause();
-                    } else {
-                      _hudController.triggerPlay();
-                    }
-                    return KeyEventResult.handled;
-                  }
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Builder(
-                builder: (context) {
-                  final focused = Focus.of(context).hasFocus;
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: focused ? Colors.white12 : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: focused ? TVTheme.accent : Colors.transparent,
-                        width: 1.5,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Time Display
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              formatDuration(posSeconds),
-                              style: TextStyle(
-                                color: focused ? Colors.white : Colors.white70,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                            Text(
-                              formatDuration(durSeconds),
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        // Track
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: Stack(
-                            children: [
-                              Container(
-                                height: 6,
-                                color: Colors.white24,
-                              ),
-                              FractionallySizedBox(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: bufferRatio,
-                                child: Container(
-                                  height: 6,
-                                  color: Colors.white38,
-                                ),
-                              ),
-                              FractionallySizedBox(
-                                alignment: Alignment.centerLeft,
-                                widthFactor: progressRatio,
-                                child: Container(
-                                  height: 6,
-                                  color: TVTheme.accent,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
@@ -897,117 +844,65 @@ class _PlayerScreenState extends State<PlayerScreen> {
     required FocusNode focusNode,
     required IconData icon,
     required String label,
-    required VoidCallback onTap,
-    double size = 44,
-    double iconSize = 22,
-    bool isPrimary = false,
-    bool highlight = false,
+    required VoidCallback onPressed,
+    FocusNode? nextFocus,
+    FocusNode? prevFocus,
   }) {
     return Focus(
       focusNode: focusNode,
-      onFocusChange: (focused) {
-        if (focused) _resetOsdTimer();
-      },
       onKeyEvent: (node, event) {
-        _resetOsdTimer();
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          onTap();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight && nextFocus != null) {
+            _resetOsdTimer();
+            nextFocus.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft && prevFocus != null) {
+            _resetOsdTimer();
+            prevFocus.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown || event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            _resetOsdTimer();
+            return KeyEventResult.handled;
+          }
         }
-        return KeyEventResult.ignored;
+        return TvShortcuts.handleKeyEvent(event, onActivate: onPressed);
       },
       child: Builder(
-        builder: (context) {
-          final focused = Focus.of(context).hasFocus;
+        builder: (ctx) {
+          final isFocused = Focus.of(ctx).hasFocus;
           return GestureDetector(
-            onTap: onTap,
-            child: AnimatedScale(
-              scale: focused ? 1.15 : 1.0,
+            onTap: onPressed,
+            child: AnimatedContainer(
               duration: const Duration(milliseconds: 140),
-              child: Container(
-                width: size,
-                height: size,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isPrimary
-                      ? (focused ? Colors.white : TVTheme.accent)
-                      : (focused ? Colors.white24 : (highlight ? TVTheme.accent.withOpacity(0.3) : Colors.white10)),
-                  border: Border.all(
-                    color: focused ? Colors.white : (highlight ? TVTheme.accent : Colors.white12),
-                    width: focused ? 2.0 : 1.0,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              decoration: BoxDecoration(
+                color: isFocused ? Colors.white : Colors.white12,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: isFocused ? TVTheme.focusShadows : [],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 20,
+                    color: isFocused ? Colors.black : Colors.white,
                   ),
-                  boxShadow: focused
-                      ? [
-                          BoxShadow(
-                            color: (isPrimary ? TVTheme.accent : Colors.white).withOpacity(0.5),
-                            blurRadius: 16,
-                            spreadRadius: 2,
-                          )
-                        ]
-                      : [],
-                ),
-                child: Icon(
-                  icon,
-                  size: iconSize,
-                  color: isPrimary
-                      ? (focused ? Colors.black : Colors.white)
-                      : (focused ? Colors.white : (highlight ? TVTheme.accent : Colors.white70)),
-                ),
+                  const SizedBox(width: 8),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: isFocused ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildErrorOverlay() {
-    return Container(
-      color: Colors.black.withOpacity(0.92),
-      padding: const EdgeInsets.all(32),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.redAccent, size: 64),
-            const SizedBox(height: 16),
-            const Text(
-              'Playback Error',
-              style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _errorMessage!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FocusableButton(
-                  label: 'Retry',
-                  color: TVTheme.accent,
-                  autofocus: true,
-                  onPressed: () {
-                    setState(() => _errorMessage = null);
-                    _player.open(Media(widget.streamUrl, httpHeaders: _requestHeaders));
-                  },
-                ),
-                const SizedBox(width: 16),
-                FocusableButton(
-                  label: 'Exit',
-                  color: Colors.white24,
-                  onPressed: _exitPlayer,
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }

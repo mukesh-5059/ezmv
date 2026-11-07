@@ -44,8 +44,10 @@ class PlayerHudController extends ChangeNotifier {
   int seekDelta = 0;
   String? targetTimeStr;
   Timer? _dismissTimer;
+  bool _isPaused = false;
 
   void triggerPlay() {
+    _isPaused = false;
     currentAction = HudAction.play;
     message = null;
     _scheduleDismiss();
@@ -53,9 +55,10 @@ class PlayerHudController extends ChangeNotifier {
   }
 
   void triggerPause() {
+    _isPaused = true;
+    _dismissTimer?.cancel();
     currentAction = HudAction.pause;
     message = null;
-    _scheduleDismiss();
     notifyListeners();
   }
 
@@ -84,7 +87,11 @@ class PlayerHudController extends ChangeNotifier {
   void _scheduleDismiss({int durationMs = 800}) {
     _dismissTimer?.cancel();
     _dismissTimer = Timer(Duration(milliseconds: durationMs), () {
-      currentAction = null;
+      if (_isPaused) {
+        currentAction = HudAction.pause;
+      } else {
+        currentAction = null;
+      }
       message = null;
       seekDelta = 0;
       targetTimeStr = null;

@@ -2,581 +2,411 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
-import '../widgets/movie_lane.dart';
-import '../widgets/actor_lane.dart';
-import '../widgets/settings_dialog.dart';
-import 'details_screen.dart';
-import 'search_screen.dart';
-import 'actor_screen.dart';
+import '../widgets/home/tv_actors_lane.dart';
+import '../widgets/home/tv_billboard.dart';
+import '../widgets/home/tv_continue_watching_lane.dart';
+import '../widgets/home/tv_movie_lane.dart';
+import '../widgets/home/tv_top_nav_bar.dart';
+import '../widgets/tv_focus_button.dart';
+import 'lane_grid_screen.dart';
 
+/// 10-Foot Lean-Back Home Screen for Android TV.
+///
+/// Features:
+/// - Manages active dashboard tabs: Tamil (default), English, Anime.
+/// - Loads dashboard lanes via [ApiClient.instance.getDashboard].
+/// - Vertical layout assembling:
+///   1. [TvTopNavBar]
+///   2. [TvBillboard] (Hero carousel with auto-scroll heuristic)
+///   3. [TvContinueWatchingLane] (Row 0, dynamic hide if empty)
+///   4. Content Lanes via [TvMovieLane]
+///   5. [TvActorsLane] (Tamil dashboard only bottom shelf)
+/// - Auto-centering vertical viewport alignment on D-pad navigation.
+/// - Remote Back hierarchy:
+///   - Scrolled deep -> smooth-scrolls up to Billboard.
+///   - At top -> double-back exit confirmation toast.
+/// - Offline / error state with retry action.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final void Function(MovieSummary movie)? onDetailsTap;
+  final void Function(MovieSummary movie)? onPlayTap;
+  final void Function(ActorSummary actor)? onActorTap;
+  final void Function(DashboardLane lane)? onShowAllLane;
+  final VoidCallback? onSearchTap;
+  final VoidCallback? onSettingsTap;
+
+  const HomeScreen({
+    super.key,
+    this.onDetailsTap,
+    this.onPlayTap,
+    this.onActorTap,
+    this.onShowAllLane,
+    this.onSearchTap,
+    this.onSettingsTap,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Movie> _history = [];
-  List<DashboardLane> _lanes = [];
-  List<Actor> _tamilActors = [];
-
-  List<Movie> _searchResults = [];
-
-  Movie? _focusedMovie;
+  String _activeDashboardId = 'tamil';
+  Dashboard? _dashboard;
   bool _isLoading = true;
   String? _errorMessage;
-  bool _isTamilSelected = true;
 
-  String _searchQuery = '';
-  int _searchPage = 1;
+  final ScrollController _verticalScrollController = ScrollController();
+  final GlobalKey<TvContinueWatchingLaneState> _continueWatchingKey = GlobalKey();
 
-  String? _activeSearchText;
-  int? _activeSearchYear;
-  int? _activeSearchGenreId;
-
-  bool _isLoadingMore = false;
-
-  final FocusNode _languageFocusNode = FocusNode();
-  final FocusNode _searchFocusNode = FocusNode();
-  final FocusNode _refreshFocusNode = FocusNode();
-  final FocusNode _settingsFocusNode = FocusNode();
-  final FocusNode _clearSearchFocusNode = FocusNode();
-
-  final Map<String, int> _rowLastFocusedIndex = {
-    'search': 0,
-    'history': 0,
-    'tamil_actors': 0,
-  };
-  final Map<String, List<FocusNode>> _rowFocusNodes = {
-    'search': [],
-    'history': [],
-    'tamil_actors': [],
-  };
-
-  FocusNode _getFocusNode(String rowKey, int index) {
-    final nodes = _rowFocusNodes[rowKey] ??= [];
-    while (nodes.length <= index) {
-      nodes.add(FocusNode());
-    }
-    return nodes[index];
-  }
-
-  List<String> get _visibleRowKeys {
-    final keys = <String>[];
-    if (_searchResults.isNotEmpty) keys.add('search');
-    if (_history.isNotEmpty) keys.add('history');
-    if (_isTamilSelected && _tamilActors.isNotEmpty) keys.add('tamil_actors');
-    for (final lane in _lanes) {
-      keys.add(lane.id);
-    }
-    return keys;
-  }
-
-  int _getRowItemCount(String rowKey) {
-    if (rowKey == 'search') {
-      final hasLoadMore = _searchResults.isNotEmpty;
-      return _searchResults.length + (hasLoadMore ? 1 : 0);
-    }
-    if (rowKey == 'history') {
-      return _history.length;
-    }
-    if (rowKey == 'tamil_actors') {
-      return _tamilActors.length;
-    }
-    final lane = _lanes.cast<DashboardLane?>().firstWhere(
-      (l) => l?.id == rowKey,
-      orElse: () => null,
-    );
-    if (lane != null) {
-      return lane.items.length + (lane.hasMore ? 1 : 0);
-    }
-    return 0;
-  }
-
-  KeyEventResult _handleRowKeyNavigation(
-    String rowKey,
-    int index,
-    int itemCount,
-    RawKeyEvent event,
-  ) {
-    if (event is! RawKeyDownEvent) return KeyEventResult.ignored;
-
-    final key = event.logicalKey;
-    final visibleRows = _visibleRowKeys;
-    final currentVisibleRowIndex = visibleRows.indexOf(rowKey);
-
-    if (key == LogicalKeyboardKey.arrowLeft) {
-      if (index > 0) {
-        _getFocusNode(rowKey, index - 1).requestFocus();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.handled;
-    }
-
-    if (key == LogicalKeyboardKey.arrowRight) {
-      if (index < itemCount - 1) {
-        _getFocusNode(rowKey, index + 1).requestFocus();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.handled;
-    }
-
-    if (key == LogicalKeyboardKey.arrowDown) {
-      if (currentVisibleRowIndex >= 0 && currentVisibleRowIndex < visibleRows.length - 1) {
-        final nextRowKey = visibleRows[currentVisibleRowIndex + 1];
-        final nextRowCount = _getRowItemCount(nextRowKey);
-        if (nextRowCount > 0) {
-          var destIndex = _rowLastFocusedIndex[nextRowKey] ?? 0;
-          if (destIndex >= nextRowCount) destIndex = nextRowCount - 1;
-          _getFocusNode(nextRowKey, destIndex).requestFocus();
-          return KeyEventResult.handled;
-        }
-      }
-      return KeyEventResult.handled;
-    }
-
-    if (key == LogicalKeyboardKey.arrowUp) {
-      if (currentVisibleRowIndex > 0) {
-        final prevRowKey = visibleRows[currentVisibleRowIndex - 1];
-        final prevRowCount = _getRowItemCount(prevRowKey);
-        if (prevRowCount > 0) {
-          var destIndex = _rowLastFocusedIndex[prevRowKey] ?? 0;
-          if (destIndex >= prevRowCount) destIndex = prevRowCount - 1;
-          _getFocusNode(prevRowKey, destIndex).requestFocus();
-          return KeyEventResult.handled;
-        }
-      } else if (currentVisibleRowIndex == 0) {
-        if (rowKey == 'search' && _searchQuery.isNotEmpty) {
-          _clearSearchFocusNode.requestFocus();
-          return KeyEventResult.handled;
-        }
-        _languageFocusNode.requestFocus();
-        return KeyEventResult.handled;
-      }
-    }
-
-    return KeyEventResult.ignored;
-  }
+  bool _isScrolledDown = false;
+  DateTime? _lastBackPressTime;
 
   @override
   void initState() {
     super.initState();
-    _loadAllData();
+    _verticalScrollController.addListener(_onVerticalScroll);
+    _loadDashboard();
   }
 
   @override
   void dispose() {
-    _languageFocusNode.dispose();
-    _searchFocusNode.dispose();
-    _refreshFocusNode.dispose();
-    _settingsFocusNode.dispose();
-    _clearSearchFocusNode.dispose();
-
-    for (final nodeList in _rowFocusNodes.values) {
-      for (final node in nodeList) {
-        node.dispose();
-      }
-    }
+    _verticalScrollController.removeListener(_onVerticalScroll);
+    _verticalScrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadAllData() async {
+  void _onVerticalScroll() {
+    if (!_verticalScrollController.hasClients) return;
+    final scrolled = _verticalScrollController.offset > 320;
+    if (scrolled != _isScrolledDown) {
+      setState(() => _isScrolledDown = scrolled);
+    }
+  }
+
+  Future<void> _loadDashboard({bool refresh = false}) async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
     try {
-      await Future.wait([
-        _loadHistory(),
-        _fetchHomeMovies(),
-      ]);
-
+      final dash = await ApiClient.instance.getDashboard(
+        _activeDashboardId,
+        refresh: refresh,
+      );
       if (mounted) {
-        Movie? initialMovie;
-        if (_lanes.isNotEmpty && _lanes.first.items.isNotEmpty) {
-          initialMovie = _lanes.first.items.first;
-        } else if (_history.isNotEmpty) {
-          initialMovie = _history.first;
-        }
-
         setState(() {
-          _focusedMovie = initialMovie;
+          _dashboard = dash;
           _isLoading = false;
         });
-
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final visibleRows = _visibleRowKeys;
-          if (visibleRows.isNotEmpty) {
-            final firstRowKey = visibleRows.first;
-            if (_getRowItemCount(firstRowKey) > 0) {
-              _getFocusNode(firstRowKey, 0).requestFocus();
-            }
-          }
-        });
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Failed to load movie catalogs: $e';
+          _errorMessage =
+              'Unable to load catalog from server. Please check your network or server configuration.';
           _isLoading = false;
         });
       }
     }
   }
 
-  Future<void> _fetchHomeMovies() async {
+  void _onDashboardChanged(String id) {
+    if (_activeDashboardId == id) return;
+    setState(() {
+      _activeDashboardId = id;
+    });
+    _loadDashboard();
+  }
+
+  void _scrollToTop() {
+    if (_verticalScrollController.hasClients && _verticalScrollController.offset > 0) {
+      _verticalScrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  void _handleBackPress() {
+    if (_verticalScrollController.hasClients && _verticalScrollController.offset > 240) {
+      _scrollToTop();
+      return;
+    }
+
+    final now = DateTime.now();
+    if (_lastBackPressTime == null ||
+        now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+      _lastBackPressTime = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Press Back again to exit',
+            style: TextStyle(color: TVTheme.textPrimary, fontWeight: FontWeight.w600),
+          ),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: TVTheme.surfaceElevated,
+          shape: RoundedRectangleBorder(borderRadius: TVTheme.borderRadiusMd),
+          margin: const EdgeInsets.symmetric(horizontal: 48, vertical: 24),
+        ),
+      );
+    } else {
+      SystemNavigator.pop();
+    }
+  }
+
+  Future<void> _handlePlayMovie(MovieSummary movie) async {
+    if (widget.onPlayTap != null) {
+      widget.onPlayTap!(movie);
+      return;
+    }
+
     try {
-      final lang = _isTamilSelected ? 'ta' : 'en';
-      final results = await Future.wait([
-        ApiClient.getDashboard(language: lang),
-        if (_isTamilSelected)
-          ApiClient.getCuratedActors(language: 'ta')
-        else
-          Future.value(<Actor>[]),
-      ]);
-      if (mounted) {
-        setState(() {
-          _lanes = results[0] as List<DashboardLane>;
-          _tamilActors = results[1] as List<Actor>;
-        });
+      final streams = await ApiClient.instance.getStreams(movie.mediaType, movie.imdbId);
+      if (!mounted) return;
+
+      if (streams.isNotEmpty) {
+        final topStream = streams.first;
+        Navigator.pushNamed(
+          context,
+          '/player',
+          arguments: {
+            'streamUrl': topStream.url,
+            'movieTitle': movie.title,
+            'tmdbId': movie.tmdbId ?? 0,
+            'mediaType': movie.mediaType,
+            'quality': topStream.quality,
+            'provider': topStream.provider,
+          },
+        );
+      } else {
+        _navigateToDetails(movie);
       }
-    } catch (e) {
-      print('Fetch home movies failed: $e');
+    } catch (_) {
+      if (mounted) _navigateToDetails(movie);
     }
   }
 
-  void _openActorScreen(Actor actor) {
-    Navigator.of(context).push(
+  Future<void> _handleResumeWatching(ContinueWatchingEntry entry) async {
+    try {
+      final streams = await ApiClient.instance.getStreams(
+        entry.mediaType,
+        entry.imdbId,
+        season: entry.season,
+        episode: entry.episode,
+      );
+      if (!mounted) return;
+
+      if (streams.isNotEmpty) {
+        final topStream = streams.first;
+        Navigator.pushNamed(
+          context,
+          '/player',
+          arguments: {
+            'streamUrl': topStream.url,
+            'movieTitle': entry.title,
+            'tmdbId': 0,
+            'mediaType': entry.mediaType,
+            'season': entry.season,
+            'episode': entry.episode,
+            'quality': topStream.quality,
+            'provider': topStream.provider,
+            'initialPositionSeconds': entry.positionMs ~/ 1000,
+          },
+        );
+      }
+    } catch (_) {}
+  }
+
+  void _navigateToDetails(MovieSummary movie) {
+    if (widget.onDetailsTap != null) {
+      widget.onDetailsTap!(movie);
+      return;
+    }
+    Navigator.pushNamed(context, '/details', arguments: movie);
+  }
+
+  void _navigateToActor(ActorSummary actor) {
+    if (widget.onActorTap != null) {
+      widget.onActorTap!(actor);
+      return;
+    }
+    Navigator.pushNamed(context, '/actor', arguments: actor);
+  }
+
+  void _navigateToLaneGrid(DashboardLane lane) {
+    if (widget.onShowAllLane != null) {
+      widget.onShowAllLane!(lane);
+      return;
+    }
+    Navigator.push(
+      context,
       MaterialPageRoute(
-        builder: (_) => ActorScreen(
-          actorId: actor.id,
-          initialActorName: actor.name,
-          initialProfilePath: actor.profilePath,
+        builder: (context) => LaneGridScreen(
+          dashboardId: _activeDashboardId,
+          laneId: lane.id,
+          laneTitle: lane.title,
         ),
       ),
     );
   }
 
-  Future<void> _loadHistory() async {
-    final history = await LocalStorage.getHistory();
-    if (mounted) {
-      setState(() => _history = history);
+  void _navigateToSearch() {
+    if (widget.onSearchTap != null) {
+      widget.onSearchTap!();
+      return;
     }
+    Navigator.pushNamed(context, '/search');
   }
 
-  Future<void> _loadMoreLane(DashboardLane lane) async {
-    if (_isLoadingMore || !lane.hasMore || lane.nextPage == null) return;
-    _isLoadingMore = true;
-    final lang = _isTamilSelected ? 'ta' : 'en';
-    final res = await ApiClient.getDashboardLane(
-      laneId: lane.id,
-      language: lang,
-      page: lane.nextPage!,
-    );
-    if (mounted && res != null) {
-      final rawItems = res['items'] as List? ?? [];
-      final newMovies = rawItems.map((e) => Movie.fromJson(e)).toList();
-      if (newMovies.isNotEmpty) {
-        setState(() {
-          lane.items.addAll(newMovies);
-          lane.hasMore = res['has_more'] ?? false;
-          lane.nextPage = res['next_page'];
-        });
-      } else {
-        setState(() {
-          lane.hasMore = false;
-          lane.nextPage = null;
-        });
-      }
+  void _showSettings() {
+    if (widget.onSettingsTap != null) {
+      widget.onSettingsTap!();
+      return;
     }
-    _isLoadingMore = false;
-  }
-
-  Future<void> _loadMoreSearch() async {
-    if (_isLoadingMore) return;
-    _isLoadingMore = true;
-    final nextPage = _searchPage + 1;
-
-    List<Movie> newMovies = [];
-    if (_activeSearchText != null) {
-      newMovies = await ApiClient.searchMovies(query: _activeSearchText!, page: nextPage);
-    } else {
-      final lang = _isTamilSelected ? 'ta' : 'en';
-      newMovies = await ApiClient.discoverMovies(
-        language: lang,
-        year: _activeSearchYear,
-        genreId: _activeSearchGenreId,
-        page: nextPage,
-      );
-    }
-
-    if (mounted && newMovies.isNotEmpty) {
-      setState(() {
-        _searchPage = nextPage;
-        _searchResults.addAll(newMovies);
-      });
-    }
-    _isLoadingMore = false;
-  }
-
-  void _clearSearch() {
-    setState(() {
-      _searchQuery = '';
-      _activeSearchText = null;
-      _activeSearchYear = null;
-      _activeSearchGenreId = null;
-      _searchResults.clear();
-      _searchPage = 1;
-
-      if (_lanes.isNotEmpty && _lanes.first.items.isNotEmpty) {
-        _focusedMovie = _lanes.first.items.first;
-      } else if (_history.isNotEmpty) {
-        _focusedMovie = _history.first;
-      }
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final visibleRows = _visibleRowKeys;
-      if (visibleRows.isNotEmpty) {
-        final firstRow = visibleRows.first;
-        if (_getRowItemCount(firstRow) > 0) {
-          _getFocusNode(firstRow, 0).requestFocus();
-        }
-      }
-    });
-  }
-
-  Widget _buildTopBarAction({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    FocusNode? focusNode,
-  }) {
-    return Focus(
-      focusNode: focusNode,
-      onKey: (node, event) {
-        if (event is RawKeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            final visibleRows = _visibleRowKeys;
-            if (visibleRows.isNotEmpty) {
-              final firstRowKey = visibleRows.first;
-              if (firstRowKey == 'search' && _searchQuery.isNotEmpty) {
-                _clearSearchFocusNode.requestFocus();
-                return KeyEventResult.handled;
-              }
-              final maxCount = _getRowItemCount(firstRowKey);
-              if (maxCount > 0) {
-                var destIndex = _rowLastFocusedIndex[firstRowKey] ?? 0;
-                if (destIndex >= maxCount) destIndex = maxCount - 1;
-                _getFocusNode(firstRowKey, destIndex).requestFocus();
-                return KeyEventResult.handled;
-              }
-            }
-          }
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-              event.logicalKey == LogicalKeyboardKey.space) {
-            onTap();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (context) {
-          final focused = Focus.of(context).hasFocus;
-          return Container(
-            margin: const EdgeInsets.only(left: 12),
-            decoration: BoxDecoration(
-              color: focused ? TVTheme.accent : TVTheme.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: focused ? Colors.white : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: IconButton(
-              icon: Icon(icon, color: Colors.white),
-              onPressed: onTap,
-              tooltip: label,
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _openMovieDetails(Movie movie) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DetailsScreen(movie: movie),
-      ),
-    ).then((_) => _loadHistory());
+    Navigator.pushNamed(context, '/settings');
   }
 
   @override
   Widget build(BuildContext context) {
-    final Size size = MediaQuery.of(context).size;
-
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'EzMV',
-                        style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                          color: TVTheme.accent,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      if (_focusedMovie != null && _errorMessage == null)
-                        SizedBox(
-                          width: size.width * 0.5,
-                          child: Text(
-                            'Current: ${_focusedMovie!.title} (${_focusedMovie!.releaseDate.isNotEmpty ? _focusedMovie!.releaseDate.split('-')[0] : 'N/A'})${_focusedMovie!.genreTags.isNotEmpty ? '  •  ${_focusedMovie!.genreTags}' : ''}',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _handleBackPress();
+      },
+      child: Scaffold(
+        backgroundColor: TVTheme.background,
+        body: _isLoading
+            ? const Center(
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: TVTheme.primary,
                   ),
-                  Row(
-                    children: [
-                      _buildTopBarAction(
-                        icon: Icons.language,
-                        label: _isTamilSelected ? 'Tamil Cinema' : 'English Cinema',
-                        focusNode: _languageFocusNode,
-                        onTap: () {
-                          setState(() {
-                            _isTamilSelected = !_isTamilSelected;
+                ),
+              )
+            : _errorMessage != null
+                ? _buildErrorView()
+                : _buildHomeContent(),
+      ),
+    );
+  }
 
-                            for (final nodes in _rowFocusNodes.values) {
-                              for (final node in nodes) {
-                                node.dispose();
-                              }
-                            }
-                            _rowFocusNodes.clear();
-                            _rowLastFocusedIndex.clear();
-                          });
-                          _loadAllData();
-                        },
-                      ),
-                      _buildTopBarAction(
-                        icon: Icons.search,
-                        label: 'Search Movies',
-                        focusNode: _searchFocusNode,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const SearchScreen()),
-                          );
-                        },
-                      ),
-                      _buildTopBarAction(
-                        icon: Icons.refresh,
-                        label: 'Refresh',
-                        focusNode: _refreshFocusNode,
-                        onTap: _loadAllData,
-                      ),
-                      _buildTopBarAction(
-                        icon: Icons.settings,
-                        label: 'Server Settings',
-                        focusNode: _settingsFocusNode,
-                        onTap: () => SettingsDialog.show(
-                          context: context,
-                          onSaved: _loadAllData,
-                        ),
-                      ),
-                    ],
-                  )
-                ],
+  Widget _buildErrorView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.wifi_off_rounded,
+              size: 56,
+              color: TVTheme.primary,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Connection Error',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: TVTheme.textPrimary,
               ),
             ),
-            Expanded(
-              child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(color: TVTheme.accent),
-                    )
-                  : _errorMessage != null
-                      ? Center(
-                          child: Text(
-                            _errorMessage!,
-                            style: const TextStyle(color: TVTheme.accent),
-                          ),
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.only(bottom: 40),
-                          children: [
-                            if (_searchResults.isNotEmpty)
-                              MovieLane(
-                                rowKey: 'search',
-                                title: 'Search Results: "$_searchQuery"',
-                                movies: _searchResults,
-                                onMovieTap: _openMovieDetails,
-                                onMovieFocused: (m) => setState(() => _focusedMovie = m),
-                                onLoadMore: _loadMoreSearch,
-                                onClear: _clearSearch,
-                                clearFocusNode: _clearSearchFocusNode,
-                                getFocusNode: _getFocusNode,
-                                onKeyNav: _handleRowKeyNavigation,
-                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
-                              ),
-                            if (_history.isNotEmpty)
-                              MovieLane(
-                                rowKey: 'history',
-                                title: 'Recently Watched',
-                                movies: _history,
-                                onMovieTap: _openMovieDetails,
-                                onMovieFocused: (m) => setState(() => _focusedMovie = m),
-                                getFocusNode: _getFocusNode,
-                                onKeyNav: _handleRowKeyNavigation,
-                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
-                              ),
-                            if (_isTamilSelected && _tamilActors.isNotEmpty)
-                              ActorLane(
-                                key: const ValueKey('tamil_actors_lane'),
-                                rowKey: 'tamil_actors',
-                                title: 'Featured Tamil Stars',
-                                actors: _tamilActors,
-                                onActorTap: _openActorScreen,
-                                getFocusNode: _getFocusNode,
-                                onKeyNav: _handleRowKeyNavigation,
-                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
-                              ),
-                            ..._lanes.map(
-                              (lane) => MovieLane(
-                                key: ValueKey('${lane.id}_${_isTamilSelected ? 'ta' : 'en'}'),
-                                rowKey: lane.id,
-                                title: lane.title,
-                                movies: lane.items,
-                                onMovieTap: _openMovieDetails,
-                                onMovieFocused: (m) => setState(() => _focusedMovie = m),
-                                onLoadMore: lane.hasMore ? () => _loadMoreLane(lane) : null,
-                                getFocusNode: _getFocusNode,
-                                onKeyNav: _handleRowKeyNavigation,
-                                onFocusedIndexChanged: (key, idx) => _rowLastFocusedIndex[key] = idx,
-                              ),
-                            ),
-                          ],
-                        ),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: TVTheme.textSecondary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TvFocusButton(
+                  label: 'Retry',
+                  icon: Icons.refresh_rounded,
+                  autofocus: true,
+                  onPressed: () => _loadDashboard(refresh: true),
+                ),
+                const SizedBox(width: 16),
+                TvFocusButton(
+                  label: 'Settings',
+                  icon: Icons.settings_rounded,
+                  isPrimary: false,
+                  onPressed: _showSettings,
+                ),
+              ],
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildHomeContent() {
+    final lanes = _dashboard?.lanes ?? [];
+
+    return ListView(
+      controller: _verticalScrollController,
+      padding: EdgeInsets.zero,
+      children: [
+        // 1. Top Navigation Bar
+        TvTopNavBar(
+          activeDashboardId: _activeDashboardId,
+          onDashboardChanged: _onDashboardChanged,
+          onSearchTap: _navigateToSearch,
+          onCuratedListsTap: _navigateToSearch,
+          onSettingsTap: _showSettings,
+        ),
+
+        // 2. Hero Billboard Carousel
+        if (lanes.isNotEmpty)
+          RepaintBoundary(
+            child: TvBillboard(
+              lanes: lanes,
+              isVisible: !_isScrolledDown,
+              onPlay: _handlePlayMovie,
+              onDetails: _navigateToDetails,
+            ),
+          ),
+
+        // 3. Row 0: Continue Watching Lane (Dynamic)
+        RepaintBoundary(
+          child: TvContinueWatchingLane(
+            key: _continueWatchingKey,
+            onResume: _handleResumeWatching,
+          ),
+        ),
+
+        // 4. Content Lanes
+        ...lanes.map((lane) => RepaintBoundary(
+              key: ValueKey('lane_${lane.id}'),
+              child: TvMovieLane(
+                lane: lane,
+                onMovieTap: _navigateToDetails,
+                onShowAll: _navigateToLaneGrid,
+              ),
+            )),
+
+        // 5. Tamil Actors Lane (Tamil Dashboard Only Shelf)
+        if (_activeDashboardId == 'tamil')
+          TvActorsLane(
+            onActorTap: _navigateToActor,
+          ),
+
+        const SizedBox(height: 48),
+      ],
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
+import 'tv_shortcuts.dart';
 
 class SettingsDialog extends StatefulWidget {
   final VoidCallback onSaved;
@@ -29,19 +30,17 @@ class _SettingsDialogState extends State<SettingsDialog> {
   final TextEditingController _ipController = TextEditingController();
   final FocusNode _saveFocusNode = FocusNode();
   final FocusNode _cancelFocusNode = FocusNode();
-  final FocusNode _scanFocusNode = FocusNode();
   late final FocusNode _textFieldFocusNode;
-  bool _isScanning = false;
 
   @override
   void initState() {
     super.initState();
-    _ipController.text = ApiClient.displayBaseUrl;
+    _ipController.text = ApiClient.instance.baseUrl;
     _textFieldFocusNode = FocusNode(
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            _scanFocusNode.requestFocus();
+            _cancelFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
         }
@@ -56,42 +55,22 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _textFieldFocusNode.dispose();
     _saveFocusNode.dispose();
     _cancelFocusNode.dispose();
-    _scanFocusNode.dispose();
     super.dispose();
   }
 
-  Future<void> _scanLan() async {
-    setState(() => _isScanning = true);
-    final found = await ApiClient.autoDiscoverAndConnect();
-    if (mounted) {
-      setState(() {
-        _isScanning = false;
-        if (found) {
-          _ipController.text = ApiClient.displayBaseUrl;
-        }
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(found ? 'Server found: ${ApiClient.baseUrl}' : 'No server found via mDNS on LAN'),
-          backgroundColor: found ? Colors.green.shade800 : Colors.orange.shade800,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      if (found) {
-        widget.onSaved();
-      }
-    }
-  }
-
   Future<void> _save() async {
-    final input = _ipController.text.trim();
+    var input = _ipController.text.trim();
     if (input.isNotEmpty) {
-      await ApiClient.setBaseUrl(input);
+      if (!input.startsWith('http://') && !input.startsWith('https://')) {
+        input = input.contains(':') && !input.contains('.') ? 'http://$input' : 'https://$input';
+      }
+      ApiClient.instance = ApiClient(baseUrl: input);
+      await StorageService.instance.setApiBaseUrl(input);
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Server endpoint saved: ${ApiClient.baseUrl}'),
+            content: Text('Server endpoint saved: ${ApiClient.instance.baseUrl}'),
             backgroundColor: Colors.green.shade800,
             duration: const Duration(seconds: 2),
           ),
@@ -111,8 +90,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Specify the server IP and port where the FastAPI python server is running.',
-            style: TextStyle(color: TVTheme.textSecondary, fontSize: 12),
+            'Specify the server IP and port where the EzMV backend is running.',
+            style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 16),
           TextField(
@@ -120,64 +99,19 @@ class _SettingsDialogState extends State<SettingsDialog> {
             autofocus: true,
             controller: _ipController,
             decoration: const InputDecoration(
-              labelText: 'Server IP / Port / URL',
-              hintText: 'e.g., 192.168.29.50:8080',
+              labelText: 'Server URL',
+              hintText: 'e.g. http://192.168.1.100:8787',
               border: OutlineInputBorder(),
             ),
-            onSubmitted: (val) {
-              Future.delayed(const Duration(milliseconds: 150), () {
-                if (mounted && _saveFocusNode.canRequestFocus) {
-                  _saveFocusNode.requestFocus();
-                }
-              });
+            onSubmitted: (_) {
+              if (mounted && _saveFocusNode.canRequestFocus) {
+                _saveFocusNode.requestFocus();
+              }
             },
           ),
         ],
       ),
       actions: [
-        Focus(
-          focusNode: _scanFocusNode,
-          onKeyEvent: (node, event) {
-            if (event is KeyDownEvent) {
-              if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                _textFieldFocusNode.requestFocus();
-                return KeyEventResult.handled;
-              }
-              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                _cancelFocusNode.requestFocus();
-                return KeyEventResult.handled;
-              }
-              if (event.logicalKey == LogicalKeyboardKey.select ||
-                  event.logicalKey == LogicalKeyboardKey.enter ||
-                  event.logicalKey == LogicalKeyboardKey.space) {
-                if (!_isScanning) _scanLan();
-                return KeyEventResult.handled;
-              }
-            }
-            return KeyEventResult.ignored;
-          },
-          child: Builder(
-            builder: (context) {
-              final focused = Focus.of(context).hasFocus;
-              return OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: focused ? Colors.white.withOpacity(0.2) : Colors.transparent,
-                  foregroundColor: Colors.white,
-                  side: BorderSide(color: focused ? Colors.white : Colors.white38),
-                ),
-                onPressed: _isScanning ? null : _scanLan,
-                icon: _isScanning
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.radar, size: 16),
-                label: Text(_isScanning ? 'Scanning...' : 'Auto Detect'),
-              );
-            },
-          ),
-        ),
         Focus(
           focusNode: _cancelFocusNode,
           onKeyEvent: (node, event) {
@@ -186,17 +120,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 _textFieldFocusNode.requestFocus();
                 return KeyEventResult.handled;
               }
-              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                _scanFocusNode.requestFocus();
-                return KeyEventResult.handled;
-              }
               if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
                 _saveFocusNode.requestFocus();
                 return KeyEventResult.handled;
               }
-              if (event.logicalKey == LogicalKeyboardKey.select ||
-                  event.logicalKey == LogicalKeyboardKey.enter ||
-                  event.logicalKey == LogicalKeyboardKey.space) {
+              if (TvShortcuts.isActivateKey(event.logicalKey)) {
                 Navigator.pop(context);
                 return KeyEventResult.handled;
               }
@@ -208,7 +136,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               final focused = Focus.of(context).hasFocus;
               return TextButton(
                 style: TextButton.styleFrom(
-                  backgroundColor: focused ? Colors.white.withOpacity(0.15) : Colors.transparent,
+                  backgroundColor: focused ? Colors.white.withValues(alpha: 0.15) : Colors.transparent,
                   foregroundColor: Colors.white,
                 ),
                 onPressed: () => Navigator.pop(context),
@@ -229,9 +157,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 _cancelFocusNode.requestFocus();
                 return KeyEventResult.handled;
               }
-              if (event.logicalKey == LogicalKeyboardKey.select ||
-                  event.logicalKey == LogicalKeyboardKey.enter ||
-                  event.logicalKey == LogicalKeyboardKey.space) {
+              if (TvShortcuts.isActivateKey(event.logicalKey)) {
                 _save();
                 return KeyEventResult.handled;
               }
@@ -243,7 +169,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
               final focused = Focus.of(context).hasFocus;
               return ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: focused ? Colors.white : TVTheme.accent,
+                  backgroundColor: focused ? Colors.white : TVTheme.primary,
                   foregroundColor: focused ? Colors.black : Colors.white,
                 ),
                 onPressed: _save,

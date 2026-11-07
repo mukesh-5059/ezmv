@@ -9,7 +9,6 @@ class MovieCard extends StatefulWidget {
   final ValueChanged<bool>? onFocusChanged;
   final FocusNode? focusNode;
   final KeyEventResult Function(FocusNode, KeyEvent)? onKeyEvent;
-  final KeyEventResult Function(FocusNode, RawKeyEvent)? onKey;
   final double? progress;
 
   const MovieCard({
@@ -19,7 +18,6 @@ class MovieCard extends StatefulWidget {
     this.onFocusChanged,
     this.focusNode,
     this.onKeyEvent,
-    this.onKey,
     this.progress,
   });
 
@@ -82,7 +80,6 @@ class _MovieCardState extends State<MovieCard> {
   Widget build(BuildContext context) {
     return Focus(
       focusNode: widget.focusNode,
-      onKey: widget.onKey,
       onFocusChange: (focused) {
         setState(() {
           _isFocused = focused;

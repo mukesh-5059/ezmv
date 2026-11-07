@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../screens/actor_screen.dart';
 import '../theme.dart';
+import 'tv_shortcuts.dart';
 
 class CastCarousel extends StatelessWidget {
   final List<CastMember> cast;
@@ -54,13 +54,13 @@ class _CastCardState extends State<_CastCard> {
   bool _isFocused = false;
 
   void _openActor() {
-    if (widget.member.id <= 0) return;
+    if (widget.member.tmdbId <= 0) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ActorScreen(
-          actorId: widget.member.id,
-          initialActorName: widget.member.name,
-          initialProfilePath: widget.member.profilePath,
+          tmdbId: widget.member.tmdbId,
+          actorName: widget.member.name,
+          profilePath: widget.member.profilePath,
         ),
       ),
     );
@@ -84,18 +84,10 @@ class _CastCardState extends State<_CastCard> {
             );
           }
         },
-        onKey: (node, event) {
-          if (event is RawKeyDownEvent) {
-            if (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                event.logicalKey == LogicalKeyboardKey.space) {
-              _openActor();
-              return KeyEventResult.handled;
-            }
-          }
-          return KeyEventResult.ignored;
-        },
+        onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(
+          event,
+          onActivate: _openActor,
+        ),
         child: GestureDetector(
           onTap: _openActor,
           child: AnimatedScale(
@@ -113,13 +105,13 @@ class _CastCardState extends State<_CastCard> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: _isFocused ? TVTheme.accent : Colors.transparent,
+                        color: _isFocused ? TVTheme.primary : Colors.transparent,
                         width: 3.0,
                       ),
                       boxShadow: _isFocused
                           ? [
                               BoxShadow(
-                                color: TVTheme.accent.withValues(alpha: 0.25),
+                                color: TVTheme.primary.withValues(alpha: 0.25),
                                 blurRadius: 10,
                                 spreadRadius: 1,
                               ),

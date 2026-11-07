@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme.dart';
+import 'tv_shortcuts.dart';
 
 class SearchDialog extends StatefulWidget {
   final ValueChanged<String> onSearch;
@@ -40,8 +41,8 @@ class _SearchDialogState extends State<SearchDialog> {
   void initState() {
     super.initState();
     _textFieldFocusNode = FocusNode(
-      onKey: (node, event) {
-        if (event is RawKeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
           _searchButtonFocusNode.requestFocus();
           return KeyEventResult.handled;
         }
@@ -66,16 +67,13 @@ class _SearchDialogState extends State<SearchDialog> {
     FocusNode? leftFocusNode,
   }) {
     return Focus(
-      onKey: (node, event) {
-        if (event is RawKeyDownEvent) {
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.arrowLeft && isLeftMost && leftFocusNode != null) {
             leftFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-              event.logicalKey == LogicalKeyboardKey.space) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
             onTap();
             return KeyEventResult.handled;
           }
@@ -106,50 +104,52 @@ class _SearchDialogState extends State<SearchDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: TVTheme.surface,
-      title: const Text('Search Movies'),
-      content: SizedBox(
-        width: 750,
+    return Dialog(
+      backgroundColor: const Color(0xFF161618),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 30),
+      child: Container(
+        width: 800,
+        height: 380,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161618),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12, width: 1.5),
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 280,
+            Expanded(
+              flex: 1,
               child: Column(
-                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Type Movie Title',
-                    style: TextStyle(color: TVTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.bold),
+                    'Search Movies & TV',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   TextField(
                     focusNode: _textFieldFocusNode,
-                    controller: _searchController,
                     autofocus: true,
+                    controller: _searchController,
                     decoration: const InputDecoration(
-                      hintText: 'Enter title...',
+                      hintText: 'e.g. Inception, Marvel...',
                       border: OutlineInputBorder(),
                     ),
                     onSubmitted: (val) {
-                      Future.delayed(const Duration(milliseconds: 150), () {
-                        if (mounted && _searchButtonFocusNode.canRequestFocus) {
-                          _searchButtonFocusNode.requestFocus();
-                        }
-                      });
+                      Navigator.pop(context);
+                      widget.onSearch(val);
                     },
                   ),
-                  const SizedBox(height: 24),
+                  const Spacer(),
                   Row(
                     children: [
                       Expanded(
                         child: Focus(
                           focusNode: _cancelButtonFocusNode,
-                          onKey: (node, event) {
-                            if (event is RawKeyDownEvent) {
+                          onKeyEvent: (node, event) {
+                            if (event is KeyDownEvent) {
                               if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                                 _textFieldFocusNode.requestFocus();
                                 return KeyEventResult.handled;
@@ -158,10 +158,7 @@ class _SearchDialogState extends State<SearchDialog> {
                                 _searchButtonFocusNode.requestFocus();
                                 return KeyEventResult.handled;
                               }
-                              if (event.logicalKey == LogicalKeyboardKey.select ||
-                                  event.logicalKey == LogicalKeyboardKey.enter ||
-                                  event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                  event.logicalKey == LogicalKeyboardKey.space) {
+                              if (TvShortcuts.isActivateKey(event.logicalKey)) {
                                 Navigator.pop(context);
                                 return KeyEventResult.handled;
                               }
@@ -173,7 +170,7 @@ class _SearchDialogState extends State<SearchDialog> {
                               final focused = Focus.of(context).hasFocus;
                               return TextButton(
                                 style: TextButton.styleFrom(
-                                  backgroundColor: focused ? Colors.white.withOpacity(0.15) : Colors.transparent,
+                                  backgroundColor: focused ? Colors.white.withValues(alpha: 0.15) : Colors.transparent,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                 ),
                                 onPressed: () => Navigator.pop(context),
@@ -187,8 +184,8 @@ class _SearchDialogState extends State<SearchDialog> {
                       Expanded(
                         child: Focus(
                           focusNode: _searchButtonFocusNode,
-                          onKey: (node, event) {
-                            if (event is RawKeyDownEvent) {
+                          onKeyEvent: (node, event) {
+                            if (event is KeyDownEvent) {
                               if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
                                 _textFieldFocusNode.requestFocus();
                                 return KeyEventResult.handled;
@@ -197,10 +194,7 @@ class _SearchDialogState extends State<SearchDialog> {
                                 _cancelButtonFocusNode.requestFocus();
                                 return KeyEventResult.handled;
                               }
-                              if (event.logicalKey == LogicalKeyboardKey.select ||
-                                  event.logicalKey == LogicalKeyboardKey.enter ||
-                                  event.logicalKey == LogicalKeyboardKey.numpadEnter ||
-                                  event.logicalKey == LogicalKeyboardKey.space) {
+                              if (TvShortcuts.isActivateKey(event.logicalKey)) {
                                 Navigator.pop(context);
                                 widget.onSearch(_searchController.text);
                                 return KeyEventResult.handled;
@@ -217,7 +211,7 @@ class _SearchDialogState extends State<SearchDialog> {
                                   widget.onSearch(_searchController.text);
                                 },
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: focused ? Colors.white : TVTheme.accent,
+                                  backgroundColor: focused ? Colors.white : TVTheme.primary,
                                   foregroundColor: focused ? Colors.black : Colors.white,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                 ),

@@ -28,3 +28,7 @@ dist/
 **/dist/
 local
 **/local
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/

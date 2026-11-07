@@ -39,7 +39,7 @@ class ResumeDialog extends StatelessWidget {
       actions: [
         FocusableButton(
           label: 'Start Over',
-          color: Colors.redAccent.withOpacity(0.3),
+          color: Colors.redAccent.withValues(alpha: 0.3),
           focusedBorderColor: Colors.redAccent,
           onPressed: () => Navigator.pop(context, false),
         ),
