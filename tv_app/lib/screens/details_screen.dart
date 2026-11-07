@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import '../widgets/cast_carousel.dart';
-import '../widgets/episode_stream_dialog.dart';
 import '../widgets/stream_selector.dart';
 import '../widgets/tv_focus_button.dart';
 import '../widgets/tv_shortcuts.dart';
@@ -170,6 +169,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       streams: _streams,
       imdbId: widget.imdbId,
       mediaType: widget.mediaType,
+      runtimeMinutes: _details?.runtime,
       autoPlay: true,
       onStreamsLoaded: (streams) {
         if (mounted) setState(() => _streams = streams);
@@ -198,6 +198,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       streams: _streams,
       imdbId: widget.imdbId,
       mediaType: widget.mediaType,
+      runtimeMinutes: _details?.runtime,
       autoPlay: false,
       onStreamsLoaded: (streams) {
         if (mounted) setState(() => _streams = streams);
@@ -243,6 +244,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
           provider: stream.provider,
           quality: stream.quality,
           seasons: _details?.seasons,
+          overview: _details?.overview ?? widget.initialMovie?.overview,
+          releaseDate: _details?.releaseDate ?? widget.initialMovie?.releaseDate,
+          ratingScore: _details?.voteAverage ?? widget.initialMovie?.ratingScore,
+          voteCount: _details?.voteCount ?? widget.initialMovie?.voteCount,
+          genres: _details?.genres.map((g) => g.name).toList() ?? widget.initialMovie?.genres.map((g) => g.name).toList(),
         ),
       ),
     );
@@ -251,31 +257,37 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   void _playEpisode(TvEpisode episode) async {
     final showTitle = _details?.title ?? widget.initialMovie?.title ?? 'TV Show';
-    showDialog(
+    final epTitle = '$showTitle S${_selectedSeasonNumber}E${episode.episodeNumber}: ${episode.name}';
+    List<StreamSource> loadedStreams = [];
+    final selected = await StreamSelector.showModal(
       context: context,
-      builder: (ctx) => EpisodeStreamDialog(
-        imdbId: widget.imdbId,
-        showTitle: showTitle,
-        seasonNumber: _selectedSeasonNumber,
-        episode: episode,
-        onStreamSelected: (stream) {
-          _launchPlayer(
-            stream,
-            [stream],
-            season: _selectedSeasonNumber,
-            episode: episode.episodeNumber,
-          );
-        },
-        onStreamSelectedWithAll: (stream, allStreams) {
-          _launchPlayer(
-            stream,
-            allStreams,
-            season: _selectedSeasonNumber,
-            episode: episode.episodeNumber,
-          );
-        },
-      ),
+      title: epTitle,
+      imdbId: widget.imdbId,
+      mediaType: 'tv',
+      season: _selectedSeasonNumber,
+      episode: episode.episodeNumber,
+      runtimeMinutes: episode.runtime,
+      autoPlay: true,
+      onStreamsLoaded: (streams) => loadedStreams = streams,
+      onError: (err) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to fetch streams: $err'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      },
     );
+
+    if (selected != null && mounted) {
+      _launchPlayer(
+        selected,
+        loadedStreams.isNotEmpty ? loadedStreams : [selected],
+        season: _selectedSeasonNumber,
+        episode: episode.episodeNumber,
+      );
+    }
   }
 
   @override
@@ -527,7 +539,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 TvFocusButton(
                                   focusNode: _playButtonFocusNode,
                                   autofocus: true,
-                                  label: _isTv ? '⚡ Browse Episodes' : '⚡ Play Now',
+                                  label: _isTv ? 'Browse Episodes' : 'Play Now',
                                   isPrimary: true,
                                   icon: Icons.play_arrow,
                                   onPressed: () {
@@ -541,7 +553,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 const SizedBox(width: 16),
                                 TvFocusButton(
                                   focusNode: _watchlistButtonFocusNode,
-                                  label: _isInWatchlist ? '✓ In Watchlist' : '➕ Watchlist',
+                                  label: _isInWatchlist ? 'In Watchlist' : 'Watchlist',
                                   isPrimary: false,
                                   icon: _isInWatchlist ? Icons.check : Icons.bookmark_add_outlined,
                                   onPressed: _toggleWatchlist,
@@ -550,7 +562,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                 if (!_isTv)
                                   TvFocusButton(
                                     focusNode: _sourcesButtonFocusNode,
-                                    label: '⚙ Sources',
+                                    label: 'Sources',
                                     isPrimary: false,
                                     icon: Icons.tune,
                                     onPressed: _openManualSources,

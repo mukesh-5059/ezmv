@@ -9,6 +9,7 @@ class StreamSource {
   final String? host;
   final List<String> languages;
   final Map<String, String>? headers;
+  final double? headroomRatio;
 
   const StreamSource({
     required this.url,
@@ -21,7 +22,36 @@ class StreamSource {
     this.host,
     this.languages = const [],
     this.headers,
+    this.headroomRatio,
   });
+
+  StreamSource copyWith({
+    String? url,
+    String? quality,
+    String? filename,
+    int? sizeBytes,
+    String? formattedSize,
+    int? priority,
+    String? provider,
+    String? host,
+    List<String>? languages,
+    Map<String, String>? headers,
+    double? headroomRatio,
+  }) {
+    return StreamSource(
+      url: url ?? this.url,
+      quality: quality ?? this.quality,
+      filename: filename ?? this.filename,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      formattedSize: formattedSize ?? this.formattedSize,
+      priority: priority ?? this.priority,
+      provider: provider ?? this.provider,
+      host: host ?? this.host,
+      languages: languages ?? this.languages,
+      headers: headers ?? this.headers,
+      headroomRatio: headroomRatio ?? this.headroomRatio,
+    );
+  }
 
   factory StreamSource.fromJson(Map<String, dynamic> json) {
     final rawLanguages = json['languages'] as List? ?? [];

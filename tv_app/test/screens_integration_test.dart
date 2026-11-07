@@ -167,9 +167,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       expect(find.text('Inception'), findsWidgets);
-      expect(find.text('⚡ Play Now'), findsOneWidget);
-      expect(find.text('➕ Watchlist'), findsOneWidget);
-      expect(find.text('⚙ Sources'), findsOneWidget);
+      expect(find.text('Play Now'), findsOneWidget);
+      expect(find.text('Watchlist'), findsOneWidget);
+      expect(find.text('Sources'), findsOneWidget);
       expect(find.text('2h 28m'), findsOneWidget);
 
       // Verify CastCarousel
@@ -206,13 +206,13 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      expect(find.text('➕ Watchlist'), findsOneWidget);
+      expect(find.text('Watchlist'), findsOneWidget);
 
       // Tap Watchlist button
-      await tester.tap(find.text('➕ Watchlist'));
+      await tester.tap(find.text('Watchlist'));
       await tester.pumpAndSettle();
 
-      expect(find.text('✓ In Watchlist'), findsOneWidget);
+      expect(find.text('In Watchlist'), findsOneWidget);
       expect(await StorageService.instance.isWatchlisted('tt1375666'), isTrue);
     });
 
@@ -287,13 +287,13 @@ void main() {
       expect(find.text('Popular Works'), findsOneWidget);
       expect(find.text('Recent Releases'), findsOneWidget);
       expect(find.byType(TvFocusCard), findsWidgets);
-      expect(find.text('☆ Favorite'), findsOneWidget);
+      expect(find.text('Favorite'), findsOneWidget);
 
       // Tap Favorite button
-      await tester.tap(find.text('☆ Favorite'));
+      await tester.tap(find.text('Favorite'));
       await tester.pump();
 
-      expect(find.text('★ Favorited'), findsOneWidget);
+      expect(find.text('Favorited'), findsOneWidget);
       expect(await StorageService.instance.isActorFavorite(6193), isTrue);
     });
   });
@@ -384,13 +384,13 @@ void main() {
 
       // Sources drawer title and stream tiles should be visible
       expect(find.text('Sources'), findsWidgets);
-      expect(find.text('BackupCDN • 720p'), findsOneWidget);
+      expect(find.text('BackupCDN Stream'), findsOneWidget);
 
       // Press Back key to close drawer
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
 
-      expect(find.text('BackupCDN • 720p'), findsNothing);
+      expect(find.text('BackupCDN Stream'), findsNothing);
     });
 
     testWidgets('EpisodeStreamDialog renders live SSE progress indicators and provider badges', (tester) async {

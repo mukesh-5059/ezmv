@@ -20,5 +20,8 @@ export 'models/continue_watching_entry.dart';
 // API Client
 export 'api/api_client.dart';
 
+// Services
+export 'services/stream_ranker.dart';
+
 // Storage Service
 export 'storage/storage_service.dart';

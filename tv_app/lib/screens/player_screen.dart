@@ -46,6 +46,11 @@ class PlayerScreen extends StatefulWidget {
   final String? backdropPath;
   final List<StreamSource>? availableStreams;
   final List<SeasonSummary>? seasons;
+  final String? overview;
+  final String? releaseDate;
+  final double? ratingScore;
+  final int? voteCount;
+  final List<String>? genres;
 
   const PlayerScreen({
     super.key,
@@ -64,6 +69,11 @@ class PlayerScreen extends StatefulWidget {
     this.backdropPath,
     this.availableStreams,
     this.seasons,
+    this.overview,
+    this.releaseDate,
+    this.ratingScore,
+    this.voteCount,
+    this.genres,
   });
 
   factory PlayerScreen.fromMap(Map<String, dynamic> map) {
@@ -83,6 +93,11 @@ class PlayerScreen extends StatefulWidget {
       backdropPath: map['backdropPath'] as String?,
       availableStreams: (map['availableStreams'] as List?)?.cast<StreamSource>(),
       seasons: (map['seasons'] as List?)?.map((s) => s is SeasonSummary ? s : SeasonSummary.fromJson(s as Map<String, dynamic>)).toList(),
+      overview: map['overview'] as String?,
+      releaseDate: map['releaseDate'] as String?,
+      ratingScore: (map['ratingScore'] as num?)?.toDouble(),
+      voteCount: (map['voteCount'] as num?)?.toInt(),
+      genres: (map['genres'] as List?)?.map((g) => g.toString()).toList(),
     );
   }
 
@@ -112,6 +127,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _progressSaveTimer;
   Timer? _osdHideTimer;
   Timer? _seekCommitTimer;
+  Timer? _playbackWatchdogTimer;
   Duration? _pendingSeekPosition;
   int _accumulatedSeekDelta = 0;
   final List<StreamSubscription> _subscriptions = [];
@@ -150,14 +166,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late String _currentStreamUrl;
   late String _currentQuality;
   late String _currentProvider;
+  Map<String, String>? _currentHeaders;
   List<StreamSource> _availableStreams = [];
 
   Map<String, String> get _requestHeaders {
     return {
       'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Range': 'bytes=0-',
-      if (widget.headers != null) ...widget.headers!,
+      if (_currentHeaders != null) ..._currentHeaders!,
     };
   }
 
@@ -167,7 +183,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _currentStreamUrl = widget.streamUrl;
     _currentQuality = widget.quality;
     _currentProvider = widget.provider;
-    _availableStreams = widget.availableStreams ?? [];
+    _currentHeaders = widget.headers;
+    _availableStreams = widget.availableStreams != null ? List<StreamSource>.from(widget.availableStreams!) : [];
     _currentSeason = widget.season ?? 1;
     _currentEpisode = widget.episode ?? 1;
     _seasonsList = widget.seasons ?? [];
@@ -182,7 +199,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Initialize media_kit Player with hardware decoding & buffering configuration
     _player = Player(
       configuration: const PlayerConfiguration(
-        bufferSize: 48 * 1024 * 1024,
+        bufferSize: 32 * 1024 * 1024,
       ),
     );
 
@@ -192,6 +209,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _player,
       configuration: const VideoControllerConfiguration(
         enableHardwareAcceleration: true,
+        androidAttachSurfaceAfterVideoParameters: true,
       ),
     );
 
@@ -200,35 +218,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _initPlayerListenersAndOpen();
+    _probeUnprobedAvailableStreams();
   }
 
   void _configureHardwareAndBuffer() {
     try {
       final p = (_player.platform as dynamic);
-      // Hardware decoding: Never fallback to CPU software decoding for 1080p
-      p?.setProperty('hwdec', 'mediacodec-copy');
       p?.setProperty('vd-lavc-threads', '4');
-      p?.setProperty('framedrop', 'vo');
 
-      // Network & Buffer Stability for 1.5GB RAM Android TVs
-      p?.setProperty('cache', 'yes');
-      p?.setProperty('cache-secs', '30');
-      p?.setProperty('demuxer-readahead-secs', '25');
-      p?.setProperty('demuxer-max-bytes', '48MiB');
-      p?.setProperty('demuxer-max-back-bytes', '24MiB');
-      p?.setProperty('video-sync', 'audio');
+      // Network & Buffer Stability for Android TVs
+      p?.setProperty('demuxer-readahead-secs', '30');
+      p?.setProperty('network-timeout', '25');
 
       // Reconnect & HTTP resilience
-      p?.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_delay_max=10');
-      p?.setProperty('stream-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=10');
-      p?.setProperty('network-timeout', '30');
+      p?.setProperty(
+        'stream-lavf-o',
+        'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=10',
+      );
     } catch (_) {}
+  }
+
+  void _startPlaybackWatchdog() {
+    _playbackWatchdogTimer?.cancel();
+    _playbackWatchdogTimer = Timer(const Duration(seconds: 12), () {
+      if (mounted && _player.state.position == Duration.zero && _player.state.buffer == Duration.zero) {
+        _handlePlaybackFailure('Stream stalled: audio/video failed to decode within 12 seconds');
+      }
+    });
+  }
+
+  void _cancelPlaybackWatchdog() {
+    _playbackWatchdogTimer?.cancel();
+    _playbackWatchdogTimer = null;
   }
 
   Future<void> _initPlayerListenersAndOpen() async {
     // CRITICAL: Update ValueNotifier WITHOUT calling setState on PlayerScreen
     _subscriptions.add(
       _player.stream.position.listen((pos) {
+        if (pos > Duration.zero) {
+          _cancelPlaybackWatchdog();
+          if (_isBuffering && !_player.state.buffering && mounted) {
+            setState(() => _isBuffering = false);
+          }
+        }
         if (_showOsd) {
           _positionNotifier.value = pos;
         }
@@ -282,6 +315,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
 
     try {
+      _startPlaybackWatchdog();
       _tamilAudioSelectedForCurrentMedia = false;
       await _player.open(
         Media(
@@ -353,6 +387,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         positionMs: posMs,
         durationMs: durMs,
         updatedAt: DateTime.now(),
+        overview: widget.overview,
+        releaseDate: widget.releaseDate,
+        ratingScore: widget.ratingScore,
+        voteCount: widget.voteCount,
+        genres: widget.genres,
       );
       StorageService.instance.saveContinueWatching(entry);
     }
@@ -400,7 +439,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           title.contains('tamil') ||
           title.contains('[tam]') ||
           title.contains('(tam)')) {
-        _player.setAudioTrack(track);
+        if (_player.state.track.audio.id != track.id) {
+          _player.setAudioTrack(track);
+        }
         _tamilAudioSelectedForCurrentMedia = true;
         _hudController.triggerInfo('Audio: Tamil');
         break;
@@ -551,6 +592,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _handlePlaybackFailure(String err) async {
     if (!mounted || _isSwitchingStream) return;
+    _cancelPlaybackWatchdog();
     _failedStreamUrls.add(_currentStreamUrl);
 
     // Auto-stream fallback: Find next stream that has not failed
@@ -565,6 +607,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (fallbackStream != null) {
       _hudController.triggerInfo('Playback failed. Auto-switching to ${fallbackStream.provider} (${fallbackStream.quality})...');
       await _switchStream(fallbackStream, preservePosition: true);
+
+      final runtimeMins = _player.state.duration > Duration.zero ? _player.state.duration.inMinutes : null;
+      final unprobed = _availableStreams.where((s) => !_failedStreamUrls.contains(s.url) && s.url != fallbackStream!.url && s.headroomRatio == null).toList();
+      if (unprobed.isNotEmpty) {
+        StreamRanker.findNextFallback(unprobed, runtimeMinutes: runtimeMins).then((newFallback) {
+          if (newFallback != null && mounted) {
+            setState(() {
+              final idx = _availableStreams.indexWhere((s) => s.url == newFallback.url);
+              if (idx != -1) {
+                _availableStreams[idx] = newFallback;
+              } else {
+                _availableStreams.add(newFallback);
+              }
+            });
+          }
+        });
+      }
+      _probeUnprobedAvailableStreams();
     } else {
       if (mounted) {
         setState(() {
@@ -572,6 +632,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
       }
     }
+  }
+
+  void _probeUnprobedAvailableStreams() {
+    final unprobed = _availableStreams
+        .where((s) => s.headroomRatio == null && !_failedStreamUrls.contains(s.url))
+        .toList();
+    if (unprobed.isEmpty) return;
+
+    Future.microtask(() async {
+      for (final stream in unprobed) {
+        if (!mounted) break;
+        if (_failedStreamUrls.contains(stream.url)) continue;
+
+        final runtimeMins = _player.state.duration > Duration.zero ? _player.state.duration.inMinutes : null;
+        final metrics = await StreamRanker.probeStream(
+          stream,
+          runtimeMinutes: runtimeMins,
+          timeout: const Duration(milliseconds: 2500),
+        );
+        if (!mounted) break;
+
+        final headroom = metrics?.headroomRatio ?? 0.0;
+        setState(() {
+          final updated = List<StreamSource>.from(_availableStreams);
+          final idx = updated.indexWhere((s) => s.url == stream.url);
+          if (idx != -1) {
+            updated[idx] = stream.copyWith(headroomRatio: headroom);
+            _availableStreams = updated;
+          }
+        });
+      }
+    });
   }
 
   Future<void> _switchStream(StreamSource stream, {bool preservePosition = true}) async {
@@ -584,12 +676,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _currentStreamUrl = stream.url;
       _currentQuality = stream.quality;
       _currentProvider = stream.provider;
+      _currentHeaders = stream.headers;
       _errorMessage = null;
       _isBuffering = true;
       _tamilAudioSelectedForCurrentMedia = false;
     });
 
     try {
+      _startPlaybackWatchdog();
       // Hardware Guardrail: Stop previous pipeline cleanly before opening new stream
       await _player.stop();
       await _player.open(
@@ -663,10 +757,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
       (event) {
         if (!mounted) return;
         if (event.isDone) {
-          setState(() {
-            _availableStreams = event.streams ?? [];
-            _isLoadingDrawerSources = false;
-          });
+          final resolvedStreams = event.streams ?? [];
+          if (resolvedStreams.isNotEmpty) {
+            setState(() {
+              _drawerSseMessage = 'Ranking streams for optimal playback...';
+            });
+            StreamRanker.rankStreams(
+              resolvedStreams,
+              onProgress: (msg, probed, qual) {
+                if (mounted) setState(() => _drawerSseMessage = msg);
+              },
+            ).then((ranked) {
+              if (!mounted) return;
+              setState(() {
+                _availableStreams = [
+                  ranked.topStream,
+                  ...ranked.fallbackStreams,
+                  ...ranked.unprobedStreams,
+                ];
+                _isLoadingDrawerSources = false;
+              });
+            }).catchError((_) {
+              if (!mounted) return;
+              setState(() {
+                _availableStreams = resolvedStreams;
+                _isLoadingDrawerSources = false;
+              });
+            });
+          } else {
+            setState(() {
+              _availableStreams = [];
+              _isLoadingDrawerSources = false;
+            });
+          }
           return;
         }
 
@@ -698,7 +821,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) setState(() => _isLoadingDrawerSources = false);
       },
       onDone: () {
-        if (mounted && _isLoadingDrawerSources) {
+        if (mounted && _isLoadingDrawerSources && _availableStreams.isEmpty) {
           setState(() => _isLoadingDrawerSources = false);
         }
       },
@@ -763,6 +886,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             _closeDrawer();
             _hudController.triggerInfo('Playing S${seasonNum}E${episode.episodeNumber}: ${episode.name}');
             await _switchStream(streams.first, preservePosition: false);
+            _probeUnprobedAvailableStreams();
           } else {
             _hudController.triggerInfo('No streams available for this episode');
           }
@@ -880,6 +1004,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _osdHideTimer?.cancel();
     _progressSaveTimer?.cancel();
     _seekCommitTimer?.cancel();
+    _playbackWatchdogTimer?.cancel();
 
     for (final sub in _subscriptions) {
       sub.cancel();
@@ -1265,7 +1390,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           top: 0,
           bottom: 0,
           right: 0,
-          width: 420,
+          width: _activeDrawer == PlayerDrawerType.sources ? 460 : 420,
           child: Container(
             decoration: const BoxDecoration(
               color: Color(0xFF16161E),
@@ -1374,18 +1499,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
     }
 
-    return ListView.separated(
+    return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       itemCount: _availableStreams.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (ctx, idx) {
         final stream = _availableStreams[idx];
         final isSelected = stream.url == _currentStreamUrl;
-        return _DrawerTile(
-          autofocus: idx == 0,
-          title: '${stream.provider} • ${stream.quality}',
-          subtitle: stream.formattedSize ?? stream.host ?? 'HLS / MP4',
+        return _SourcesDrawerItem(
+          stream: stream,
           isSelected: isSelected,
+          autofocus: idx == 0,
           onTap: () {
             _closeDrawer();
             if (stream.url != _currentStreamUrl) {
@@ -1560,6 +1683,173 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _SourcesDrawerItem extends StatefulWidget {
+  final StreamSource stream;
+  final bool isSelected;
+  final bool autofocus;
+  final VoidCallback onTap;
+  final VoidCallback onBack;
+
+  const _SourcesDrawerItem({
+    required this.stream,
+    required this.isSelected,
+    required this.autofocus,
+    required this.onTap,
+    required this.onBack,
+  });
+
+  @override
+  State<_SourcesDrawerItem> createState() => _SourcesDrawerItemState();
+}
+
+class _SourcesDrawerItemState extends State<_SourcesDrawerItem> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.stream;
+    final langs = s.languages.isNotEmpty ? s.languages.join(', ') : 'Default';
+
+    return Focus(
+      autofocus: widget.autofocus,
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+              event.logicalKey == LogicalKeyboardKey.escape ||
+              event.logicalKey == LogicalKeyboardKey.backspace ||
+              event.logicalKey == LogicalKeyboardKey.goBack) {
+            widget.onBack();
+            return KeyEventResult.handled;
+          }
+        }
+        return TvShortcuts.handleKeyEvent(event, onActivate: widget.onTap);
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _isFocused
+                ? TVTheme.primary.withValues(alpha: 0.25)
+                : widget.isSelected
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.white.withValues(alpha: 0.03),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _isFocused
+                  ? Colors.white
+                  : widget.isSelected
+                      ? TVTheme.primary.withValues(alpha: 0.6)
+                      : Colors.white12,
+              width: _isFocused ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: TVTheme.primary,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      s.quality.isNotEmpty ? s.quality : 'HD',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                  if (s.headroomRatio != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: s.headroomRatio! >= 1.4
+                            ? Colors.green.withValues(alpha: 0.2)
+                            : s.headroomRatio! >= 1.0
+                                ? Colors.amber.withValues(alpha: 0.2)
+                                : Colors.red.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: s.headroomRatio! >= 1.4
+                              ? Colors.greenAccent
+                              : s.headroomRatio! >= 1.0
+                                  ? Colors.amberAccent
+                                  : Colors.redAccent,
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        '${s.headroomRatio!.toStringAsFixed(1)}x Headroom',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          color: s.headroomRatio! >= 1.4
+                              ? Colors.greenAccent
+                              : s.headroomRatio! >= 1.0
+                                  ? Colors.amberAccent
+                                  : Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  if (widget.isSelected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: TVTheme.primary.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: TVTheme.primary, width: 1),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check, size: 12, color: TVTheme.primary),
+                          SizedBox(width: 3),
+                          Text(
+                            'Active',
+                            style: TextStyle(fontSize: 10, color: TVTheme.primary, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                s.filename ?? '${s.provider} Stream',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${s.provider.toUpperCase()}  •  Audio: $langs${s.formattedSize != null ? "  •  ${s.formattedSize}" : ""}',
+                style: const TextStyle(fontSize: 11, color: TVTheme.textSecondary),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

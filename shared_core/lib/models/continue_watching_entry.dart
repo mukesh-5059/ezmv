@@ -1,3 +1,6 @@
+import 'genre.dart';
+import 'movie_summary.dart';
+
 class ContinueWatchingEntry {
   final String imdbId;
   final int? tmdbId;
@@ -10,6 +13,11 @@ class ContinueWatchingEntry {
   final int positionMs;
   final int durationMs;
   final DateTime updatedAt;
+  final String? overview;
+  final String? releaseDate;
+  final double? ratingScore;
+  final int? voteCount;
+  final List<String>? genres;
 
   const ContinueWatchingEntry({
     required this.imdbId,
@@ -23,6 +31,11 @@ class ContinueWatchingEntry {
     required this.positionMs,
     required this.durationMs,
     required this.updatedAt,
+    this.overview,
+    this.releaseDate,
+    this.ratingScore,
+    this.voteCount,
+    this.genres,
   });
 
   bool get isTv => mediaType == 'tv';
@@ -44,6 +57,22 @@ class ContinueWatchingEntry {
     return 'https://image.tmdb.org/t/p/w1280$backdropPath';
   }
 
+  MovieSummary toMovieSummary() {
+    return MovieSummary(
+      imdbId: imdbId,
+      tmdbId: tmdbId,
+      title: title,
+      overview: overview ?? '',
+      releaseDate: releaseDate ?? '',
+      posterPath: posterPath ?? '',
+      backdropPath: backdropPath ?? '',
+      ratingScore: ratingScore ?? 0.0,
+      voteCount: voteCount ?? 0,
+      mediaType: mediaType,
+      genres: genres?.map((g) => Genre(slug: g.toLowerCase().replaceAll(' ', '-'), name: g)).toList() ?? <Genre>[],
+    );
+  }
+
   factory ContinueWatchingEntry.fromJson(Map<String, dynamic> json) {
     DateTime parsedDate;
     final rawDate = json['updated_at'];
@@ -53,6 +82,12 @@ class ContinueWatchingEntry {
       parsedDate = DateTime.tryParse(rawDate) ?? DateTime.now();
     } else {
       parsedDate = DateTime.now();
+    }
+
+    final rawGenres = json['genres'];
+    List<String>? parsedGenres;
+    if (rawGenres is List) {
+      parsedGenres = rawGenres.map((e) => e.toString()).toList();
     }
 
     return ContinueWatchingEntry(
@@ -67,6 +102,11 @@ class ContinueWatchingEntry {
       positionMs: (json['position_ms'] as num?)?.toInt() ?? 0,
       durationMs: (json['duration_ms'] as num?)?.toInt() ?? 0,
       updatedAt: parsedDate,
+      overview: json['overview'] as String?,
+      releaseDate: json['release_date'] as String?,
+      ratingScore: (json['rating_score'] as num?)?.toDouble(),
+      voteCount: (json['vote_count'] as num?)?.toInt(),
+      genres: parsedGenres,
     );
   }
 
@@ -82,5 +122,10 @@ class ContinueWatchingEntry {
     'position_ms': positionMs,
     'duration_ms': durationMs,
     'updated_at': updatedAt.toIso8601String(),
+    if (overview != null) 'overview': overview,
+    if (releaseDate != null) 'release_date': releaseDate,
+    if (ratingScore != null) 'rating_score': ratingScore,
+    if (voteCount != null) 'vote_count': voteCount,
+    if (genres != null) 'genres': genres,
   };
 }

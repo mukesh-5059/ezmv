@@ -197,9 +197,9 @@ void main() {
       expect(find.text('Joseph Gordon-Levitt'), findsOneWidget);
 
       // Action Buttons
-      expect(find.text('⚡ Play Now'), findsOneWidget);
-      expect(find.text('➕ Watchlist'), findsOneWidget);
-      expect(find.text('⚙ Sources'), findsOneWidget);
+      expect(find.text('Play Now'), findsOneWidget);
+      expect(find.text('Watchlist'), findsOneWidget);
+      expect(find.text('Sources'), findsOneWidget);
     });
 
     testWidgets('falls back to initialMovie attributes during initial load', (tester) async {
@@ -270,21 +270,21 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Initial state: not watchlisted
-      expect(find.text('➕ Watchlist'), findsOneWidget);
+      expect(find.text('Watchlist'), findsOneWidget);
       expect(await StorageService.instance.isWatchlisted('tt1375666'), isFalse);
 
       // First click: add to watchlist
-      await tester.tap(find.text('➕ Watchlist'));
+      await tester.tap(find.text('Watchlist'));
       await tester.pumpAndSettle();
 
-      expect(find.text('✓ In Watchlist'), findsOneWidget);
+      expect(find.text('In Watchlist'), findsOneWidget);
       expect(await StorageService.instance.isWatchlisted('tt1375666'), isTrue);
 
       // Second click: remove from watchlist
-      await tester.tap(find.text('✓ In Watchlist'));
+      await tester.tap(find.text('In Watchlist'));
       await tester.pumpAndSettle();
 
-      expect(find.text('➕ Watchlist'), findsOneWidget);
+      expect(find.text('Watchlist'), findsOneWidget);
       expect(await StorageService.instance.isWatchlisted('tt1375666'), isFalse);
     });
 
@@ -321,8 +321,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Should render '✓ In Watchlist'
-      expect(find.text('✓ In Watchlist'), findsOneWidget);
+      // Should render 'In Watchlist'
+      expect(find.text('In Watchlist'), findsOneWidget);
     });
   });
 
@@ -360,8 +360,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Tap Sources button
-      expect(find.text('⚙ Sources'), findsOneWidget);
-      await tester.tap(find.text('⚙ Sources'));
+      expect(find.text('Sources'), findsOneWidget);
+      await tester.tap(find.text('Sources'));
       await tester.pumpAndSettle();
 
       // Verify Modal Dialog is shown
@@ -407,7 +407,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Open sources modal
-      await tester.tap(find.text('⚙ Sources'));
+      await tester.tap(find.text('Sources'));
       await tester.pumpAndSettle();
 
       // Tap the first stream option
@@ -452,7 +452,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Tap Play Now button
-      await tester.tap(find.text('⚡ Play Now'));
+      await tester.tap(find.text('Play Now'));
       await tester.pumpAndSettle();
 
       expect(find.byType(PlayerScreen), findsOneWidget);
@@ -490,12 +490,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // TV shows should display '⚡ Browse Episodes' instead of '⚡ Play Now'
-      expect(find.text('⚡ Browse Episodes'), findsOneWidget);
-      expect(find.text('⚡ Play Now'), findsNothing);
+      // TV shows should display 'Browse Episodes' instead of 'Play Now'
+      expect(find.text('Browse Episodes'), findsOneWidget);
+      expect(find.text('Play Now'), findsNothing);
 
       // TV mode should NOT display the Sources button
-      expect(find.text('⚙ Sources'), findsNothing);
+      expect(find.text('Sources'), findsNothing);
 
       // Title & Seasons
       expect(find.text('Breaking Bad'), findsWidgets);
@@ -555,7 +555,7 @@ void main() {
       expect(find.text('Pilot'), findsNothing);
     });
 
-    testWidgets('tapping an episode card opens EpisodeStreamDialog', (tester) async {
+    testWidgets('tapping an episode card opens unified StreamSelector modal and autoplays episode', (tester) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
@@ -603,9 +603,8 @@ void main() {
       await tester.tap(find.text('Pilot'));
       await tester.pumpAndSettle();
 
-      // EpisodeStreamDialog should be open
-      expect(find.byType(EpisodeStreamDialog), findsOneWidget);
-      expect(find.textContaining('S01E01'), findsOneWidget);
+      // Unified stream dialog resolves and autoplays into PlayerScreen
+      expect(find.byType(PlayerScreen), findsOneWidget);
     });
   });
 
@@ -653,7 +652,7 @@ void main() {
       // Recovered view
       expect(find.byIcon(Icons.error_outline), findsNothing);
       expect(find.text('Inception'), findsWidgets);
-      expect(find.text('⚡ Play Now'), findsOneWidget);
+      expect(find.text('Play Now'), findsOneWidget);
     });
 
     testWidgets('shows snackbar when streams fetch fails on play attempt', (tester) async {
@@ -689,7 +688,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Tap Play Now
-      await tester.tap(find.text('⚡ Play Now'));
+      await tester.tap(find.text('Play Now'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Failed to fetch streams'), findsOneWidget);

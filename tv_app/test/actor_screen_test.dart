@@ -96,7 +96,7 @@ void main() {
       expect(find.text('Leonardo Wilhelm DiCaprio is an American actor and film producer.'), findsOneWidget);
 
       // Favorite button initial state
-      expect(find.text('☆ Favorite'), findsOneWidget);
+      expect(find.text('Favorite'), findsOneWidget);
     });
 
     testWidgets('renders filmography shelves (Popular Works and Recent Releases) with movie cards', (tester) async {
@@ -208,21 +208,21 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Initial state: not favorited
-      expect(find.text('☆ Favorite'), findsOneWidget);
+      expect(find.text('Favorite'), findsOneWidget);
       expect(await StorageService.instance.isActorFavorite(6193), isFalse);
 
       // Tap favorite button to favorite
-      await tester.tap(find.text('☆ Favorite'));
+      await tester.tap(find.text('Favorite'));
       await tester.pump();
 
-      expect(find.text('★ Favorited'), findsOneWidget);
+      expect(find.text('Favorited'), findsOneWidget);
       expect(await StorageService.instance.isActorFavorite(6193), isTrue);
 
       // Tap favorite button again to unfavorite
-      await tester.tap(find.text('★ Favorited'));
+      await tester.tap(find.text('Favorited'));
       await tester.pump();
 
-      expect(find.text('☆ Favorite'), findsOneWidget);
+      expect(find.text('Favorite'), findsOneWidget);
       expect(await StorageService.instance.isActorFavorite(6193), isFalse);
     });
 
@@ -258,7 +258,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       // Button should initially render as favorited
-      expect(find.text('★ Favorited'), findsOneWidget);
+      expect(find.text('Favorited'), findsOneWidget);
     });
   });
 

@@ -231,20 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleResumeWatching(ContinueWatchingEntry entry) {
-    final movie = MovieSummary(
-      imdbId: entry.imdbId,
-      tmdbId: entry.tmdbId,
-      title: entry.title,
-      overview: '',
-      releaseDate: '',
-      posterPath: entry.posterPath ?? '',
-      backdropPath: entry.backdropPath ?? '',
-      ratingScore: 0.0,
-      voteCount: 0,
-      mediaType: entry.mediaType,
-      genres: [],
-    );
-    _navigateToDetails(movie);
+    _navigateToDetails(entry.toMovieSummary());
   }
 
   void _navigateToDetails(MovieSummary movie) async {

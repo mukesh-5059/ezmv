@@ -233,7 +233,7 @@ class _ActorScreenState extends State<ActorScreen> {
                 children: [
                   TvFocusButton(
                     focusNode: _favButtonFocusNode,
-                    label: _isFavorite ? '★ Favorited' : '☆ Favorite',
+                    label: _isFavorite ? 'Favorited' : 'Favorite',
                     isPrimary: _isFavorite,
                     icon: _isFavorite ? Icons.star : Icons.star_border,
                     onPressed: _toggleFavorite,

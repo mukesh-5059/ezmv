@@ -10,6 +10,7 @@ class EpisodeStreamDialog extends StatefulWidget {
   final String showTitle;
   final int seasonNumber;
   final TvEpisode episode;
+  final bool autoPlay;
   final void Function(StreamSource stream)? onStreamSelected;
   final void Function(StreamSource stream, List<StreamSource> allStreams)? onStreamSelectedWithAll;
 
@@ -19,6 +20,7 @@ class EpisodeStreamDialog extends StatefulWidget {
     required this.showTitle,
     required this.seasonNumber,
     required this.episode,
+    this.autoPlay = true,
     this.onStreamSelected,
     this.onStreamSelectedWithAll,
   });
@@ -30,6 +32,7 @@ class EpisodeStreamDialog extends StatefulWidget {
 class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
   List<StreamSource> _streams = [];
   bool _isLoading = true;
+  bool _isRanking = false;
   String _statusMessage = 'Connecting to scrapers...';
   StreamSubscription<StreamProgressEvent>? _sseSubscription;
   final Map<String, ({StreamProgressStatus status, int count})> _providerStatuses = {};
@@ -73,17 +76,76 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
         if (!mounted) return;
         if (event.isDone) {
           final resolvedStreams = event.streams ?? [];
+          if (resolvedStreams.isEmpty) {
+            setState(() {
+              _streams = [];
+              _isLoading = false;
+              _isRanking = false;
+              _statusMessage = 'No streams found for this episode.';
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _retryFocusNode.requestFocus();
+            });
+            return;
+          }
+
+          _isRanking = true;
           setState(() {
-            _streams = resolvedStreams;
-            _isLoading = false;
+            _isLoading = true;
+            _statusMessage = 'Analyzing streams for optimal playback...';
           });
-          WidgetsBinding.instance.addPostFrameCallback((_) {
+
+          StreamRanker.rankStreams(
+            resolvedStreams,
+            runtimeMinutes: widget.episode.runtime,
+            onProgress: (msg, probed, qual) {
+              if (mounted) setState(() => _statusMessage = msg);
+            },
+          ).then((ranked) {
             if (!mounted) return;
-            if (_streams.isNotEmpty) {
-              _firstStreamFocusNode.requestFocus();
-            } else {
-              _retryFocusNode.requestFocus();
+            final allStreams = [
+              ranked.topStream,
+              ...ranked.fallbackStreams,
+              ...ranked.unprobedStreams,
+            ];
+            if (widget.autoPlay) {
+              Navigator.of(context).pop();
+              if (widget.onStreamSelectedWithAll != null) {
+                widget.onStreamSelectedWithAll!(ranked.topStream, allStreams);
+              } else {
+                widget.onStreamSelected?.call(ranked.topStream);
+              }
+              return;
             }
+            setState(() {
+              _streams = allStreams;
+              _isLoading = false;
+              _isRanking = false;
+            });
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              if (_streams.isNotEmpty) {
+                _firstStreamFocusNode.requestFocus();
+              } else {
+                _retryFocusNode.requestFocus();
+              }
+            });
+          }).catchError((_) {
+            if (!mounted) return;
+            if (widget.autoPlay && resolvedStreams.isNotEmpty) {
+              Navigator.of(context).pop();
+              if (widget.onStreamSelectedWithAll != null) {
+                widget.onStreamSelectedWithAll!(resolvedStreams.first, resolvedStreams);
+              } else {
+                widget.onStreamSelected?.call(resolvedStreams.first);
+              }
+              return;
+            }
+            setState(() {
+              _streams = resolvedStreams;
+              _isLoading = false;
+              _isRanking = false;
+            });
           });
           return;
         }
@@ -114,25 +176,27 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
       },
       onError: (err) {
         if (!mounted) return;
-        setState(() {
-          _isLoading = false;
-          _statusMessage = 'Failed to load streams: $err';
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _retryFocusNode.requestFocus();
+        _isRanking = false;
+        StreamRanker.checkInternetReachability().then((isOnline) {
+          if (!mounted) return;
+          final displayErr = !isOnline
+              ? 'Network error: Please check your Wi-Fi or Ethernet connection.'
+              : 'Streaming providers are temporarily slow or unavailable ($err).';
+          setState(() {
+            _isLoading = false;
+            _statusMessage = displayErr;
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _retryFocusNode.requestFocus();
+          });
         });
       },
       onDone: () {
         if (!mounted) return;
-        if (_isLoading) {
+        if (_isLoading && !_isRanking && _streams.isEmpty) {
           setState(() => _isLoading = false);
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            if (_streams.isNotEmpty) {
-              _firstStreamFocusNode.requestFocus();
-            } else {
-              _retryFocusNode.requestFocus();
-            }
+            if (mounted) _retryFocusNode.requestFocus();
           });
         }
       },
@@ -148,9 +212,9 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 60, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       child: Container(
-        width: 920,
+        width: 780,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: const Color(0xFF0C0D12),
@@ -620,6 +684,30 @@ class _EpisodeStreamCardState extends State<_EpisodeStreamCard> {
                               ),
                             ),
                           ),
+                          if (s.headroomRatio != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: s.headroomRatio! >= 1.4
+                                    ? Colors.green.withValues(alpha: 0.2)
+                                    : Colors.amber.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: s.headroomRatio! >= 1.4 ? Colors.greenAccent : Colors.amberAccent,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                '${s.headroomRatio!.toStringAsFixed(1)}x',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: s.headroomRatio! >= 1.4 ? Colors.greenAccent : Colors.amberAccent,
+                                ),
+                              ),
+                            ),
+                          ],
                           if (s.formattedSize != null && s.formattedSize!.isNotEmpty) ...[
                             const SizedBox(width: 8),
                             Icon(Icons.folder_outlined, size: 13, color: _isFocused ? Colors.white70 : Colors.white54),
