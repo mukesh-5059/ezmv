@@ -34,7 +34,7 @@ class TVTheme {
   static const double focusScale = 1.08;
   static const double buttonFocusScale = 1.06;
   static const double focusBorderWidth = 3.0;
-  static const Duration focusDuration = Duration(milliseconds: 200);
+  static const Duration focusDuration = Duration(milliseconds: 250);
   static const Curve focusCurve = Curves.easeOutCubic;
 
   // Dual-layer Focus Shadows

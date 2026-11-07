@@ -57,6 +57,17 @@ class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _verticalScrollController = ScrollController();
   final GlobalKey<TvContinueWatchingLaneState> _continueWatchingKey = GlobalKey();
 
+  final FocusNode _navActiveTabFocusNode = FocusNode(debugLabel: 'NavActiveTab');
+  final FocusNode _navSearchFocusNode = FocusNode(debugLabel: 'NavSearch');
+  final FocusNode _billboardPlayFocusNode = FocusNode(debugLabel: 'BillboardPlay');
+  final FocusNode _billboardDetailsFocusNode = FocusNode(debugLabel: 'BillboardDetails');
+  final FocusNode _continueWatchingHeaderNode = FocusNode(debugLabel: 'CWHeader');
+  final FocusNode _actorsHeaderNode = FocusNode(debugLabel: 'ActorsHeader');
+  final Map<String, FocusNode> _laneHeaderNodes = {};
+
+  FocusNode _getLaneHeaderNode(String laneId) =>
+      _laneHeaderNodes.putIfAbsent(laneId, () => FocusNode(debugLabel: 'LaneHeader_$laneId'));
+
   bool _isScrolledDown = false;
   DateTime? _lastBackPressTime;
 
@@ -71,6 +82,15 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _verticalScrollController.removeListener(_onVerticalScroll);
     _verticalScrollController.dispose();
+    _navActiveTabFocusNode.dispose();
+    _navSearchFocusNode.dispose();
+    _billboardPlayFocusNode.dispose();
+    _billboardDetailsFocusNode.dispose();
+    _continueWatchingHeaderNode.dispose();
+    _actorsHeaderNode.dispose();
+    for (final node in _laneHeaderNodes.values) {
+      node.dispose();
+    }
     super.dispose();
   }
 
@@ -120,12 +140,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _scrollToTop() {
     if (_verticalScrollController.hasClients && _verticalScrollController.offset > 0) {
-      _verticalScrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeOutCubic,
-      );
+      _verticalScrollController.jumpTo(0);
     }
+  }
+
+  void _focusFirstLaneHeader() {
+    final lanes = _dashboard?.lanes ?? [];
+    if (_continueWatchingKey.currentState?.hasEntries == true) {
+      _continueWatchingHeaderNode.requestFocus();
+    } else if (lanes.isNotEmpty) {
+      _getLaneHeaderNode(lanes.first.id).requestFocus();
+    }
+  }
+
+  void _ensureFocusedVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final focusedContext = FocusManager.instance.primaryFocus?.context;
+      if (focusedContext != null) {
+        final ro = focusedContext.findRenderObject();
+        if (ro != null && ro.attached) {
+          Scrollable.maybeOf(focusedContext, axis: Axis.vertical)?.position.ensureVisible(
+            ro,
+            alignment: 0.22,
+            duration: Duration.zero,
+          );
+        }
+      }
+    });
   }
 
   void _handleBackPress() {
@@ -219,28 +261,30 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
-  void _navigateToDetails(MovieSummary movie) {
+  void _navigateToDetails(MovieSummary movie) async {
     if (widget.onDetailsTap != null) {
       widget.onDetailsTap!(movie);
       return;
     }
-    Navigator.pushNamed(context, '/details', arguments: movie);
+    await Navigator.pushNamed(context, '/details', arguments: movie);
+    if (mounted) _ensureFocusedVisible();
   }
 
-  void _navigateToActor(ActorSummary actor) {
+  void _navigateToActor(ActorSummary actor) async {
     if (widget.onActorTap != null) {
       widget.onActorTap!(actor);
       return;
     }
-    Navigator.pushNamed(context, '/actor', arguments: actor);
+    await Navigator.pushNamed(context, '/actor', arguments: actor);
+    if (mounted) _ensureFocusedVisible();
   }
 
-  void _navigateToLaneGrid(DashboardLane lane) {
+  void _navigateToLaneGrid(DashboardLane lane) async {
     if (widget.onShowAllLane != null) {
       widget.onShowAllLane!(lane);
       return;
     }
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => LaneGridScreen(
@@ -250,22 +294,25 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+    if (mounted) _ensureFocusedVisible();
   }
 
-  void _navigateToSearch() {
+  void _navigateToSearch() async {
     if (widget.onSearchTap != null) {
       widget.onSearchTap!();
       return;
     }
-    Navigator.pushNamed(context, '/search');
+    await Navigator.pushNamed(context, '/search');
+    if (mounted) _ensureFocusedVisible();
   }
 
-  void _showSettings() {
+  void _showSettings() async {
     if (widget.onSettingsTap != null) {
       widget.onSettingsTap!();
       return;
     }
-    Navigator.pushNamed(context, '/settings');
+    await Navigator.pushNamed(context, '/settings');
+    if (mounted) _ensureFocusedVisible();
   }
 
   @override
@@ -357,55 +404,136 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildHomeContent() {
     final lanes = _dashboard?.lanes ?? [];
 
-    return ListView(
-      controller: _verticalScrollController,
-      padding: EdgeInsets.zero,
+    return Stack(
       children: [
-        // 1. Top Navigation Bar
-        TvTopNavBar(
-          activeDashboardId: _activeDashboardId,
-          onDashboardChanged: _onDashboardChanged,
-          onSearchTap: _navigateToSearch,
-          onCuratedListsTap: _navigateToSearch,
-          onSettingsTap: _showSettings,
+        // Scrollable content area
+        ListView(
+          controller: _verticalScrollController,
+          padding: const EdgeInsets.only(top: 68),
+          children: [
+            // 1. Hero Billboard Carousel
+            if (lanes.isNotEmpty)
+              RepaintBoundary(
+                child: TvBillboard(
+                  lanes: lanes,
+                  isVisible: !_isScrolledDown,
+                  playButtonFocusNode: _billboardPlayFocusNode,
+                  detailsButtonFocusNode: _billboardDetailsFocusNode,
+                  onPlay: _handlePlayMovie,
+                  onDetails: _navigateToDetails,
+                  onNavigateUp: () {
+                    _scrollToTop();
+                    _navActiveTabFocusNode.requestFocus();
+                  },
+                  onNavigateDown: _focusFirstLaneHeader,
+                ),
+              ),
+
+            // 2. Row 0: Continue Watching Lane (Dynamic)
+            RepaintBoundary(
+              child: TvContinueWatchingLane(
+                key: _continueWatchingKey,
+                headerFocusNode: _continueWatchingHeaderNode,
+                onResume: _handleResumeWatching,
+                onNavigateUpFromHeader: () {
+                  _scrollToTop();
+                  _billboardPlayFocusNode.requestFocus();
+                },
+                onNavigateDownFromCard: () {
+                  if (lanes.isNotEmpty) {
+                    _getLaneHeaderNode(lanes.first.id).requestFocus();
+                  }
+                },
+              ),
+            ),
+
+            // 3. Content Lanes
+            ...lanes.asMap().entries.map((entry) {
+              final i = entry.key;
+              final lane = entry.value;
+              return RepaintBoundary(
+                key: ValueKey('lane_${lane.id}'),
+                child: TvMovieLane(
+                  lane: lane,
+                  headerFocusNode: _getLaneHeaderNode(lane.id),
+                  onMovieTap: _navigateToDetails,
+                  onShowAll: _navigateToLaneGrid,
+                  onNavigateUpFromHeader: () {
+                    if (i == 0) {
+                      if (_continueWatchingKey.currentState?.hasEntries == true) {
+                        _continueWatchingHeaderNode.requestFocus();
+                      } else {
+                        _scrollToTop();
+                        _billboardPlayFocusNode.requestFocus();
+                      }
+                    } else {
+                      _getLaneHeaderNode(lanes[i - 1].id).requestFocus();
+                    }
+                  },
+                  onNavigateDownFromCard: () {
+                    if (i < lanes.length - 1) {
+                      _getLaneHeaderNode(lanes[i + 1].id).requestFocus();
+                    } else if (_activeDashboardId == 'tamil') {
+                      _actorsHeaderNode.requestFocus();
+                    }
+                  },
+                ),
+              );
+            }),
+
+            // 4. Tamil Actors Lane (Tamil Dashboard Only Shelf)
+            if (_activeDashboardId == 'tamil')
+              TvActorsLane(
+                headerFocusNode: _actorsHeaderNode,
+                onActorTap: _navigateToActor,
+                onNavigateUpFromHeader: () {
+                  if (lanes.isNotEmpty) {
+                    _getLaneHeaderNode(lanes.last.id).requestFocus();
+                  }
+                },
+              ),
+
+            const SizedBox(height: 48),
+          ],
         ),
 
-        // 2. Hero Billboard Carousel
-        if (lanes.isNotEmpty)
-          RepaintBoundary(
-            child: TvBillboard(
-              lanes: lanes,
-              isVisible: !_isScrolledDown,
-              onPlay: _handlePlayMovie,
-              onDetails: _navigateToDetails,
+        // Pinned Top Navigation Bar with subtle scrim backdrop
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  TVTheme.background.withValues(alpha: 0.95),
+                  TVTheme.background.withValues(alpha: 0.75),
+                  Colors.transparent,
+                ],
+                stops: const [0.0, 0.65, 1.0],
+              ),
+            ),
+            child: TvTopNavBar(
+              activeDashboardId: _activeDashboardId,
+              activeTabFocusNode: _navActiveTabFocusNode,
+              searchButtonFocusNode: _navSearchFocusNode,
+              onDashboardChanged: _onDashboardChanged,
+              onSearchTap: _navigateToSearch,
+              onCuratedListsTap: _navigateToSearch,
+              onSettingsTap: _showSettings,
+              onNavigateDown: () {
+                _scrollToTop();
+                if (lanes.isNotEmpty) {
+                  _billboardPlayFocusNode.requestFocus();
+                } else {
+                  _focusFirstLaneHeader();
+                }
+              },
             ),
           ),
-
-        // 3. Row 0: Continue Watching Lane (Dynamic)
-        RepaintBoundary(
-          child: TvContinueWatchingLane(
-            key: _continueWatchingKey,
-            onResume: _handleResumeWatching,
-          ),
         ),
-
-        // 4. Content Lanes
-        ...lanes.map((lane) => RepaintBoundary(
-              key: ValueKey('lane_${lane.id}'),
-              child: TvMovieLane(
-                lane: lane,
-                onMovieTap: _navigateToDetails,
-                onShowAll: _navigateToLaneGrid,
-              ),
-            )),
-
-        // 5. Tamil Actors Lane (Tamil Dashboard Only Shelf)
-        if (_activeDashboardId == 'tamil')
-          TvActorsLane(
-            onActorTap: _navigateToActor,
-          ),
-
-        const SizedBox(height: 48),
       ],
     );
   }

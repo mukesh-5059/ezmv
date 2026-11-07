@@ -12,11 +12,17 @@ import '../tv_unified_header_strip.dart';
 class TvContinueWatchingLane extends StatefulWidget {
   final void Function(ContinueWatchingEntry entry) onResume;
   final VoidCallback? onWatchHistoryCleared;
+  final FocusNode? headerFocusNode;
+  final VoidCallback? onNavigateUpFromHeader;
+  final VoidCallback? onNavigateDownFromCard;
 
   const TvContinueWatchingLane({
     super.key,
     required this.onResume,
     this.onWatchHistoryCleared,
+    this.headerFocusNode,
+    this.onNavigateUpFromHeader,
+    this.onNavigateDownFromCard,
   });
 
   @override
@@ -27,10 +33,13 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
     with AutomaticKeepAliveClientMixin {
   List<ContinueWatchingEntry> _entries = [];
   bool _isLoading = true;
+  bool get hasEntries => !_isLoading && _entries.isNotEmpty;
   final FocusNode _headerFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   final List<FocusNode> _itemFocusNodes = [];
   int _lastFocusedIndex = 0;
+
+  FocusNode get _effectiveHeaderFocusNode => widget.headerFocusNode ?? _headerFocusNode;
 
   @override
   bool get wantKeepAlive => true;
@@ -59,11 +68,18 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   }
 
   KeyEventResult _handleHeaderKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      if (_entries.isNotEmpty) {
-        final targetIndex = _lastFocusedIndex.clamp(0, _entries.length - 1);
-        _getFocusNode(targetIndex).requestFocus();
-        return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (_entries.isNotEmpty) {
+          final targetIndex = _lastFocusedIndex.clamp(0, _entries.length - 1);
+          _getFocusNode(targetIndex).requestFocus();
+          return KeyEventResult.handled;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (widget.onNavigateUpFromHeader != null) {
+          widget.onNavigateUpFromHeader!();
+          return KeyEventResult.handled;
+        }
       }
     }
     return KeyEventResult.ignored;
@@ -89,9 +105,16 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   }
 
   KeyEventResult _handleCardKeyEvent(KeyEvent event, int index) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _headerFocusNode.requestFocus();
-      return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _effectiveHeaderFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (widget.onNavigateDownFromCard != null) {
+          widget.onNavigateDownFromCard!();
+          return KeyEventResult.handled;
+        }
+      }
     }
     return KeyEventResult.ignored;
   }
@@ -110,14 +133,12 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
-          child: Focus(
+          child: TvUnifiedHeaderStrip(
+            title: 'Continue Watching',
+            count: _entries.length,
+            focusNode: _effectiveHeaderFocusNode,
             onKeyEvent: (node, event) => _handleHeaderKeyEvent(event),
-            child: TvUnifiedHeaderStrip(
-              title: 'Continue Watching',
-              count: _entries.length,
-              focusNode: _headerFocusNode,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
         ),
         const SizedBox(height: 8),

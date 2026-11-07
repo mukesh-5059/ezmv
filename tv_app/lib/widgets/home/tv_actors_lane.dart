@@ -17,10 +17,14 @@ import '../tv_unified_header_strip.dart';
 /// - Selecting an actor triggers [onActorTap].
 class TvActorsLane extends StatefulWidget {
   final void Function(ActorSummary actor) onActorTap;
+  final FocusNode? headerFocusNode;
+  final VoidCallback? onNavigateUpFromHeader;
 
   const TvActorsLane({
     super.key,
     required this.onActorTap,
+    this.headerFocusNode,
+    this.onNavigateUpFromHeader,
   });
 
   @override
@@ -93,12 +97,21 @@ class _TvActorsLaneState extends State<TvActorsLane>
     }
   }
 
+  FocusNode get _effectiveHeaderFocusNode => widget.headerFocusNode ?? _headerFocusNode;
+
   KeyEventResult _handleHeaderKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      if (_actors.isNotEmpty) {
-        final targetIndex = _lastFocusedIndex.clamp(0, _actors.length - 1);
-        _getFocusNode(targetIndex).requestFocus();
-        return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (_actors.isNotEmpty) {
+          final targetIndex = _lastFocusedIndex.clamp(0, _actors.length - 1);
+          _getFocusNode(targetIndex).requestFocus();
+          return KeyEventResult.handled;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (widget.onNavigateUpFromHeader != null) {
+          widget.onNavigateUpFromHeader!();
+          return KeyEventResult.handled;
+        }
       }
     }
     return KeyEventResult.ignored;
@@ -106,7 +119,7 @@ class _TvActorsLaneState extends State<TvActorsLane>
 
   KeyEventResult _handleCardKeyEvent(KeyEvent event) {
     if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _headerFocusNode.requestFocus();
+      _effectiveHeaderFocusNode.requestFocus();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -126,14 +139,12 @@ class _TvActorsLaneState extends State<TvActorsLane>
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
-          child: Focus(
+          child: TvUnifiedHeaderStrip(
+            title: 'Popular Tamil Actors',
+            count: _actors.length,
+            focusNode: _effectiveHeaderFocusNode,
             onKeyEvent: (node, event) => _handleHeaderKeyEvent(event),
-            child: TvUnifiedHeaderStrip(
-              title: 'Popular Tamil Actors',
-              count: _actors.length,
-              focusNode: _headerFocusNode,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
         ),
         const SizedBox(height: 12),
@@ -201,8 +212,7 @@ class _ActorCircleCardState extends State<_ActorCircleCard> {
           Scrollable.ensureVisible(
             context,
             alignment: 0.5,
-            duration: TVTheme.focusDuration,
-            curve: Curves.easeInOut,
+            duration: Duration.zero,
           );
         }
         widget.onFocusChanged(focused);

@@ -115,12 +115,26 @@ class _TvFocusCardState extends State<TvFocusCard> {
       onFocusChange: (focused) {
         setState(() => _isFocused = focused);
         if (focused) {
-          Scrollable.ensureVisible(
-            context,
-            alignment: 0.5,
-            duration: TVTheme.focusDuration,
-            curve: Curves.easeInOut,
-          );
+          final RenderObject? renderObject = context.findRenderObject();
+          if (renderObject != null && renderObject.attached) {
+            final horizontal = Scrollable.maybeOf(context, axis: Axis.horizontal);
+            if (horizontal != null) {
+              horizontal.position.ensureVisible(
+                renderObject,
+                alignment: 0.5,
+                duration: Duration.zero,
+              );
+            } else {
+              final vertical = Scrollable.maybeOf(context, axis: Axis.vertical);
+              if (vertical != null) {
+                vertical.position.ensureVisible(
+                  renderObject,
+                  alignment: 0.5,
+                  duration: Duration.zero,
+                );
+              }
+            }
+          }
         }
         widget.onFocusChanged?.call(focused);
       },
@@ -159,24 +173,24 @@ class _TvFocusCardState extends State<TvFocusCard> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      // Poster Image with Strict Downsampling
+                      // Poster Image with Strict Downsampling & Static Skeleton (zero ticker jank)
                       if (widget.posterUrl.isNotEmpty)
                         CachedNetworkImage(
                           imageUrl: widget.posterUrl,
                           fit: BoxFit.cover,
-                          memCacheWidth: 300,
-                          memCacheHeight: 450,
-                          maxWidthDiskCache: 300,
+                          memCacheWidth: 260,
+                          memCacheHeight: 390,
+                          maxWidthDiskCache: 260,
+                          maxHeightDiskCache: 390,
+                          fadeInDuration: const Duration(milliseconds: 120),
+                          fadeOutDuration: const Duration(milliseconds: 120),
                           placeholder: (context, url) => Container(
-                            color: TVTheme.surface,
+                            color: TVTheme.surfaceElevated,
                             child: const Center(
-                              child: SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: TVTheme.primary,
-                                ),
+                              child: Icon(
+                                Icons.movie_outlined,
+                                color: TVTheme.textMuted,
+                                size: 32,
                               ),
                             ),
                           ),

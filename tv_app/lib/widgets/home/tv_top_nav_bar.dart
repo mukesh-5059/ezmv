@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../theme.dart';
 import '../tv_shortcuts.dart';
 
@@ -16,6 +17,9 @@ class TvTopNavBar extends StatefulWidget {
   final VoidCallback onSearchTap;
   final VoidCallback onCuratedListsTap;
   final VoidCallback onSettingsTap;
+  final FocusNode? activeTabFocusNode;
+  final FocusNode? searchButtonFocusNode;
+  final VoidCallback? onNavigateDown;
 
   const TvTopNavBar({
     super.key,
@@ -24,6 +28,9 @@ class TvTopNavBar extends StatefulWidget {
     required this.onSearchTap,
     required this.onCuratedListsTap,
     required this.onSettingsTap,
+    this.activeTabFocusNode,
+    this.searchButtonFocusNode,
+    this.onNavigateDown,
   });
 
   @override
@@ -36,6 +43,44 @@ class _TvTopNavBarState extends State<TvTopNavBar> {
     {'id': 'english', 'label': 'English'},
     {'id': 'anime', 'label': 'Anime'},
   ];
+
+  late final Map<String, FocusNode> _tabFocusNodes;
+  late final FocusNode _searchFocusNode;
+  late final FocusNode _curatedFocusNode;
+  late final FocusNode _settingsFocusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabFocusNodes = {
+      'tamil': FocusNode(debugLabel: 'nav_tab_tamil'),
+      'english': FocusNode(debugLabel: 'nav_tab_english'),
+      'anime': FocusNode(debugLabel: 'nav_tab_anime'),
+    };
+    _searchFocusNode = FocusNode(debugLabel: 'nav_search');
+    _curatedFocusNode = FocusNode(debugLabel: 'nav_curated');
+    _settingsFocusNode = FocusNode(debugLabel: 'nav_settings');
+  }
+
+  @override
+  void dispose() {
+    for (final node in _tabFocusNodes.values) {
+      node.dispose();
+    }
+    _searchFocusNode.dispose();
+    _curatedFocusNode.dispose();
+    _settingsFocusNode.dispose();
+    super.dispose();
+  }
+
+  FocusNode _getTabFocusNode(String id) {
+    if (widget.activeDashboardId == id && widget.activeTabFocusNode != null) {
+      return widget.activeTabFocusNode!;
+    }
+    return _tabFocusNodes[id]!;
+  }
+
+  FocusNode get _effectiveSearchNode => widget.searchButtonFocusNode ?? _searchFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -78,17 +123,23 @@ class _TvTopNavBarState extends State<TvTopNavBar> {
           const SizedBox(width: 32),
 
           // Dashboard Category Tabs
-          ..._dashboards.map((dash) {
+          ..._dashboards.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final dash = entry.value;
             final id = dash['id']!;
             final label = dash['label']!;
             final isSelected = widget.activeDashboardId == id;
+            final isLastTab = idx == _dashboards.length - 1;
 
             return Padding(
               padding: const EdgeInsets.only(right: 12),
               child: _NavTabItem(
+                focusNode: _getTabFocusNode(id),
                 label: label,
                 isSelected: isSelected,
                 onSelected: () => widget.onDashboardChanged(id),
+                onDown: widget.onNavigateDown,
+                onRight: isLastTab ? () => _effectiveSearchNode.requestFocus() : null,
               ),
             );
           }),
@@ -97,21 +148,28 @@ class _TvTopNavBarState extends State<TvTopNavBar> {
 
           // Right-aligned Actions
           _NavIconButton(
+            focusNode: _effectiveSearchNode,
             icon: Icons.search_rounded,
             label: 'Search',
             onTap: widget.onSearchTap,
+            onDown: widget.onNavigateDown,
+            onLeft: () => _getTabFocusNode('anime').requestFocus(),
           ),
           const SizedBox(width: 12),
           _NavIconButton(
+            focusNode: _curatedFocusNode,
             icon: Icons.playlist_play_rounded,
             label: 'Curated Lists',
             onTap: widget.onCuratedListsTap,
+            onDown: widget.onNavigateDown,
           ),
           const SizedBox(width: 12),
           _NavIconButton(
+            focusNode: _settingsFocusNode,
             icon: Icons.settings_rounded,
             label: 'Settings',
             onTap: widget.onSettingsTap,
+            onDown: widget.onNavigateDown,
           ),
         ],
       ),
@@ -120,14 +178,20 @@ class _TvTopNavBarState extends State<TvTopNavBar> {
 }
 
 class _NavTabItem extends StatefulWidget {
+  final FocusNode focusNode;
   final String label;
   final bool isSelected;
   final VoidCallback onSelected;
+  final VoidCallback? onDown;
+  final VoidCallback? onRight;
 
   const _NavTabItem({
+    required this.focusNode,
     required this.label,
     required this.isSelected,
     required this.onSelected,
+    this.onDown,
+    this.onRight,
   });
 
   @override
@@ -140,11 +204,24 @@ class _NavTabItemState extends State<_NavTabItem> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      focusNode: widget.focusNode,
       onFocusChange: (focused) => setState(() => _isFocused = focused),
-      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(
-        event,
-        onActivate: widget.onSelected,
-      ),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onDown != null) {
+            widget.onDown!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight && widget.onRight != null) {
+            widget.onRight!();
+            return KeyEventResult.handled;
+          }
+        }
+        return TvShortcuts.handleKeyEvent(
+          event,
+          onActivate: widget.onSelected,
+        );
+      },
       child: GestureDetector(
         onTap: widget.onSelected,
         child: AnimatedScale(
@@ -203,14 +280,22 @@ class _NavTabItemState extends State<_NavTabItem> {
 }
 
 class _NavIconButton extends StatefulWidget {
+  final FocusNode? focusNode;
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final VoidCallback? onDown;
+  final VoidCallback? onLeft;
+  final VoidCallback? onRight;
 
   const _NavIconButton({
+    this.focusNode,
     required this.icon,
     required this.label,
     required this.onTap,
+    this.onDown,
+    this.onLeft,
+    this.onRight,
   });
 
   @override
@@ -223,11 +308,28 @@ class _NavIconButtonState extends State<_NavIconButton> {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      focusNode: widget.focusNode,
       onFocusChange: (focused) => setState(() => _isFocused = focused),
-      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(
-        event,
-        onActivate: widget.onTap,
-      ),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onDown != null) {
+            widget.onDown!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft && widget.onLeft != null) {
+            widget.onLeft!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight && widget.onRight != null) {
+            widget.onRight!();
+            return KeyEventResult.handled;
+          }
+        }
+        return TvShortcuts.handleKeyEvent(
+          event,
+          onActivate: widget.onTap,
+        );
+      },
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedScale(

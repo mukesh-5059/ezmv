@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../../theme.dart';
 import '../tv_focus_button.dart';
@@ -22,6 +23,10 @@ class TvBillboard extends StatefulWidget {
   final bool isVisible;
   final void Function(MovieSummary movie) onPlay;
   final void Function(MovieSummary movie) onDetails;
+  final FocusNode? playButtonFocusNode;
+  final FocusNode? detailsButtonFocusNode;
+  final VoidCallback? onNavigateUp;
+  final VoidCallback? onNavigateDown;
 
   const TvBillboard({
     super.key,
@@ -29,6 +34,10 @@ class TvBillboard extends StatefulWidget {
     this.isVisible = true,
     required this.onPlay,
     required this.onDetails,
+    this.playButtonFocusNode,
+    this.detailsButtonFocusNode,
+    this.onNavigateUp,
+    this.onNavigateDown,
   });
 
   @override
@@ -45,13 +54,16 @@ class _TvBillboardState extends State<TvBillboard> {
   final FocusNode _playButtonFocusNode = FocusNode();
   final FocusNode _detailsButtonFocusNode = FocusNode();
 
+  FocusNode get _effectivePlayButtonNode => widget.playButtonFocusNode ?? _playButtonFocusNode;
+  FocusNode get _effectiveDetailsButtonNode => widget.detailsButtonFocusNode ?? _detailsButtonFocusNode;
+
   @override
   void initState() {
     super.initState();
     _computeFeaturedMovies();
     _billboardScopeNode.addListener(_onFocusScopeChange);
-    _playButtonFocusNode.addListener(_onFocusScopeChange);
-    _detailsButtonFocusNode.addListener(_onFocusScopeChange);
+    _effectivePlayButtonNode.addListener(_onFocusScopeChange);
+    _effectiveDetailsButtonNode.addListener(_onFocusScopeChange);
     _resetTimer();
   }
 
@@ -60,6 +72,13 @@ class _TvBillboardState extends State<TvBillboard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.lanes != widget.lanes) {
       _computeFeaturedMovies();
+    }
+    if (oldWidget.playButtonFocusNode != widget.playButtonFocusNode ||
+        oldWidget.detailsButtonFocusNode != widget.detailsButtonFocusNode) {
+      oldWidget.playButtonFocusNode?.removeListener(_onFocusScopeChange);
+      oldWidget.detailsButtonFocusNode?.removeListener(_onFocusScopeChange);
+      _effectivePlayButtonNode.addListener(_onFocusScopeChange);
+      _effectiveDetailsButtonNode.addListener(_onFocusScopeChange);
     }
     if (oldWidget.isVisible != widget.isVisible) {
       if (widget.isVisible) {
@@ -74,8 +93,8 @@ class _TvBillboardState extends State<TvBillboard> {
   void dispose() {
     _stopTimer();
     _billboardScopeNode.removeListener(_onFocusScopeChange);
-    _playButtonFocusNode.removeListener(_onFocusScopeChange);
-    _detailsButtonFocusNode.removeListener(_onFocusScopeChange);
+    _effectivePlayButtonNode.removeListener(_onFocusScopeChange);
+    _effectiveDetailsButtonNode.removeListener(_onFocusScopeChange);
     _billboardScopeNode.dispose();
     _playButtonFocusNode.dispose();
     _detailsButtonFocusNode.dispose();
@@ -84,8 +103,8 @@ class _TvBillboardState extends State<TvBillboard> {
 
   void _onFocusScopeChange() {
     final hasFocusNow = _billboardScopeNode.hasFocus ||
-        _playButtonFocusNode.hasFocus ||
-        _detailsButtonFocusNode.hasFocus;
+        _effectivePlayButtonNode.hasFocus ||
+        _effectiveDetailsButtonNode.hasFocus;
 
     if (_hasFocus != hasFocusNow) {
       setState(() => _hasFocus = hasFocusNow);
@@ -447,19 +466,46 @@ class _TvBillboardState extends State<TvBillboard> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TvFocusButton(
-                        focusNode: _playButtonFocusNode,
+                        focusNode: _effectivePlayButtonNode,
+                        autofocus: true,
                         label: 'Play Now',
                         icon: Icons.play_arrow_rounded,
                         isPrimary: true,
                         onPressed: () => widget.onPlay(movie),
+                        onKeyEvent: (node, event) {
+                          if (event is KeyDownEvent) {
+                            if (event.logicalKey == LogicalKeyboardKey.arrowUp && widget.onNavigateUp != null) {
+                              widget.onNavigateUp!();
+                              return KeyEventResult.handled;
+                            }
+                            if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onNavigateDown != null) {
+                              widget.onNavigateDown!();
+                              return KeyEventResult.handled;
+                            }
+                          }
+                          return KeyEventResult.ignored;
+                        },
                       ),
                       const SizedBox(width: 16),
                       TvFocusButton(
-                        focusNode: _detailsButtonFocusNode,
+                        focusNode: _effectiveDetailsButtonNode,
                         label: 'Details',
                         icon: Icons.info_outline_rounded,
                         isPrimary: false,
                         onPressed: () => widget.onDetails(movie),
+                        onKeyEvent: (node, event) {
+                          if (event is KeyDownEvent) {
+                            if (event.logicalKey == LogicalKeyboardKey.arrowUp && widget.onNavigateUp != null) {
+                              widget.onNavigateUp!();
+                              return KeyEventResult.handled;
+                            }
+                            if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onNavigateDown != null) {
+                              widget.onNavigateDown!();
+                              return KeyEventResult.handled;
+                            }
+                          }
+                          return KeyEventResult.ignored;
+                        },
                       ),
                     ],
                   ),

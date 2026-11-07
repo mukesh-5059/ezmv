@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
@@ -6,42 +5,171 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme.dart';
 import '../widgets/tv_focus_button.dart';
 import '../widgets/tv_focus_card.dart';
+import '../widgets/tv_pill_chip.dart';
+import '../widgets/tv_shortcuts.dart';
 import 'details_screen.dart';
 
+enum SearchFilterDimension {
+  type,
+  genre,
+  year,
+  rating,
+  sort,
+}
+
+/// 10-Foot TV Search Screen with 70/30 Filter Layout.
+///
+/// Features:
+/// - 70/30 Split Layout:
+///   - Left 70%: 5-column virtualized movie search grid (full width when no strip is active).
+///   - Right 30%: Vertical filter strip for active filter dimension (with checkmarks, autofocus, D-pad Left/Back dismissal).
+/// - Top Control Bar:
+///   - Search input text field with high-contrast TV focus state. Pressing Enter/Select triggers native TV IME keyboard.
+///   - Search history row: Horizontal list of recently searched query chips + "Clear History" action.
+///   - Filter pills row: Type (All/Movie/TV), Genre, Year, Rating, Sort By, and Clear Filters button.
+/// - Remote Back-Key Hierarchy:
+///   - Priority 1: Strip open -> Close strip & refocus active pill chip.
+///   - Priority 2: Scrolled down (offset > 20) -> Smooth-scroll to row 0 & focus search bar.
+///   - Priority 3: At row 0 & no strip -> Exit / pop screen.
+/// - Data & Pagination:
+///   - Query via `ApiClient.instance.search(query, type: ..., genre: ..., year: ..., minRating: ...)`.
+///   - Infinite scroll pagination: Lookahead prefetch when scrolling past 80% (or index >= items.length - 15).
+///   - Skeletons during fetch and clear "End of Catalog" indicator when hasMore == false.
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  final ApiClient? apiClient;
+  final void Function(MovieSummary movie)? onMovieSelected;
+
+  const SearchScreen({
+    super.key,
+    this.apiClient,
+    this.onMovieSelected,
+  });
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
 class _SearchScreenState extends State<SearchScreen> {
+  late final ApiClient _apiClient;
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _gridScrollController = ScrollController();
+
+  // Control bar focus nodes
+  final FocusNode _backButtonFocusNode = FocusNode();
   late final FocusNode _textFieldFocusNode;
-  final FocusNode _submitSearchFocusNode = FocusNode();
   final FocusNode _clearSearchFocusNode = FocusNode();
+  final FocusNode _clearHistoryFocusNode = FocusNode();
 
+  // Filter pill focus nodes
+  final FocusNode _typePillFocusNode = FocusNode();
+  final FocusNode _genrePillFocusNode = FocusNode();
+  final FocusNode _yearPillFocusNode = FocusNode();
+  final FocusNode _ratingPillFocusNode = FocusNode();
+  final FocusNode _sortPillFocusNode = FocusNode();
+  final FocusNode _clearFiltersFocusNode = FocusNode();
+
+  FocusNode? _lastFocusedPillNode;
+
+  // Search History state
   List<String> _history = [];
-  List<MovieSummary> _movies = [];
-  List<TraktListSummary> _traktLists = [];
-  TraktListSummary? _selectedList;
-
-  int _page = 1;
-  bool _isLoading = false;
-  bool _isLoadingMore = false;
-  bool _hasMore = true;
-
   static const String _historyKey = 'tv_search_history';
+
+  // Filter selections
+  String _selectedType = 'All';
+  String _selectedGenre = 'All';
+  String _selectedYear = 'All';
+  String _selectedRating = 'All';
+  String _selectedSort = 'Popular';
+
+  // Active filter dimension strip
+  SearchFilterDimension? _activeFilterDimension;
+
+  // Data & Pagination state
+  final List<MovieSummary> _items = [];
+  int _currentPage = 1;
+  bool _hasMore = false;
+  bool _isLoading = false;
+  bool _isFetchingMore = false;
+  String? _errorMessage;
+  bool _hasSearched = false;
+
+  static const List<String> _typeOptions = ['All', 'Movies', 'TV'];
+
+  static const List<String> _genreOptions = [
+    'All',
+    'Action',
+    'Adventure',
+    'Animation',
+    'Anime',
+    'Biography',
+    'Comedy',
+    'Crime',
+    'Documentary',
+    'Drama',
+    'Family',
+    'Fantasy',
+    'History',
+    'Horror',
+    'Music',
+    'Mystery',
+    'Romance',
+    'Sci-Fi',
+    'Sports',
+    'Thriller',
+    'War',
+  ];
+
+  static const List<String> _yearOptions = [
+    'All',
+    '2024',
+    '2023',
+    '2022',
+    '2020s',
+    '2010s',
+    '2000s',
+    '90s',
+    'classic',
+  ];
+
+  static const List<String> _ratingOptions = [
+    'All',
+    '9.0+',
+    '8.0+',
+    '7.0+',
+    '6.0+',
+  ];
+
+  static const List<String> _sortOptions = [
+    'Popular',
+    'Top Rated',
+    'Newest',
+    'Oldest',
+    'Title',
+  ];
 
   @override
   void initState() {
     super.initState();
+    _apiClient = widget.apiClient ?? ApiClient.instance;
+
     _textFieldFocusNode = FocusNode(
       onKeyEvent: (node, event) {
         if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.escape ||
+              event.logicalKey == LogicalKeyboardKey.goBack) {
+            _handleBack();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            _backButtonFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            _submitSearchFocusNode.requestFocus();
+            if (_history.isNotEmpty) {
+              FocusScope.of(context).nextFocus();
+            } else {
+              _typePillFocusNode.requestFocus();
+            }
             return KeyEventResult.handled;
           }
         }
@@ -51,15 +179,28 @@ class _SearchScreenState extends State<SearchScreen> {
 
     _loadHistory();
     _gridScrollController.addListener(_onScroll);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _textFieldFocusNode.requestFocus();
+      }
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     _gridScrollController.dispose();
+    _backButtonFocusNode.dispose();
     _textFieldFocusNode.dispose();
-    _submitSearchFocusNode.dispose();
     _clearSearchFocusNode.dispose();
+    _clearHistoryFocusNode.dispose();
+    _typePillFocusNode.dispose();
+    _genrePillFocusNode.dispose();
+    _yearPillFocusNode.dispose();
+    _ratingPillFocusNode.dispose();
+    _sortPillFocusNode.dispose();
+    _clearFiltersFocusNode.dispose();
     super.dispose();
   }
 
@@ -80,122 +221,301 @@ class _SearchScreenState extends State<SearchScreen> {
     if (mounted) setState(() => _history = list);
   }
 
+  Future<void> _clearHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_historyKey);
+    if (mounted) setState(() => _history = []);
+  }
+
+  String? _mapTypeParam() {
+    if (_selectedType == 'Movies') return 'movie';
+    if (_selectedType == 'TV') return 'tv';
+    return null;
+  }
+
+  String? _mapGenreParam() {
+    if (_selectedGenre == 'All') return null;
+    return _selectedGenre.toLowerCase();
+  }
+
+  int? _mapYearParam() {
+    if (_selectedYear == 'All') return null;
+    if (_selectedYear == '2020s') return 2020;
+    if (_selectedYear == '2010s') return 2010;
+    if (_selectedYear == '2000s') return 2000;
+    if (_selectedYear == '90s') return 1990;
+    if (_selectedYear == 'classic') return 1980;
+    return int.tryParse(_selectedYear);
+  }
+
+  double? _mapRatingParam() {
+    if (_selectedRating == 'All') return null;
+    return double.tryParse(_selectedRating.replaceAll('+', ''));
+  }
+
   void _onScroll() {
-    if (_gridScrollController.position.pixels >=
-        _gridScrollController.position.maxScrollExtent - 400) {
-      if (!_isLoading && !_isLoadingMore && _hasMore) {
-        _fetchNextPage();
+    if (!_gridScrollController.hasClients) return;
+    final maxScroll = _gridScrollController.position.maxScrollExtent;
+    final currentScroll = _gridScrollController.position.pixels;
+    // Fetch next page when user scrolls past 80%
+    if (maxScroll > 0 && currentScroll >= maxScroll * 0.8) {
+      if (!_isLoading && !_isFetchingMore && _hasMore) {
+        _fetchMore();
       }
     }
   }
 
-  Future<void> _executeSearch({bool resetPage = true}) async {
-    if (resetPage) {
-      _page = 1;
-      _hasMore = true;
-      _selectedList = null;
+  void _onCardFocused(int index) {
+    if (index >= _items.length - 15 && _hasMore && !_isFetchingMore && !_isLoading) {
+      _fetchMore();
     }
+  }
 
+  Future<void> _executeSearch({bool reset = true}) async {
     final query = _searchController.text.trim();
     if (query.isEmpty) {
       setState(() {
-        _movies = [];
-        _traktLists = [];
+        _items.clear();
         _isLoading = false;
+        _hasMore = false;
+        _hasSearched = false;
+        _errorMessage = null;
       });
       return;
     }
 
     _saveHistory(query);
-    setState(() => _isLoading = true);
 
-    try {
-      final movieResp = await ApiClient.instance.search(query, page: 1);
-      if (mounted) {
-        setState(() {
-          _movies = movieResp.items;
-          _isLoading = false;
-          _hasMore = movieResp.hasMore;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+    if (reset) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+        _items.clear();
+        _currentPage = 1;
+        _hasMore = false;
+        _hasSearched = true;
+      });
     }
 
     try {
-      final listResp = await ApiClient.instance.searchLists(query, page: 1);
-      if (mounted) {
-        setState(() {
-          _traktLists = listResp.items;
-        });
-      }
-    } catch (_) {
-      // Ignored: list search failure or rate-limiting should not affect movie results
-    }
-  }
+      final response = await _apiClient.search(
+        query,
+        page: 1,
+        type: _mapTypeParam(),
+        genre: _mapGenreParam(),
+        year: _mapYearParam(),
+        minRating: _mapRatingParam(),
+      );
 
-  Future<void> _fetchNextPage() async {
-    if (_isLoadingMore || !_hasMore) return;
-    setState(() => _isLoadingMore = true);
+      if (!mounted) return;
 
-    try {
-      final nextPage = _page + 1;
-      final query = _searchController.text.trim();
+      var resultItems = response.items;
+      _applySort(resultItems);
 
-      if (_selectedList != null) {
-        final resp = await ApiClient.instance.getListItems(_selectedList!.id, page: nextPage);
-        if (mounted) {
-          setState(() {
-            _page = nextPage;
-            _movies.addAll(resp.items);
-            _hasMore = resp.hasMore;
-            _isLoadingMore = false;
-          });
-        }
-      } else {
-        final resp = await ApiClient.instance.search(query, page: nextPage);
-        if (mounted) {
-          setState(() {
-            _page = nextPage;
-            _movies.addAll(resp.items);
-            _hasMore = resp.hasMore;
-            _isLoadingMore = false;
-          });
-        }
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoadingMore = false);
+      setState(() {
+        _isLoading = false;
+        _currentPage = response.page;
+        _hasMore = response.hasMore;
+        if (reset) _items.clear();
+        _items.addAll(resultItems);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.toString();
+      });
     }
   }
 
-  Future<void> _selectList(TraktListSummary? list) async {
-    if (list == null) {
-      _executeSearch(resetPage: true);
+  Future<void> _fetchMore() async {
+    if (_isFetchingMore || !_hasMore || _isLoading) return;
+
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return;
+
+    setState(() => _isFetchingMore = true);
+
+    try {
+      final nextPage = _currentPage + 1;
+      final response = await _apiClient.search(
+        query,
+        page: nextPage,
+        type: _mapTypeParam(),
+        genre: _mapGenreParam(),
+        year: _mapYearParam(),
+        minRating: _mapRatingParam(),
+      );
+
+      if (!mounted) return;
+
+      var resultItems = response.items;
+      _applySort(resultItems);
+
+      setState(() {
+        _isFetchingMore = false;
+        _currentPage = response.page;
+        _hasMore = response.hasMore;
+        _items.addAll(resultItems);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isFetchingMore = false);
+    }
+  }
+
+  void _applySort(List<MovieSummary> items) {
+    switch (_selectedSort) {
+      case 'Top Rated':
+        items.sort((a, b) => b.ratingScore.compareTo(a.ratingScore));
+        break;
+      case 'Newest':
+        items.sort((a, b) => b.year.compareTo(a.year));
+        break;
+      case 'Oldest':
+        items.sort((a, b) => a.year.compareTo(b.year));
+        break;
+      case 'Title':
+        items.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+        break;
+      case 'Popular':
+      default:
+        break;
+    }
+  }
+
+  void _handleBack() {
+    // Priority 1: Dismiss active filter strip
+    if (_activeFilterDimension != null) {
+      setState(() => _activeFilterDimension = null);
+      _lastFocusedPillNode?.requestFocus();
       return;
     }
 
+    // Priority 2: Jump to Row 0 if scrolled down
+    if (_gridScrollController.hasClients && _gridScrollController.offset > 20) {
+      _gridScrollController.jumpTo(0);
+      _textFieldFocusNode.requestFocus();
+      return;
+    }
+
+    // Priority 3: Pop screen and return to previous route
+    Navigator.of(context).pop();
+  }
+
+  void _clearFilters() {
+    final hasFilterChanges = _selectedType != 'All' ||
+        _selectedGenre != 'All' ||
+        _selectedYear != 'All' ||
+        _selectedRating != 'All' ||
+        _selectedSort != 'Popular';
+
+    if (!hasFilterChanges && _items.isNotEmpty) return;
+
     setState(() {
-      _selectedList = list;
-      _isLoading = true;
-      _page = 1;
-      _hasMore = true;
+      _selectedType = 'All';
+      _selectedGenre = 'All';
+      _selectedYear = 'All';
+      _selectedRating = 'All';
+      _selectedSort = 'Popular';
+      _activeFilterDimension = null;
     });
 
-    try {
-      final resp = await ApiClient.instance.getListItems(list.id, page: 1);
-      if (mounted) {
-        setState(() {
-          _movies = resp.items;
-          _isLoading = false;
-          _hasMore = resp.hasMore;
-        });
+    if (_searchController.text.trim().isNotEmpty) {
+      _executeSearch(reset: true);
+    }
+  }
+
+  void _openFilterStrip(SearchFilterDimension dimension, FocusNode pillNode) {
+    setState(() {
+      _activeFilterDimension = dimension;
+      _lastFocusedPillNode = pillNode;
+    });
+  }
+
+  void _closeFilterStrip() {
+    setState(() => _activeFilterDimension = null);
+    _lastFocusedPillNode?.requestFocus();
+  }
+
+  void _applyFilterOption(SearchFilterDimension dimension, String option) {
+    setState(() {
+      switch (dimension) {
+        case SearchFilterDimension.type:
+          _selectedType = option;
+          break;
+        case SearchFilterDimension.genre:
+          _selectedGenre = option;
+          break;
+        case SearchFilterDimension.year:
+          _selectedYear = option;
+          break;
+        case SearchFilterDimension.rating:
+          _selectedRating = option;
+          break;
+        case SearchFilterDimension.sort:
+          _selectedSort = option;
+          break;
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      _activeFilterDimension = null;
+    });
+
+    _lastFocusedPillNode?.requestFocus();
+    if (_searchController.text.trim().isNotEmpty) {
+      _executeSearch(reset: true);
+    }
+  }
+
+  List<String> _getFilterStripOptions(SearchFilterDimension dimension) {
+    switch (dimension) {
+      case SearchFilterDimension.type:
+        return _typeOptions;
+      case SearchFilterDimension.genre:
+        return _genreOptions;
+      case SearchFilterDimension.year:
+        return _yearOptions;
+      case SearchFilterDimension.rating:
+        return _ratingOptions;
+      case SearchFilterDimension.sort:
+        return _sortOptions;
+    }
+  }
+
+  String _getFilterStripTitle(SearchFilterDimension dimension) {
+    switch (dimension) {
+      case SearchFilterDimension.type:
+        return 'Media Type';
+      case SearchFilterDimension.genre:
+        return 'Genre';
+      case SearchFilterDimension.year:
+        return 'Release Year';
+      case SearchFilterDimension.rating:
+        return 'Minimum Rating';
+      case SearchFilterDimension.sort:
+        return 'Sort By';
+    }
+  }
+
+  String _getCurrentFilterValue(SearchFilterDimension dimension) {
+    switch (dimension) {
+      case SearchFilterDimension.type:
+        return _selectedType;
+      case SearchFilterDimension.genre:
+        return _selectedGenre;
+      case SearchFilterDimension.year:
+        return _selectedYear;
+      case SearchFilterDimension.rating:
+        return _selectedRating;
+      case SearchFilterDimension.sort:
+        return _selectedSort;
     }
   }
 
   void _navigateToDetails(MovieSummary movie) {
+    if (widget.onMovieSelected != null) {
+      widget.onMovieSelected!(movie);
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DetailsScreen(
@@ -209,230 +529,735 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: TVTheme.background,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: TVTheme.overscanMargin,
-            vertical: 24,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Search Header Row
-              _buildSearchHeader(),
-              const SizedBox(height: 16),
+    final isStripOpen = _activeFilterDimension != null;
 
-              // Search History / Suggestions Row
-              if (_history.isNotEmpty && _movies.isEmpty && !_isLoading) ...[
-                _buildHistoryRow(),
-                const SizedBox(height: 16),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleBack();
+      },
+      child: Scaffold(
+        backgroundColor: TVTheme.background,
+        body: Focus(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.escape ||
+                  event.logicalKey == LogicalKeyboardKey.backspace ||
+                  event.logicalKey == LogicalKeyboardKey.goBack) {
+                _handleBack();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(48, 28, 48, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildSearchHeaderRow(),
+                if (_history.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _buildSearchHistoryRow(),
+                ],
+                const SizedBox(height: 14),
+                _buildFilterPillsRow(),
+                const SizedBox(height: 18),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Left Area: 5-column Movie Grid (70% when strip is open, 100% when closed)
+                      Expanded(
+                        flex: isStripOpen ? 7 : 10,
+                        child: _buildGridArea(),
+                      ),
+                      // Right Area: 30% Vertical Filter Strip
+                      if (isStripOpen) ...[
+                        const SizedBox(width: 24),
+                        Expanded(
+                          flex: 3,
+                          child: _buildFilterStrip(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ],
-
-              // Trakt Lists Shelf (if query returned lists)
-              if (_traktLists.isNotEmpty) ...[
-                _buildListsShelf(),
-                const SizedBox(height: 16),
-              ],
-
-              // Results Grid
-              Expanded(
-                child: _isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: TVTheme.primary),
-                      )
-                    : _movies.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.search, size: 56, color: TVTheme.textMuted),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _searchController.text.trim().isEmpty
-                                      ? 'Type a title, actor, or genre above to search.'
-                                      : 'No titles found matching "${_searchController.text.trim()}".',
-                                  style: const TextStyle(color: TVTheme.textSecondary, fontSize: 16),
-                                ),
-                              ],
-                            ),
-                          )
-                        : _buildMovieGrid(),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSearchHeader() {
+  Widget _buildSearchHeaderRow() {
     return Row(
       children: [
-        IconButton(
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+        TvFocusButton(
+          focusNode: _backButtonFocusNode,
+          label: 'Back',
+          icon: Icons.arrow_back_rounded,
+          isPrimary: false,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          onPressed: _handleBack,
         ),
         const SizedBox(width: 16),
         Expanded(
-          child: TextField(
+          child: _TvSearchInputField(
             controller: _searchController,
             focusNode: _textFieldFocusNode,
             autofocus: true,
-            style: const TextStyle(fontSize: 18, color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'Search movies, TV shows, lists...',
-              hintStyle: const TextStyle(color: TVTheme.textMuted),
-              filled: true,
-              fillColor: TVTheme.surface,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              border: OutlineInputBorder(
-                borderRadius: TVTheme.borderRadiusMd,
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: TVTheme.borderRadiusMd,
-                borderSide: const BorderSide(color: Colors.white, width: 2),
-              ),
-            ),
-            onSubmitted: (q) => _executeSearch(resetPage: true),
+            hintText: 'Search movies, TV shows, actors...',
+            onSubmitted: (q) => _executeSearch(reset: true),
           ),
         ),
         const SizedBox(width: 16),
         TvFocusButton(
-          focusNode: _submitSearchFocusNode,
           label: 'Search',
+          icon: Icons.search_rounded,
           isPrimary: true,
-          icon: Icons.search,
-          onPressed: () => _executeSearch(resetPage: true),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          onPressed: () => _executeSearch(reset: true),
         ),
-        const SizedBox(width: 12),
-        if (_searchController.text.isNotEmpty)
+        if (_searchController.text.isNotEmpty) ...[
+          const SizedBox(width: 12),
           TvFocusButton(
             focusNode: _clearSearchFocusNode,
             label: 'Clear',
+            icon: Icons.close_rounded,
             isPrimary: false,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             onPressed: () {
               _searchController.clear();
               setState(() {
-                _movies = [];
-                _traktLists = [];
-                _selectedList = null;
+                _items.clear();
+                _hasSearched = false;
+                _errorMessage = null;
               });
               _textFieldFocusNode.requestFocus();
             },
           ),
+        ],
       ],
     );
   }
 
-  Widget _buildHistoryRow() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildSearchHistoryRow() {
+    return Row(
       children: [
+        const Icon(Icons.history_rounded, size: 16, color: TVTheme.textMuted),
+        const SizedBox(width: 8),
         const Text(
-          'Recent Searches',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white70),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 40,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _history.length,
-            itemBuilder: (ctx, idx) {
-              final item = _history[idx];
-              return Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: TvFocusButton(
-                  label: item,
-                  isPrimary: false,
-                  fontSize: 13,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  onPressed: () {
-                    _searchController.text = item;
-                    _executeSearch(resetPage: true);
-                  },
-                ),
-              );
-            },
+          'Recent:',
+          style: TextStyle(
+            color: TVTheme.textMuted,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
           ),
         ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final query in _history) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: TvPillChip(
+                      label: query,
+                      isSelected: false,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      onTap: () {
+                        _searchController.text = query;
+                        _executeSearch(reset: true);
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        TvFocusButton(
+          focusNode: _clearHistoryFocusNode,
+          label: 'Clear History',
+          icon: Icons.delete_sweep_rounded,
+          isPrimary: false,
+          fontSize: 12,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          onPressed: _clearHistory,
+        ),
       ],
     );
   }
 
-  Widget _buildListsShelf() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildFilterPillsRow() {
+    final isTypeOpen = _activeFilterDimension == SearchFilterDimension.type;
+    final isGenreOpen = _activeFilterDimension == SearchFilterDimension.genre;
+    final isYearOpen = _activeFilterDimension == SearchFilterDimension.year;
+    final isRatingOpen = _activeFilterDimension == SearchFilterDimension.rating;
+    final isSortOpen = _activeFilterDimension == SearchFilterDimension.sort;
+
+    return Row(
       children: [
-        Row(
-          children: [
-            const Text(
-              'Matched Trakt Lists',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            if (_selectedList != null) ...[
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: () => _selectList(null),
-                child: const Text(
-                  '(Show All Direct Results)',
-                  style: TextStyle(color: TVTheme.primary, fontSize: 13),
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                TvPillChip(
+                  focusNode: _typePillFocusNode,
+                  label: _selectedType == 'All' ? 'Type' : 'Type: $_selectedType',
+                  isSelected: _selectedType != 'All' || isTypeOpen,
+                  onTap: () => _openFilterStrip(SearchFilterDimension.type, _typePillFocusNode),
                 ),
+                const SizedBox(width: 12),
+                TvPillChip(
+                  focusNode: _genrePillFocusNode,
+                  label: _selectedGenre == 'All' ? 'Genre' : 'Genre: $_selectedGenre',
+                  isSelected: _selectedGenre != 'All' || isGenreOpen,
+                  onTap: () => _openFilterStrip(SearchFilterDimension.genre, _genrePillFocusNode),
+                ),
+                const SizedBox(width: 12),
+                TvPillChip(
+                  focusNode: _yearPillFocusNode,
+                  label: _selectedYear == 'All' ? 'Year' : 'Year: $_selectedYear',
+                  isSelected: _selectedYear != 'All' || isYearOpen,
+                  onTap: () => _openFilterStrip(SearchFilterDimension.year, _yearPillFocusNode),
+                ),
+                const SizedBox(width: 12),
+                TvPillChip(
+                  focusNode: _ratingPillFocusNode,
+                  label: _selectedRating == 'All' ? 'Rating' : 'Rating: $_selectedRating',
+                  isSelected: _selectedRating != 'All' || isRatingOpen,
+                  onTap: () => _openFilterStrip(SearchFilterDimension.rating, _ratingPillFocusNode),
+                ),
+                const SizedBox(width: 12),
+                TvPillChip(
+                  focusNode: _sortPillFocusNode,
+                  label: _selectedSort == 'Popular' ? 'Sort' : 'Sort: $_selectedSort',
+                  isSelected: _selectedSort != 'Popular' || isSortOpen,
+                  onTap: () => _openFilterStrip(SearchFilterDimension.sort, _sortPillFocusNode),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        TvFocusButton(
+          focusNode: _clearFiltersFocusNode,
+          label: 'Clear Filters',
+          icon: Icons.clear_rounded,
+          isPrimary: false,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          fontSize: 13,
+          onPressed: _clearFilters,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGridArea() {
+    if (_isLoading && _items.isEmpty) {
+      return _buildSkeletonGrid();
+    }
+
+    if (_errorMessage != null && _items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline_rounded, size: 48, color: TVTheme.primary),
+            const SizedBox(height: 16),
+            Text(
+              'Failed to search catalog: $_errorMessage',
+              style: const TextStyle(color: TVTheme.textSecondary, fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            TvFocusButton(
+              label: 'Retry',
+              icon: Icons.refresh_rounded,
+              onPressed: () => _executeSearch(reset: true),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_items.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _hasSearched ? Icons.search_off_rounded : Icons.search_rounded,
+              size: 56,
+              color: TVTheme.textMuted,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _hasSearched
+                  ? 'No titles found matching "${_searchController.text.trim()}".'
+                  : 'Search movies, TV shows, and actors using the search bar above.',
+              style: const TextStyle(color: TVTheme.textSecondary, fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            if (_hasSearched) ...[
+              const SizedBox(height: 20),
+              TvFocusButton(
+                label: 'Reset Filters',
+                icon: Icons.filter_alt_off_rounded,
+                isPrimary: false,
+                onPressed: _clearFilters,
               ),
             ],
           ],
         ),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 44,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _traktLists.length,
-            itemBuilder: (ctx, idx) {
-              final list = _traktLists[idx];
-              final isSelected = _selectedList?.id == list.id;
-              return Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: TvFocusButton(
-                  label: '${list.name} (${list.itemCount})',
-                  isPrimary: isSelected,
-                  fontSize: 13,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  onPressed: () => _selectList(isSelected ? null : list),
+      );
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: GridView.builder(
+            key: const PageStorageKey('tv_search_grid'),
+            controller: _gridScrollController,
+            cacheExtent: 600,
+            padding: const EdgeInsets.only(bottom: 24),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 5,
+              childAspectRatio: 150 / 225,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 16,
+            ),
+            itemCount: _items.length,
+            itemBuilder: (context, index) {
+              final movie = _items[index];
+              return FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: 162,
+                  height: 241,
+                  child: TvFocusCard(
+                    key: ValueKey('search_movie_${movie.imdbId}_$index'),
+                    posterUrl: movie.posterUrl,
+                    title: movie.title,
+                    rating: movie.ratingScore > 0 ? movie.ratingScore : null,
+                    year: movie.year.isNotEmpty ? movie.year : null,
+                    isTv: movie.isTv,
+                    width: 150,
+                    height: 225,
+                    showTitleBelow: false,
+                    onTap: () => _navigateToDetails(movie),
+                    onKeyEvent: (node, event) {
+                      if (event is KeyDownEvent) {
+                        if (event.logicalKey == LogicalKeyboardKey.escape ||
+                            event.logicalKey == LogicalKeyboardKey.backspace ||
+                            event.logicalKey == LogicalKeyboardKey.goBack) {
+                          _handleBack();
+                          return KeyEventResult.handled;
+                        }
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                    onFocusChanged: (focused) {
+                      if (focused) {
+                        _onCardFocused(index);
+                      }
+                    },
+                  ),
                 ),
               );
             },
           ),
         ),
+        if (_isFetchingMore)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            alignment: Alignment.center,
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
+                ),
+                SizedBox(width: 10),
+                Text(
+                  'Loading more titles...',
+                  style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                ),
+              ],
+            ),
+          )
+        else if (!_hasMore && _items.isNotEmpty)
+          _buildEndOfCatalogBanner(),
       ],
     );
   }
 
-  Widget _buildMovieGrid() {
+  Widget _buildSkeletonGrid() {
     return GridView.builder(
-      controller: _gridScrollController,
+      physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 6,
-        childAspectRatio: 0.58,
+        crossAxisCount: 5,
+        childAspectRatio: 150 / 225,
         crossAxisSpacing: 16,
-        mainAxisSpacing: 20,
+        mainAxisSpacing: 16,
       ),
-      itemCount: _movies.length,
-      itemBuilder: (context, index) {
-        final movie = _movies[index];
-        return TvFocusCard(
-          posterUrl: movie.posterUrl,
-          title: movie.title,
-          rating: movie.ratingScore > 0 ? movie.ratingScore : null,
-          year: movie.year.isNotEmpty ? movie.year : null,
-          isTv: movie.isTv,
-          showTitleBelow: true,
-          onTap: () => _navigateToDetails(movie),
-        );
+      itemCount: 10,
+      itemBuilder: (context, index) => Focus(
+        canRequestFocus: false,
+        descendantsAreFocusable: false,
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: Container(
+            width: 150,
+            height: 225,
+            decoration: BoxDecoration(
+              color: TVTheme.surfaceElevated,
+              borderRadius: TVTheme.borderRadiusMd,
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.movie_filter_outlined,
+                size: 40,
+                color: TVTheme.surface,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEndOfCatalogBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      alignment: Alignment.center,
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(width: 48, child: Divider(color: TVTheme.surfaceElevated, thickness: 1)),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'End of Catalog',
+              style: TextStyle(
+                color: TVTheme.textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          SizedBox(width: 48, child: Divider(color: TVTheme.surfaceElevated, thickness: 1)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterStrip() {
+    final dimension = _activeFilterDimension!;
+    final title = _getFilterStripTitle(dimension);
+    final options = _getFilterStripOptions(dimension);
+    final selectedOption = _getCurrentFilterValue(dimension);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: TVTheme.surface,
+        borderRadius: TVTheme.borderRadiusMd,
+        border: Border.all(
+          color: TVTheme.surfaceElevated,
+          width: 1.5,
+        ),
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: TVTheme.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                '‹ Back',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: TVTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: TVTheme.surfaceElevated, height: 1),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView.separated(
+              itemCount: options.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final option = options[index];
+                final isSelected = option == selectedOption;
+                return _FilterOptionTile(
+                  key: ValueKey('search_filter_option_${dimension.name}_$option'),
+                  label: option,
+                  isSelected: isSelected,
+                  autofocus: isSelected,
+                  onSelect: () => _applyFilterOption(dimension, option),
+                  onDismiss: _closeFilterStrip,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TvSearchInputField extends StatefulWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool autofocus;
+  final String hintText;
+  final ValueChanged<String> onSubmitted;
+
+  const _TvSearchInputField({
+    required this.controller,
+    required this.focusNode,
+    this.autofocus = true,
+    required this.hintText,
+    required this.onSubmitted,
+  });
+
+  @override
+  State<_TvSearchInputField> createState() => _TvSearchInputFieldState();
+}
+
+class _TvSearchInputFieldState extends State<_TvSearchInputField> {
+  bool _isFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isFocused = widget.focusNode.hasFocus;
+    widget.focusNode.addListener(_onFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant _TvSearchInputField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_onFocusChange);
+      widget.focusNode.addListener(_onFocusChange);
+      _isFocused = widget.focusNode.hasFocus;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_onFocusChange);
+    super.dispose();
+  }
+
+  void _onFocusChange() {
+    if (_isFocused != widget.focusNode.hasFocus && mounted) {
+      setState(() => _isFocused = widget.focusNode.hasFocus);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: TVTheme.focusDuration,
+      curve: TVTheme.focusCurve,
+      decoration: BoxDecoration(
+        color: TVTheme.surface,
+        borderRadius: TVTheme.borderRadiusMd,
+        border: Border.all(
+          color: _isFocused ? Colors.white : Colors.transparent,
+          width: _isFocused ? TVTheme.focusBorderWidth : 1.0,
+        ),
+        boxShadow: _isFocused ? TVTheme.focusShadows : TVTheme.restingShadows,
+      ),
+      child: TextField(
+        controller: widget.controller,
+        focusNode: widget.focusNode,
+        autofocus: widget.autofocus,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: TVTheme.textPrimary,
+        ),
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: widget.hintText,
+          hintStyle: const TextStyle(color: TVTheme.textMuted, fontSize: 15),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          prefixIcon: const Icon(Icons.search_rounded, color: TVTheme.textMuted, size: 22),
+          border: InputBorder.none,
+        ),
+        onSubmitted: widget.onSubmitted,
+      ),
+    );
+  }
+}
+
+class _FilterOptionTile extends StatefulWidget {
+  final String label;
+  final bool isSelected;
+  final bool autofocus;
+  final VoidCallback onSelect;
+  final VoidCallback onDismiss;
+
+  const _FilterOptionTile({
+    super.key,
+    required this.label,
+    required this.isSelected,
+    required this.autofocus,
+    required this.onSelect,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_FilterOptionTile> createState() => _FilterOptionTileState();
+}
+
+class _FilterOptionTileState extends State<_FilterOptionTile> {
+  final FocusNode _focusNode = FocusNode();
+  bool _isFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isSelected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _focusNode.requestFocus();
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Color bgColor;
+    Border border;
+
+    if (_isFocused) {
+      bgColor = widget.isSelected
+          ? TVTheme.primary.withValues(alpha: 0.25)
+          : TVTheme.surfaceElevated;
+      border = Border.all(
+        color: Colors.white,
+        width: TVTheme.focusBorderWidth,
+      );
+    } else if (widget.isSelected) {
+      bgColor = TVTheme.surfaceElevated;
+      border = Border.all(
+        color: TVTheme.primary.withValues(alpha: 0.7),
+        width: 1.5,
+      );
+    } else {
+      bgColor = Colors.transparent;
+      border = Border.all(
+        color: Colors.transparent,
+        width: TVTheme.focusBorderWidth,
+      );
+    }
+
+    return Focus(
+      focusNode: _focusNode,
+      autofocus: widget.autofocus,
+      onFocusChange: (focused) {
+        setState(() => _isFocused = focused);
+        if (focused) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: Duration.zero,
+          );
+        }
       },
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
+            widget.onSelect();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+              event.logicalKey == LogicalKeyboardKey.escape ||
+              event.logicalKey == LogicalKeyboardKey.backspace ||
+              event.logicalKey == LogicalKeyboardKey.goBack) {
+            widget.onDismiss();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: widget.onSelect,
+        child: AnimatedContainer(
+          duration: TVTheme.focusDuration,
+          curve: TVTheme.focusCurve,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: TVTheme.borderRadiusMd,
+            border: border,
+            boxShadow: _isFocused ? TVTheme.focusShadows : TVTheme.restingShadows,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  widget.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: (_isFocused || widget.isSelected)
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                    color: (_isFocused || widget.isSelected)
+                        ? TVTheme.textPrimary
+                        : TVTheme.textSecondary,
+                  ),
+                ),
+              ),
+              if (widget.isSelected)
+                Icon(
+                  Icons.check_rounded,
+                  size: 20,
+                  color: _isFocused ? Colors.white : TVTheme.primary,
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

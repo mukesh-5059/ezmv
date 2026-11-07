@@ -18,6 +18,8 @@ class TvUnifiedHeaderStrip extends StatefulWidget {
   final bool autofocus;
   final EdgeInsetsGeometry padding;
   final EdgeInsetsGeometry margin;
+  final ValueChanged<bool>? onFocusChanged;
+  final KeyEventResult Function(FocusNode, KeyEvent)? onKeyEvent;
 
   const TvUnifiedHeaderStrip({
     super.key,
@@ -28,6 +30,8 @@ class TvUnifiedHeaderStrip extends StatefulWidget {
     this.autofocus = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     this.margin = const EdgeInsets.only(bottom: 6),
+    this.onFocusChanged,
+    this.onKeyEvent,
   });
 
   @override
@@ -100,7 +104,8 @@ class _TvUnifiedHeaderStripState extends State<TvUnifiedHeaderStrip> {
       ),
     );
 
-    if (!hasAction) return content;
+    final canFocus = widget.focusNode != null || hasAction;
+    if (!canFocus) return content;
 
     return Focus(
       focusNode: widget.focusNode,
@@ -110,16 +115,22 @@ class _TvUnifiedHeaderStripState extends State<TvUnifiedHeaderStrip> {
         if (focused) {
           Scrollable.ensureVisible(
             context,
-            alignment: 0.5,
-            duration: TVTheme.focusDuration,
-            curve: Curves.easeInOut,
+            alignment: 0.22,
+            duration: Duration.zero,
           );
         }
+        widget.onFocusChanged?.call(focused);
       },
-      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(
-        event,
-        onActivate: () => widget.onShowAll?.call(),
-      ),
+      onKeyEvent: (node, event) {
+        if (widget.onKeyEvent != null) {
+          final res = widget.onKeyEvent!(node, event);
+          if (res != KeyEventResult.ignored) return res;
+        }
+        return TvShortcuts.handleKeyEvent(
+          event,
+          onActivate: () => widget.onShowAll?.call(),
+        );
+      },
       child: GestureDetector(
         onTap: widget.onShowAll,
         child: AnimatedScale(

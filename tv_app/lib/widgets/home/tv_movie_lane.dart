@@ -20,12 +20,18 @@ class TvMovieLane extends StatefulWidget {
   final DashboardLane lane;
   final void Function(MovieSummary movie) onMovieTap;
   final void Function(DashboardLane lane) onShowAll;
+  final FocusNode? headerFocusNode;
+  final VoidCallback? onNavigateUpFromHeader;
+  final VoidCallback? onNavigateDownFromCard;
 
   const TvMovieLane({
     super.key,
     required this.lane,
     required this.onMovieTap,
     required this.onShowAll,
+    this.headerFocusNode,
+    this.onNavigateUpFromHeader,
+    this.onNavigateDownFromCard,
   });
 
   @override
@@ -38,6 +44,8 @@ class _TvMovieLaneState extends State<TvMovieLane>
   final ScrollController _scrollController = ScrollController();
   final List<FocusNode> _itemFocusNodes = [];
   int _lastFocusedIndex = 0;
+
+  FocusNode get _effectiveHeaderFocusNode => widget.headerFocusNode ?? _headerFocusNode;
 
   @override
   bool get wantKeepAlive => true;
@@ -60,20 +68,34 @@ class _TvMovieLaneState extends State<TvMovieLane>
   }
 
   KeyEventResult _handleHeaderKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      if (widget.lane.items.isNotEmpty) {
-        final targetIndex = _lastFocusedIndex.clamp(0, widget.lane.items.length - 1);
-        _getFocusNode(targetIndex).requestFocus();
-        return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (widget.lane.items.isNotEmpty) {
+          final targetIndex = _lastFocusedIndex.clamp(0, widget.lane.items.length - 1);
+          _getFocusNode(targetIndex).requestFocus();
+          return KeyEventResult.handled;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (widget.onNavigateUpFromHeader != null) {
+          widget.onNavigateUpFromHeader!();
+          return KeyEventResult.handled;
+        }
       }
     }
     return KeyEventResult.ignored;
   }
 
   KeyEventResult _handleCardKeyEvent(KeyEvent event, int index) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _headerFocusNode.requestFocus();
-      return KeyEventResult.handled;
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _effectiveHeaderFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (widget.onNavigateDownFromCard != null) {
+          widget.onNavigateDownFromCard!();
+          return KeyEventResult.handled;
+        }
+      }
     }
     return KeyEventResult.ignored;
   }
@@ -97,15 +119,13 @@ class _TvMovieLaneState extends State<TvMovieLane>
         // Focusable Lane Header Strip
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
-          child: Focus(
+          child: TvUnifiedHeaderStrip(
+            title: widget.lane.title,
+            count: totalCount,
+            focusNode: _effectiveHeaderFocusNode,
+            onShowAll: () => widget.onShowAll(widget.lane),
             onKeyEvent: (node, event) => _handleHeaderKeyEvent(event),
-            child: TvUnifiedHeaderStrip(
-              title: widget.lane.title,
-              count: totalCount,
-              focusNode: _headerFocusNode,
-              onShowAll: () => widget.onShowAll(widget.lane),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
         ),
         const SizedBox(height: 8),
@@ -116,6 +136,7 @@ class _TvMovieLaneState extends State<TvMovieLane>
           child: ListView.builder(
             key: PageStorageKey('lane_${widget.lane.id}'),
             controller: _scrollController,
+            cacheExtent: 320,
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
             itemCount: widget.lane.items.length,

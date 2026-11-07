@@ -20,6 +20,7 @@ class TvFocusButton extends StatefulWidget {
   final double borderRadius;
   final double fontSize;
   final ValueChanged<bool>? onFocusChanged;
+  final KeyEventResult Function(FocusNode, KeyEvent)? onKeyEvent;
 
   const TvFocusButton({
     super.key,
@@ -35,6 +36,7 @@ class TvFocusButton extends StatefulWidget {
     this.borderRadius = TVTheme.radiusMd,
     this.fontSize = 16,
     this.onFocusChanged,
+    this.onKeyEvent,
   });
 
   @override
@@ -60,16 +62,21 @@ class _TvFocusButtonState extends State<TvFocusButton> {
           Scrollable.ensureVisible(
             context,
             alignment: 0.5,
-            duration: TVTheme.focusDuration,
-            curve: Curves.easeInOut,
+            duration: Duration.zero,
           );
         }
         widget.onFocusChanged?.call(focused);
       },
-      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(
-        event,
-        onActivate: widget.onPressed,
-      ),
+      onKeyEvent: (node, event) {
+        if (widget.onKeyEvent != null) {
+          final res = widget.onKeyEvent!(node, event);
+          if (res != KeyEventResult.ignored) return res;
+        }
+        return TvShortcuts.handleKeyEvent(
+          event,
+          onActivate: widget.onPressed,
+        );
+      },
       child: GestureDetector(
         onTap: widget.onPressed,
         child: AnimatedScale(

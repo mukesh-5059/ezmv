@@ -285,13 +285,9 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
       return;
     }
 
-    // Priority 2: Smooth-scroll to Row 0 if scrolled down
+    // Priority 2: Jump to Row 0 if scrolled down
     if (_scrollController.hasClients && _scrollController.offset > 20) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-      );
+      _scrollController.jumpTo(0);
       _backButtonFocusNode.requestFocus();
       return;
     }
@@ -610,6 +606,7 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
           child: GridView.builder(
             key: PageStorageKey('lane_grid_${widget.dashboardId}_${widget.laneId}'),
             controller: _scrollController,
+            cacheExtent: 600,
             padding: const EdgeInsets.only(bottom: 24),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 5,
@@ -884,8 +881,7 @@ class _FilterOptionTileState extends State<_FilterOptionTile> {
           Scrollable.ensureVisible(
             context,
             alignment: 0.5,
-            duration: TVTheme.focusDuration,
-            curve: Curves.easeInOut,
+            duration: Duration.zero,
           );
         }
       },
