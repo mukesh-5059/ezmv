@@ -23,7 +23,7 @@ dashboardRouter.get('/:dashboard_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
-  const isRefresh = c.req.query('refresh') === 'true';
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
   const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
@@ -88,7 +88,7 @@ dashboardRouter.get('/:dashboard_id/lanes/:lane_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
-  const isRefresh = c.req.query('refresh') === 'true';
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
   const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);

@@ -6,9 +6,10 @@ import { CacheService } from '../services/cache';
 export const actorsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 actorsRouter.get('/', async (c) => {
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const actorsService = new ActorsService(c.env);
   c.header('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
-  return c.json(await actorsService.getCuratedActors());
+  return c.json(await actorsService.getCuratedActors(isRefresh));
 });
 
 actorsRouter.get('/:tmdb_id', async (c) => {
@@ -22,8 +23,9 @@ actorsRouter.get('/:tmdb_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<PersonDetailsResponse>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<PersonDetailsResponse>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {

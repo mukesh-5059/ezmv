@@ -18,8 +18,9 @@ moviesRouter.get('/tv/:tmdb_id/season/:season_number', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<TvSeasonResponse>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<TvSeasonResponse>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
@@ -55,8 +56,9 @@ moviesRouter.get('/:media_type/:tmdb_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<AdditionalMovieDetails>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<AdditionalMovieDetails>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {

@@ -36,8 +36,8 @@ export class ActorsService {
     this.config = new ConfigService(env.CONFIG_KV);
   }
 
-  async getCuratedActors(): Promise<ActorSummary[]> {
-    return this.config.getCuratedActors();
+  async getCuratedActors(refresh = false): Promise<ActorSummary[]> {
+    return this.config.getCuratedActors(refresh);
   }
 
   async getPersonDetails(personId: number, trace?: RequestTrace): Promise<PersonDetailsResponse | null> {

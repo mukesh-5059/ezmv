@@ -13,9 +13,9 @@ export class ConfigService {
     this.cache = new CacheService();
   }
 
-  private async loadConfig<T>(key: string, defaultVal: T, ttlSeconds = 3600): Promise<T> {
+  private async loadConfig<T>(key: string, defaultVal: T, ttlSeconds = 3600, refresh = false): Promise<T> {
     const cacheUrl = `https://cache.internal/config/${key}`;
-    const cached = await this.cache.get<T>(cacheUrl);
+    const cached = refresh ? null : await this.cache.get<T>(cacheUrl);
     if (cached) return cached;
 
     if (this.kv) {
@@ -33,11 +33,11 @@ export class ConfigService {
     return defaultVal;
   }
 
-  async getRatingRules(): Promise<RatingRules> {
-    return this.loadConfig<RatingRules>('rating_rules', defaultRatingRules as RatingRules);
+  async getRatingRules(refresh = false): Promise<RatingRules> {
+    return this.loadConfig<RatingRules>('rating_rules', defaultRatingRules as RatingRules, 3600, refresh);
   }
 
-  async getCuratedActors(): Promise<ActorSummary[]> {
-    return this.loadConfig<ActorSummary[]>('curated_actors', defaultActors as ActorSummary[]);
+  async getCuratedActors(refresh = false): Promise<ActorSummary[]> {
+    return this.loadConfig<ActorSummary[]>('curated_actors', defaultActors as ActorSummary[], 3600, refresh);
   }
 }

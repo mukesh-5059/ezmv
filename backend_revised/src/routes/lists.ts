@@ -15,8 +15,9 @@ listsRouter.get('/popular', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<any>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
@@ -50,8 +51,9 @@ listsRouter.get('/search', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<any>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {
@@ -112,8 +114,9 @@ listsRouter.get('/:list_id/items', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<any>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<any>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
 
   if (cached) {

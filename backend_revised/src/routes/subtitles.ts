@@ -36,8 +36,9 @@ async function handleSubtitles(
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<SubtitleTrack[]>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<SubtitleTrack[]>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
   if (cached) {
     let responseData = cached;

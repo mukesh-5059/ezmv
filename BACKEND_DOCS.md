@@ -57,6 +57,12 @@ Configuration values are stored in Cloudflare KV namespace `CONFIG_KV` and fetch
 - `rating_rules`: Bayesian prior, source weights (IMDb, TMDb, Trakt, Letterboxd, Metacritic, Rotten Tomatoes), minimum votes, and era decay parameters.
 - `curated_actors`: Array of featured regional actors with TMDb IDs and biographies.
 
+### Cache Override & Invalidation:
+All GET endpoints across the API support a uniform cache override query parameter (`?refresh=true` or `?cache=false`):
+- **Bypasses Edge Cache**: Skips reading from Cloudflare Edge Cache (`caches.default`) / in-memory cache.
+- **Fresh Fetch**: Queries origin data directly (Cloudflare D1 SQLite database, Cloudflare KV namespace, upstream TMDb, Trakt, MDBList, OpenSubtitles, or streaming scrapers).
+- **Cache Overwrite**: Immediately updates and overwrites the Cloudflare Edge Cache with the fresh response data using standard TTLs.
+
 ---
 
 ## 3. Database Schema (Cloudflare D1)
@@ -101,7 +107,34 @@ Core payload returned across catalog lanes, search, and list items:
   "genres": [
     { "slug": "drama", "name": "Drama" },
     { "slug": "crime", "name": "Crime" }
-  ]
+  ],
+  "original_language": "en",
+  "runtime": 142
+}
+```
+
+### Additional Movie Details Object (`AdditionalMovieDetails`)
+Supplemental payload returned by `GET /api/v1/movies/:media_type/:tmdb_id` containing only the extra details missing from `MovieSummary`:
+```json
+{
+  "cast": [
+    {
+      "tmdb_id": 504,
+      "name": "Tim Robbins",
+      "character": "Andy Dufresne",
+      "profile_path": "https://image.tmdb.org/t/p/w185/djXJ45.jpg",
+      "order": 0
+    }
+  ],
+  "seasons": [
+    {
+      "season_number": 1,
+      "name": "Season 1",
+      "episode_count": 10
+    }
+  ],
+  "status": "Ended",
+  "is_ongoing": false
 }
 ```
 
@@ -200,7 +233,7 @@ Fetches all homepage lanes for a dashboard, pre-populated with up to 100 items p
 - **Query Parameters**:
   | Parameter | Type | Required | Default | Description |
   |---|---|---|---|---|
-  | `refresh` | `string` / `boolean` | No | `false` | Pass `true` to bypass edge cache and fetch fresh data |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache and fetch fresh data from D1, overwriting cache |
 
 - **Cache-Control**: `public, max-age=43200, stale-while-revalidate=86400` (12 hours)
 - **Status Codes**:
@@ -248,7 +281,7 @@ Paginated view of an individual lane (100 items per page) with server-side multi
   | `year` | `number` | No | `undefined` | Release year filter (e.g. `2024`) |
   | `min_rating` | `number` | No | `undefined` | Minimum composite rating score (e.g. `7.5`) |
   | `sort_by` | `string` | No | `'popular'` | Sort order: `'popular'` (rank), `'top_rated'`, `'newest'`, `'oldest'`, or `'title'` |
-  | `refresh` | `string` / `boolean` | No | `false` | Pass `true` to bypass edge cache |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache and fetch fresh data from D1, overwriting cache |
 
 - **Cache-Control**: `public, max-age=43200, stale-while-revalidate=86400` (12 hours)
 - **Status Codes**:
@@ -274,41 +307,29 @@ Paginated view of an individual lane (100 items per page) with server-side multi
 
 ---
 
-#### `GET /api/v1/movies/:media_type/:imdb_id`
-Retrieves detailed metadata for a single movie or TV show, including composite rating, cast list (top 20), seasons breakdown, and ongoing status.
+#### `GET /api/v1/movies/:media_type/:tmdb_id`
+Retrieves additional details for a movie or TV show (cast list up to 20 members, season breakdown for TV, status, and ongoing flag). Basic metadata (title, overview, release date, poster, backdrop, ratings, runtime, genres, original language) is already provided by `MovieSummary` from catalog/search endpoints.
 
 - **Method**: `GET`
-- **Path**: `/api/v1/movies/:media_type/:imdb_id`
+- **Path**: `/api/v1/movies/:media_type/:tmdb_id`
 - **Path Parameters**:
   | Parameter | Type | Required | Description |
   |---|---|---|---|
   | `media_type` | `string` | Yes | Media type: strictly `'movie'` or `'tv'` |
-  | `imdb_id` | `string` | Yes | IMDb ID: strictly required to start with `'tt'` (e.g. `tt0944947`) |
+  | `tmdb_id` | `number` | Yes | Numeric TMDb ID (`> 0`) |
 
-- **Query Parameters**: None
+- **Query Parameters**:
+  | Parameter | Type | Required | Default | Description |
+  |---|---|---|---|---|
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh metadata/cast from TMDb, and overwrite cache |
 - **Cache-Control**: `public, max-age=86400, stale-while-revalidate=43200` (24 hours)
 - **Status Codes**:
-  - `200 OK`: Movie or show details found
-  - `400 Bad Request`: Invalid `media_type` or `id` does not begin with `tt`
-  - `404 Not Found`: Item not found in catalog or upstream providers
+  - `200 OK`: Additional details found
+  - `400 Bad Request`: Invalid `media_type` or non-numeric `tmdb_id`
+  - `404 Not Found`: Item not found on TMDb
 - **Response** (`200 OK`):
   ```json
   {
-    "imdb_id": "tt0944947",
-    "tmdb_id": 1399,
-    "title": "Game of Thrones",
-    "overview": "Seven noble families fight for control of the mythical land of Westeros.",
-    "release_date": "2011-04-17",
-    "poster_path": "https://image.tmdb.org/t/p/w500/...",
-    "backdrop_path": "https://image.tmdb.org/t/p/w1280/...",
-    "rating_score": 9.2,
-    "vote_count": 2200000,
-    "media_type": "tv",
-    "genres": [
-      { "slug": "drama", "name": "Drama" },
-      { "slug": "fantasy", "name": "Fantasy" }
-    ],
-    "runtime": 60,
     "cast": [
       {
         "tmdb_id": 239019,
@@ -326,8 +347,7 @@ Retrieves detailed metadata for a single movie or TV show, including composite r
       }
     ],
     "status": "Ended",
-    "is_ongoing": false,
-    "original_language": "en"
+    "is_ongoing": false
   }
   ```
 
@@ -344,7 +364,10 @@ Retrieves episode-level details for a specific season of a TV series.
   | `tmdb_id` | `number` | Yes | Numeric TMDb TV Series ID (`> 0`) |
   | `season_number` | `number` | Yes | Numeric season number (`>= 0`) |
 
-- **Query Parameters**: None
+- **Query Parameters**:
+  | Parameter | Type | Required | Default | Description |
+  |---|---|---|---|---|
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh metadata/cast from TMDb, and overwrite cache |
 - **Cache-Control**: `public, max-age=86400, stale-while-revalidate=43200` (24 hours)
 - **Status Codes**:
   - `200 OK`: Season found
@@ -390,6 +413,7 @@ Searches catalog and upstream Trakt API with full Bayesian composite ratings and
   | `genre` | `string` | No | `undefined` | Genre slug filter |
   | `year` | `number` | No | `undefined` | Release year filter |
   | `min_rating` | `number` | No | `undefined` | Minimum composite score filter (0.0 to 10.0) |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh search results from Trakt, and overwrite cache |
 
 - **Cache-Control**: `public, max-age=43200, stale-while-revalidate=86400` (12 hours)
 - **Response** (`200 OK`):
@@ -419,6 +443,7 @@ Fetches paginated popular curated lists from Trakt (100 lists per page).
   | Parameter | Type | Required | Default | Description |
   |---|---|---|---|---|
   | `page` | `number` | No | `1` | 1-indexed page number |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh lists from Trakt, and overwrite cache |
 
 - **Cache-Control**: `public, max-age=43200, stale-while-revalidate=86400` (12 hours)
 - **Response** (`200 OK`):
@@ -452,6 +477,7 @@ Searches curated Trakt lists by query (50 lists per page).
   |---|---|---|---|---|
   | `query` / `q` | `string` | No | `""` | Search query. If blank, redirects (`302`) to `/api/v1/lists/popular?page=${page}` |
   | `page` | `number` | No | `1` | 1-indexed page number |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh search results from Trakt, and overwrite cache |
 
 - **Cache-Control**: `public, max-age=43200, stale-while-revalidate=86400` (12 hours)
 - **Response** (`200 OK`):
@@ -479,6 +505,7 @@ Fetches movies and shows inside a specific curated list with filtering and sorti
   | `min_rating` | `number` | No | `undefined` | Minimum composite score filter (0.0 to 10.0) |
   | `sort_by` | `string` | No | `undefined` | Sort property: `'rank'`, `'added'`, `'title'`, `'released'`, `'popularity'`, `'votes'` |
   | `sort_order` | `string` | No | `undefined` | Direction: `'asc'` or `'desc'` |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, resolve fresh items via Trakt/D1/MDBList, and overwrite cache |
 
 - **Cache-Control**: `public, max-age=43200, stale-while-revalidate=86400` (12 hours)
 - **Status Codes**:
@@ -507,7 +534,10 @@ Returns a list of curated featured regional actors.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/actors`
-- **Query Parameters**: None
+- **Query Parameters**:
+  | Parameter | Type | Required | Default | Description |
+  |---|---|---|---|---|
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, reload curated actors from KV, and overwrite cache |
 - **Cache-Control**: `public, max-age=604800, stale-while-revalidate=86400` (7 days)
 - **Response** (`200 OK`):
   ```json
@@ -533,7 +563,10 @@ Returns actor biography and filmography categorized into up to 30 popular works 
   |---|---|---|---|
   | `id` | `number` | Yes | Numeric TMDb Person ID (`> 0`) |
 
-- **Query Parameters**: None
+- **Query Parameters**:
+  | Parameter | Type | Required | Default | Description |
+  |---|---|---|---|---|
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh person details from TMDb, and overwrite cache |
 - **Cache-Control**: `public, max-age=604800, stale-while-revalidate=86400` (7 days)
 - **Status Codes**:
   - `200 OK`: Person found
@@ -574,6 +607,7 @@ Resolves streaming links for movies or TV episodes by querying high-speed direct
   | `season` | `number` | Yes (if `tv`) | `undefined` | Season number (required when `media_type === 'tv'`) |
   | `episode` | `number` | Yes (if `tv`) | `undefined` | Episode number (required when `media_type === 'tv'`) |
   | `default_language` | `string` | No | `undefined` | Fallback language or ISO code (e.g. `'Tamil'`, `'ta'`) used when release has no explicit language tags |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, scrape live stream links from upstream providers, and overwrite cache |
 
 - **Response** (`200 OK`):
   ```json
@@ -622,6 +656,7 @@ Resolves available subtitle tracks for movies or TV episodes via OpenSubtitles (
   | `season` | `number` | Yes (if `tv`) | `undefined` | Season number (required when `media_type === 'tv'`) |
   | `episode` | `number` | Yes (if `tv`) | `undefined` | Episode number (required when `media_type === 'tv'`) |
   | `language` | `string` | No | `undefined` | Case-insensitive language name or ISO code filter (e.g. `English`, `eng`, `Tamil`) |
+  | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, fetch fresh subtitle tracks from OpenSubtitles, and overwrite cache |
 
 - **Status Codes**:
   - `200 OK`: Subtitle tracks returned (may be empty array if none found)
@@ -645,20 +680,22 @@ Resolves available subtitle tracks for movies or TV episodes via OpenSubtitles (
 
 ## 6. Endpoints Summary Table
 
+All GET endpoints support optional cache-busting overrides: `?refresh=true` (or `?cache=false`).
+
 | Method | Endpoint | Primary Query / Path Params | Purpose |
 |---|---|---|---|
 | `GET` | `/` | — | API status and health check |
 | `GET` | `/api/v1/genres` | — | Canonical list of genres for filter pills |
-| `GET` | `/api/v1/dashboard` | — | List available dashboard categories |
+| `GET` | `/api/v1/dashboard` | `?refresh` | List available dashboard categories |
 | `GET` | `/api/v1/dashboard/:dashboard_id` | `:dashboard_id`, `?refresh` | Homepage lanes with first 100 items each |
 | `GET` | `/api/v1/dashboard/:dashboard_id/lanes/:lane_id` | `:dashboard_id`, `:lane_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?refresh` | Paginated lane items (100/page) with 4 filters & 5 sorts |
-| `GET` | `/api/v1/movies/:media_type/:imdb_id` | `:media_type`, `:imdb_id` (`tt...`) | Movie/show details, Bayesian rating, cast (top 20), seasons |
-| `GET` | `/api/v1/movies/tv/:tmdb_id/season/:season_number` | `:tmdb_id` (TMDb), `:season_number` | TV Season episode list with `is_released` flags |
-| `GET` | `/api/v1/search` | `?q`, `?page`, `?type`, `?genre`, `?year`, `?min_rating` | Search catalog & Trakt upstream with Bayesian ratings |
-| `GET` | `/api/v1/lists/popular` | `?page` | Curated popular Trakt lists (100/page) |
-| `GET` | `/api/v1/lists/search` | `?q`, `?page` | Search Trakt lists (50/page) |
-| `GET` | `/api/v1/lists/:list_id/items` | `:list_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?sort_order` | Paginated items inside a curated list (100/page) |
-| `GET` | `/api/v1/actors` | — | Curated regional featured actors |
-| `GET` | `/api/v1/actors/:id` | `:id` (TMDb) | Actor profile, top 30 popular and top 30 recent filmography |
-| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?default_language` | Deduplicated, host-ranked streaming links (PlavioHD, HDHub, PenguPlay, NoTorrent) |
-| `GET` | `/api/v1/subtitles/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?language` | OpenSubtitles tracks sorted by popularity |
+| `GET` | `/api/v1/movies/:media_type/:tmdb_id` | `:media_type`, `:tmdb_id` (numeric), `?refresh` | Additional details: cast (top 20), seasons (TV), status, ongoing flag |
+| `GET` | `/api/v1/movies/tv/:tmdb_id/season/:season_number` | `:tmdb_id` (TMDb), `:season_number`, `?refresh` | TV Season episode list with `is_released` flags |
+| `GET` | `/api/v1/search` | `?q`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?refresh` | Search catalog & Trakt upstream with Bayesian ratings |
+| `GET` | `/api/v1/lists/popular` | `?page`, `?refresh` | Curated popular Trakt lists (100/page) |
+| `GET` | `/api/v1/lists/search` | `?q`, `?page`, `?refresh` | Search Trakt lists (50/page) |
+| `GET` | `/api/v1/lists/:list_id/items` | `:list_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?sort_order`, `?refresh` | Paginated items inside a curated list (100/page) |
+| `GET` | `/api/v1/actors` | `?refresh` | Curated regional featured actors |
+| `GET` | `/api/v1/actors/:id` | `:id` (TMDb), `?refresh` | Actor profile, top 30 popular and top 30 recent filmography |
+| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?default_language`, `?refresh` | Deduplicated, host-ranked streaming links (PlavioHD, HDHub, PenguPlay, NoTorrent) |
+| `GET` | `/api/v1/subtitles/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?language`, `?refresh` | OpenSubtitles tracks sorted by popularity |

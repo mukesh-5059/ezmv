@@ -35,8 +35,9 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
+  const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
   const tCache = Date.now();
-  const cached = await cacheService.get<StreamsResponse>(cacheKey);
+  const cached = isRefresh ? null : await cacheService.get<StreamsResponse>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);
   
   if (cached) return c.json(cached);
