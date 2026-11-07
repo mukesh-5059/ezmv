@@ -8,6 +8,7 @@ export 'models/movie_details.dart';
 export 'models/tv_episode.dart';
 export 'models/tv_season.dart';
 export 'models/stream_source.dart';
+export 'models/stream_progress_event.dart';
 export 'models/subtitle_track.dart';
 export 'models/dashboard_lane.dart';
 export 'models/dashboard.dart';

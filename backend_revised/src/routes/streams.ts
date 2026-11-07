@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import { Bindings, StreamsResponse, Variables } from '../types';
 import { StreamsService } from '../services/streams';
 import { CacheService } from '../services/cache';
@@ -30,12 +31,62 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
     );
   }
 
+  const isSSE =
+    c.req.query('sse') === 'true' ||
+    (c.req.header('Accept')?.includes('text/event-stream') ?? false);
+
   const origin = new URL(c.req.url).origin;
   const cacheKey = `${origin}/api/v1/streams/${mediaType}/${imdbId}/${season || 0}/${episode || 0}/${defaultLanguage || ''}`;
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
   const isRefresh = c.req.query('refresh') === 'true' || c.req.query('cache') === 'false';
+
+  if (isSSE) {
+    return streamSSE(c, async (stream) => {
+      const streamsService = new StreamsService(c.env);
+      const tFetch = Date.now();
+      try {
+        const cached = isRefresh ? null : await cacheService.get<StreamsResponse>(cacheKey);
+        if (cached) {
+          if (trace) trace.add('cache: HIT');
+          await stream.writeSSE({
+            event: 'done',
+            data: JSON.stringify(cached),
+          });
+          return;
+        }
+
+        const data = await streamsService.getStreams({
+          imdbId,
+          mediaType,
+          season,
+          episode,
+          defaultLanguage,
+          onProgress: async (progress) => {
+            await stream.writeSSE({
+              event: 'progress',
+              data: JSON.stringify(progress),
+            });
+          },
+        });
+
+        if (trace) trace.add(`streams: ${data.streams.length} links ${Date.now() - tFetch}ms`);
+        if (data.streams.length > 0) await cacheService.set(cacheKey, data, 900);
+
+        await stream.writeSSE({
+          event: 'done',
+          data: JSON.stringify(data),
+        });
+      } catch (err: any) {
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({ error: err?.message || 'Failed to resolve streams' }),
+        });
+      }
+    });
+  }
+
   const tCache = Date.now();
   const cached = isRefresh ? null : await cacheService.get<StreamsResponse>(cacheKey);
   if (trace) trace.add(`cache: ${cached ? 'HIT' : 'MISS'} ${Date.now() - tCache}ms`);

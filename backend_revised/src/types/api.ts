@@ -178,6 +178,14 @@ export interface StreamSource {
   headers?: Record<string, string>;
 }
 
+export type StreamProgressStatus = 'searching' | 'resolved' | 'error';
+
+export interface StreamProgressPayload {
+  provider: string;
+  status: StreamProgressStatus;
+  count?: number;
+}
+
 export interface StreamsResponse {
   imdb_id: string;
   media_type: 'movie' | 'tv';

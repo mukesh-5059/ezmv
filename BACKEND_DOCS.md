@@ -607,9 +607,10 @@ Resolves streaming links for movies or TV episodes by querying high-speed direct
   | `season` | `number` | Yes (if `tv`) | `undefined` | Season number (required when `media_type === 'tv'`) |
   | `episode` | `number` | Yes (if `tv`) | `undefined` | Episode number (required when `media_type === 'tv'`) |
   | `default_language` | `string` | No | `undefined` | Fallback language or ISO code (e.g. `'Tamil'`, `'ta'`) used when release has no explicit language tags |
+  | `sse` | `boolean` | No | `false` | When `true` (or when `Accept: text/event-stream` header is sent), streams Server-Sent Events (SSE) in real-time as each provider resolves |
   | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, scrape live stream links from upstream providers, and overwrite cache |
 
-- **Response** (`200 OK`):
+- **Response (Standard JSON - `200 OK`)**:
   ```json
   {
     "imdb_id": "tt0816692",
@@ -632,6 +633,27 @@ Resolves streaming links for movies or TV episodes by querying high-speed direct
     ]
   }
   ```
+
+- **Response (Server-Sent Events - `Content-Type: text/event-stream`)**:
+  When `?sse=true` is supplied or requested with header `Accept: text/event-stream`:
+  - **`event: progress`**: Emitted as each provider starts searching or finishes resolving.
+    ```text
+    event: progress
+    data: {"provider":"PlavioHD","status":"searching"}
+
+    event: progress
+    data: {"provider":"PlavioHD","status":"resolved","count":3}
+    ```
+  - **`event: done`**: Emitted upon completion with the full deduplicated and ranked stream list:
+    ```text
+    event: done
+    data: {"imdb_id":"tt0816692","media_type":"movie","streams":[ ... ]}
+    ```
+  - **`event: error`**: Emitted if stream resolution encounters a fatal error:
+    ```text
+    event: error
+    data: {"error":"Failed to resolve streams"}
+    ```
 
 ---
 

@@ -207,6 +207,48 @@ void main() {
       expect(streams.first.provider, 'penguplay');
     });
 
+    test('getStreamsProgressive parses SSE events stream', () async {
+      final sseBody = [
+        'event: progress',
+        'data: {"provider":"PlavioHD","status":"searching"}',
+        '',
+        'event: progress',
+        'data: {"provider":"PlavioHD","status":"resolved","count":2}',
+        '',
+        'event: done',
+        'data: {"imdb_id":"tt0816692","media_type":"movie","streams":[{"url":"https://example.com/stream.mp4","quality":"1080p","provider":"plaviohd"}]}',
+        '',
+      ].join('\n');
+
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/api/v1/streams/movie/tt0816692');
+        expect(request.url.queryParameters['sse'], 'true');
+        expect(request.headers['Accept'], 'text/event-stream');
+        return http.Response(
+          sseBody,
+          200,
+          headers: {'content-type': 'text/event-stream'},
+        );
+      });
+
+      final api = ApiClient(client: mockClient);
+      final events = await api.getStreamsProgressive('movie', 'tt0816692').toList();
+
+      expect(events.length, 3);
+      expect(events[0].provider, 'PlavioHD');
+      expect(events[0].status, StreamProgressStatus.searching);
+      expect(events[0].isDone, false);
+
+      expect(events[1].provider, 'PlavioHD');
+      expect(events[1].status, StreamProgressStatus.resolved);
+      expect(events[1].count, 2);
+      expect(events[1].isDone, false);
+
+      expect(events[2].isDone, true);
+      expect(events[2].streams?.length, 1);
+      expect(events[2].streams?.first.provider, 'plaviohd');
+    });
+
     test('getSubtitles parses subtitle list', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/subtitles/movie/tt0111161');

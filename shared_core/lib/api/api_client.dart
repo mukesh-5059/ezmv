@@ -7,6 +7,7 @@ import '../models/genre.dart';
 import '../models/movie_details.dart';
 import '../models/movie_summary.dart';
 import '../models/paginated_response.dart';
+import '../models/stream_progress_event.dart';
 import '../models/stream_source.dart';
 import '../models/subtitle_track.dart';
 import '../models/trakt_list_summary.dart';
@@ -130,6 +131,96 @@ class ApiClient {
     final map = data as Map<String, dynamic>;
     final rawStreams = map['streams'] as List? ?? [];
     return rawStreams.map((s) => StreamSource.fromJson(s as Map<String, dynamic>)).toList();
+  }
+
+  Stream<StreamProgressEvent> getStreamsProgressive(
+    String mediaType,
+    String imdbId, {
+    int? season,
+    int? episode,
+    String? defaultLanguage,
+  }) async* {
+    final queryParams = <String, String>{'sse': 'true'};
+    if (season != null) queryParams['season'] = '$season';
+    if (episode != null) queryParams['episode'] = '$episode';
+    if (defaultLanguage != null && defaultLanguage.isNotEmpty) {
+      queryParams['default_language'] = defaultLanguage;
+    }
+
+    final uri = _buildUri('/api/v1/streams/$mediaType/$imdbId', queryParams);
+    final request = http.Request('GET', uri);
+    request.headers['Accept'] = 'text/event-stream';
+
+    final response = await _client.send(request);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final body = await response.stream.bytesToString();
+      yield StreamProgressEvent.error('HTTP ${response.statusCode}: $body');
+      return;
+    }
+
+    String currentEvent = 'message';
+    final dataBuffer = StringBuffer();
+
+    await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      final trimmed = line.trimRight();
+      if (trimmed.isEmpty) {
+        if (dataBuffer.isNotEmpty) {
+          final dataStr = dataBuffer.toString().trim();
+          dataBuffer.clear();
+
+          try {
+            final parsed = json.decode(dataStr) as Map<String, dynamic>;
+            if (currentEvent == 'progress') {
+              yield StreamProgressEvent.progress(
+                provider: parsed['provider'] as String? ?? 'unknown',
+                status: StreamProgressStatus.fromString(parsed['status'] as String? ?? ''),
+                count: (parsed['count'] as num?)?.toInt(),
+              );
+            } else if (currentEvent == 'done') {
+              final rawStreams = parsed['streams'] as List? ?? [];
+              final streams = rawStreams
+                  .map((s) => StreamSource.fromJson(s as Map<String, dynamic>))
+                  .toList();
+              yield StreamProgressEvent.done(streams);
+            } else if (currentEvent == 'error') {
+              yield StreamProgressEvent.error(parsed['error'] as String? ?? 'Unknown error');
+            }
+          } catch (_) {
+            // Ignore parse errors on individual SSE chunks
+          }
+        }
+        currentEvent = 'message';
+      } else if (trimmed.startsWith('event:')) {
+        currentEvent = trimmed.substring(6).trim();
+      } else if (trimmed.startsWith('data:')) {
+        final dataPart = trimmed.substring(5).trimLeft();
+        if (dataBuffer.isNotEmpty) dataBuffer.write('\n');
+        dataBuffer.write(dataPart);
+      }
+    }
+
+    // Flush any trailing event
+    if (dataBuffer.isNotEmpty) {
+      final dataStr = dataBuffer.toString().trim();
+      try {
+        final parsed = json.decode(dataStr) as Map<String, dynamic>;
+        if (currentEvent == 'progress') {
+          yield StreamProgressEvent.progress(
+            provider: parsed['provider'] as String? ?? 'unknown',
+            status: StreamProgressStatus.fromString(parsed['status'] as String? ?? ''),
+            count: (parsed['count'] as num?)?.toInt(),
+          );
+        } else if (currentEvent == 'done') {
+          final rawStreams = parsed['streams'] as List? ?? [];
+          final streams = rawStreams
+              .map((s) => StreamSource.fromJson(s as Map<String, dynamic>))
+              .toList();
+          yield StreamProgressEvent.done(streams);
+        } else if (currentEvent == 'error') {
+          yield StreamProgressEvent.error(parsed['error'] as String? ?? 'Unknown error');
+        }
+      } catch (_) {}
+    }
   }
 
   Future<List<SubtitleTrack>> getSubtitles(
