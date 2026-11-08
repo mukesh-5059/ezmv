@@ -20,7 +20,7 @@ backend_revised/
 │   │   ├── lists.ts           # /api/v1/lists (Trakt curated lists)
 │   │   ├── movies.ts          # /api/v1/movies (Movie details & TV season episodes)
 │   │   ├── search.ts          # /api/v1/search (Catalog & Trakt upstream search)
-│   │   ├── streams.ts         # /api/v1/streams (PenguPlay & HDHub Stremio streams)
+│   │   ├── streams.ts         # /api/v1/streams (Tiered Stremio streams & language priority)
 │   │   └── subtitles.ts       # /api/v1/subtitles (OpenSubtitles resolution)
 │   ├── services/              # Core business services
 │   │   ├── actors.ts          # Actor resolution & TMDb combined filmography
@@ -591,7 +591,7 @@ Returns actor biography and filmography categorized into up to 30 popular works 
 ---
 
 #### `GET /api/v1/streams/:media_type/:imdb_id`
-Resolves streaming links for movies or TV episodes by querying high-speed direct CDN providers (**PlavioHD** & **HDHub**) in parallel, with automatic fallback to secondary scrapers (**PenguPlay** & **NoTorrent**). Deduplicates streams by canonical URL and filename/size, ranks by host speed and language priority, and returns a clean top-20 stratified slice.
+Resolves streaming links for movies or TV episodes using a two-tier scraping pipeline with language-aware priority ranking. Queries Tier 1 providers (**HDHub** & **PlavioHD**) in parallel, triggering Tier 2 fallback providers (**PenguPlay** & **NoTorrent**) automatically if Tier 1 yields fewer than 15 streams. Streams are deduplicated by URL and filename/size, ranked by language affinity, provider, host speed, and video quality, and capped at the top 20 candidate links.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/streams/:media_type/:imdb_id`
@@ -606,9 +606,24 @@ Resolves streaming links for movies or TV episodes by querying high-speed direct
   |---|---|---|---|---|
   | `season` | `number` | Yes (if `tv`) | `undefined` | Season number (required when `media_type === 'tv'`) |
   | `episode` | `number` | Yes (if `tv`) | `undefined` | Episode number (required when `media_type === 'tv'`) |
+  | `original_language` / `orig_lang` | `string` | No | `undefined` | Original spoken language ISO code or name (e.g. `ja`, `hi`, `ta`, `ko`, `en`). Directly guides stream ranking without D1 lookups |
   | `default_language` | `string` | No | `undefined` | Fallback language or ISO code (e.g. `'Tamil'`, `'ta'`) used when release has no explicit language tags |
   | `sse` | `boolean` | No | `false` | When `true` (or when `Accept: text/event-stream` header is sent), streams Server-Sent Events (SSE) in real-time as each provider resolves |
   | `refresh` / `cache` | `string` / `boolean` | No | `false` | Pass `refresh=true` (or `cache=false`) to bypass edge cache, scrape live stream links from upstream providers, and overwrite cache |
+
+- **Scraper Architecture & Priority Ranking**:
+  - **Tier 1 Providers**: HDHub (`https://hdhub.thevolecitor.qzz.io/...`) and PlavioHD (`https://hd.plavio.site/...`).
+  - **Tier 2 Fallback**: PenguPlay (`https://pengu.uk/...`) and NoTorrent (`https://addon.notorrent2.workers.dev/...`) triggered when Tier 1 streams < 15.
+  - **Language Priority Rules**:
+    - **Indian Media** (`hi`, `ta`, `te`, `ml`, `kn`, `bn`, `mr`, `pa`, `gu`): Forces **Tamil** as primary stream priority (`score -= 30`), followed by title's **original language** (`score -= 20`), then `default_language` (`score -= 15`).
+    - **Non-Indian Media** (Anime `ja`, `ko`, `en`, `es`, `fr`, etc.): Prioritizes title's **original language** (`score -= 30`), then `default_language` (`score -= 15`).
+    - **Unspecified**: Falls back to Tamil priority (`score -= 30`), then `default_language` (`score -= 15`).
+  - **Provider & Host Weighting**:
+    - Provider: HDHub (`score -= 70`), PlavioHD (`score -= 20`), PenguPlay (`score -= 10`).
+    - Fast Hosts: PixelDrain, HubCloud, Google CDN (`score -= 15`).
+    - Slow Hosts: Streamtape, DoodStream, VidVault (`score += 20`).
+    - Quality: 1080p (`score -= 20`), 720p (`score -= 5`). 4K UHD filtered out unless verified web-ready.
+    - Sorting: HDHub streams sorted to top partition, followed by ascending priority score. Top 15 probed concurrently via HEAD requests to eliminate dead links.
 
 - **Response (Standard JSON - `200 OK`)**:
   ```json
@@ -719,5 +734,5 @@ All GET endpoints support optional cache-busting overrides: `?refresh=true` (or 
 | `GET` | `/api/v1/lists/:list_id/items` | `:list_id`, `?page`, `?type`, `?genre`, `?year`, `?min_rating`, `?sort_by`, `?sort_order`, `?refresh` | Paginated items inside a curated list (100/page) |
 | `GET` | `/api/v1/actors` | `?refresh` | Curated regional featured actors |
 | `GET` | `/api/v1/actors/:id` | `:id` (TMDb), `?refresh` | Actor profile, top 30 popular and top 30 recent filmography |
-| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?default_language`, `?refresh` | Deduplicated, host-ranked streaming links (PlavioHD, HDHub, PenguPlay, NoTorrent) |
+| `GET` | `/api/v1/streams/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?original_language`, `?default_language`, `?refresh` | Tiered, language-ranked streaming links (HDHub, PlavioHD, PenguPlay, NoTorrent) |
 | `GET` | `/api/v1/subtitles/:media_type/:imdb_id` | `:media_type`, `:imdb_id`, `?season`, `?episode`, `?language`, `?refresh` | OpenSubtitles tracks sorted by popularity |

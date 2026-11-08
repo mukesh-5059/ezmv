@@ -233,6 +233,8 @@ void main() {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/streams/movie/tt0816692');
         expect(request.url.queryParameters['default_language'], 'ta');
+        expect(request.url.queryParameters['original_language'], 'en');
+        expect(request.url.queryParameters['refresh'], 'true');
         return http.Response(
           json.encode({
             'imdb_id': 'tt0816692',
@@ -251,7 +253,13 @@ void main() {
       });
 
       final api = ApiClient(client: mockClient);
-      final streams = await api.getStreams('movie', 'tt0816692', defaultLanguage: 'ta');
+      final streams = await api.getStreams(
+        'movie',
+        'tt0816692',
+        defaultLanguage: 'ta',
+        originalLanguage: 'en',
+        refresh: true,
+      );
       expect(streams.length, 1);
       expect(streams.first.provider, 'penguplay');
     });
@@ -272,6 +280,8 @@ void main() {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/streams/movie/tt0816692');
         expect(request.url.queryParameters['sse'], 'true');
+        expect(request.url.queryParameters['original_language'], 'ja');
+        expect(request.url.queryParameters['refresh'], 'true');
         expect(request.headers['Accept'], 'text/event-stream');
         return http.Response(
           sseBody,
@@ -281,7 +291,12 @@ void main() {
       });
 
       final api = ApiClient(client: mockClient);
-      final events = await api.getStreamsProgressive('movie', 'tt0816692').toList();
+      final events = await api.getStreamsProgressive(
+        'movie',
+        'tt0816692',
+        originalLanguage: 'ja',
+        refresh: true,
+      ).toList();
 
       expect(events.length, 3);
       expect(events[0].provider, 'PlavioHD');

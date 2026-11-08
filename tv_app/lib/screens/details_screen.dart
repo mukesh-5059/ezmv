@@ -169,6 +169,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       streams: _streams,
       imdbId: widget.imdbId,
       mediaType: widget.mediaType,
+      originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
       runtimeMinutes: _details?.runtime,
       autoPlay: true,
       onStreamsLoaded: (streams) {
@@ -198,6 +199,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       streams: _streams,
       imdbId: widget.imdbId,
       mediaType: widget.mediaType,
+      originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
       runtimeMinutes: _details?.runtime,
       autoPlay: false,
       onStreamsLoaded: (streams) {
@@ -249,6 +251,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
           ratingScore: _details?.voteAverage ?? widget.initialMovie?.ratingScore,
           voteCount: _details?.voteCount ?? widget.initialMovie?.voteCount,
           genres: _details?.genres.map((g) => g.name).toList() ?? widget.initialMovie?.genres.map((g) => g.name).toList(),
+          originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
         ),
       ),
     );
@@ -266,6 +269,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       mediaType: 'tv',
       season: _selectedSeasonNumber,
       episode: episode.episodeNumber,
+      originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
       runtimeMinutes: episode.runtime,
       autoPlay: true,
       onStreamsLoaded: (streams) => loadedStreams = streams,
@@ -676,7 +680,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         ),
         const SizedBox(height: 14),
         SizedBox(
-          height: 250,
+          height: 260,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
@@ -787,19 +791,20 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                                 child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),
                               ),
                             ),
-                          if (!ep.isReleased)
+                          if (ep.isUpcoming)
                             Positioned(
                               top: 8,
                               right: 8,
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: Colors.red.shade900,
+                                  color: Colors.red.shade900.withValues(alpha: 0.9),
                                   borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.redAccent.shade100, width: 1),
                                 ),
-                                child: const Text(
-                                  'Upcoming',
-                                  style: TextStyle(
+                                child: Text(
+                                  ep.formattedAirDate.isNotEmpty ? 'Airs: ${ep.formattedAirDate}' : 'Unreleased',
+                                  style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
@@ -849,30 +854,62 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                       ),
                     ),
 
-                    // Title & Air Date
+                    // Title
                     Padding(
                       padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
+                      child: Text(
+                        ep.name.isNotEmpty ? ep.name : 'Episode ${ep.episodeNumber}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: _isFocused ? FontWeight.bold : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+
+                    // Air Date & Release Status
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
                       child: Row(
                         children: [
-                          Expanded(
-                            child: Text(
-                              ep.name.isNotEmpty ? ep.name : 'Episode ${ep.episodeNumber}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                          if (ep.formattedAirDate.isNotEmpty) ...[
+                            Icon(
+                              Icons.calendar_today_outlined,
+                              size: 11,
+                              color: ep.isUpcoming ? Colors.amberAccent : TVTheme.textMuted,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              ep.isUpcoming ? 'Airs ${ep.formattedAirDate}' : ep.formattedAirDate,
                               style: TextStyle(
-                                color: _isFocused ? Colors.white : Colors.white,
-                                fontSize: 13,
-                                fontWeight: _isFocused ? FontWeight.bold : FontWeight.w600,
+                                color: ep.isUpcoming ? Colors.amberAccent : TVTheme.textMuted,
+                                fontSize: 11,
+                                fontWeight: ep.isUpcoming ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
-                          ),
-                          if (ep.airDate != null && ep.airDate!.isNotEmpty) ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              ep.airDate!,
-                              style: const TextStyle(
-                                color: TVTheme.textMuted,
-                                fontSize: 10,
+                          ],
+                          if (ep.isUpcoming) ...[
+                            if (ep.formattedAirDate.isNotEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 6),
+                                child: Text('•', style: TextStyle(color: Colors.white24, fontSize: 10)),
+                              ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(3),
+                                border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.4), width: 0.8),
+                              ),
+                              child: const Text(
+                                'Unreleased',
+                                style: TextStyle(
+                                  color: Colors.amberAccent,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ],

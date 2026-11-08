@@ -1,5 +1,5 @@
 import { Bindings, StreamProgressPayload, StreamSource, StreamsResponse } from '../types';
-import { parseStreamItem } from './stream_parser';
+import { calculatePriority, isIndianLanguage, parseStreamItem } from './stream_parser';
 
 async function isStreamPlayable(stream: StreamSource): Promise<boolean> {
   const url = stream.url;
@@ -71,9 +71,10 @@ export class StreamsService {
     season?: number;
     episode?: number;
     defaultLanguage?: string;
+    originalLanguage?: string;
     onProgress?: (progress: StreamProgressPayload) => Promise<void> | void;
   }): Promise<StreamsResponse> {
-    const { imdbId, mediaType = 'movie', season, episode, defaultLanguage, onProgress } = params;
+    const { imdbId, mediaType = 'movie', season, episode, defaultLanguage, originalLanguage, onProgress } = params;
 
     const plavioBase = (this.env.PLAVIOHD_MANIFEST_URL || '').replace(/\/manifest\.json\/?$/, '');
     const hdhubBase = (this.env.HDHUB_MANIFEST_URL || '').replace(/\/manifest\.json\/?$/, '');
@@ -117,7 +118,7 @@ export class StreamsService {
           return [];
         }
         const parsed = data.streams
-          .map((s) => parseStreamItem(s, providerName, defaultLanguage))
+          .map((s) => parseStreamItem(s, providerName, defaultLanguage, originalLanguage))
           .filter((s): s is StreamSource => s !== null);
         if (onProgress) await onProgress({ provider: displayName, status: 'resolved', count: parsed.length });
         return parsed;
@@ -129,18 +130,18 @@ export class StreamsService {
 
     const streams: StreamSource[] = [];
 
-    // Tier 1: High-priority primary scrapers (PlavioHD + HDHub)
+    // Tier 1 Execution (HDHub + PlavioHD)
     const tier1Fetches: Promise<StreamSource[]>[] = [];
-    if (plavioBase) tier1Fetches.push(fetchAddon(plavioBase, 'plaviohd', 'PlavioHD'));
     if (hdhubBase) tier1Fetches.push(fetchAddon(hdhubBase, 'hdhub', 'HDHub'));
+    if (plavioBase) tier1Fetches.push(fetchAddon(plavioBase, 'plaviohd', 'PlavioHD'));
 
     const tier1Results = await Promise.allSettled(tier1Fetches);
     for (const res of tier1Results) {
       if (res.status === 'fulfilled') streams.push(...res.value);
     }
 
-    // Tier 2 Fallback: If Tier 1 yields less than 20 streams, query PenguPlay + NoTorrent
-    if (streams.length < 20) {
+    // Tier 2 Fallback: If Tier 1 yields less than 15 streams, query PenguPlay + NoTorrent
+    if (streams.length < 15) {
       const tier2Fetches: Promise<StreamSource[]>[] = [];
       if (penguBase) tier2Fetches.push(fetchAddon(penguBase, 'penguplay', 'PenguPlay'));
       if (notorrentBase) tier2Fetches.push(fetchAddon(notorrentBase, 'notorrent', 'NoTorrent'));
@@ -169,11 +170,11 @@ export class StreamsService {
       uniqueStreams.push(s);
     }
 
-    // Sort by priority ascending (HDHub has absolute highest priority)
+    // Sort by priority ascending (HDHub has highest priority, then language & quality priority)
     uniqueStreams.sort((a, b) => {
-      const aHdhub = a.provider.toLowerCase().includes('hdhub') ? 0 : 1;
-      const bHdhub = b.provider.toLowerCase().includes('hdhub') ? 0 : 1;
-      if (aHdhub !== bHdhub) return aHdhub - bHdhub;
+      const aTop = a.provider.toLowerCase().includes('hdhub') ? 0 : 1;
+      const bTop = b.provider.toLowerCase().includes('hdhub') ? 0 : 1;
+      if (aTop !== bTop) return aTop - bTop;
       return (a.priority ?? 100) - (b.priority ?? 100);
     });
 

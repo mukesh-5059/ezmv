@@ -18,6 +18,7 @@ class ContinueWatchingEntry {
   final double? ratingScore;
   final int? voteCount;
   final List<String>? genres;
+  final String? originalLanguage;
 
   const ContinueWatchingEntry({
     required this.imdbId,
@@ -36,6 +37,7 @@ class ContinueWatchingEntry {
     this.ratingScore,
     this.voteCount,
     this.genres,
+    this.originalLanguage,
   });
 
   bool get isTv => mediaType == 'tv';
@@ -70,6 +72,7 @@ class ContinueWatchingEntry {
       voteCount: voteCount ?? 0,
       mediaType: mediaType,
       genres: genres?.map((g) => Genre(slug: g.toLowerCase().replaceAll(' ', '-'), name: g)).toList() ?? <Genre>[],
+      originalLanguage: originalLanguage,
     );
   }
 
@@ -107,6 +110,7 @@ class ContinueWatchingEntry {
       ratingScore: (json['rating_score'] as num?)?.toDouble(),
       voteCount: (json['vote_count'] as num?)?.toInt(),
       genres: parsedGenres,
+      originalLanguage: json['original_language'] as String?,
     );
   }
 
@@ -127,5 +131,6 @@ class ContinueWatchingEntry {
     if (ratingScore != null) 'rating_score': ratingScore,
     if (voteCount != null) 'vote_count': voteCount,
     if (genres != null) 'genres': genres,
+    if (originalLanguage != null) 'original_language': originalLanguage,
   };
 }

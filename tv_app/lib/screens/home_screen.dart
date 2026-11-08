@@ -205,7 +205,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final streams = await ApiClient.instance.getStreams(movie.mediaType, movie.imdbId);
+      final streams = await ApiClient.instance.getStreams(
+        movie.mediaType,
+        movie.imdbId,
+        originalLanguage: movie.originalLanguage,
+      );
       if (!mounted) return;
 
       if (streams.isNotEmpty) {
@@ -220,6 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'mediaType': movie.mediaType,
             'quality': topStream.quality,
             'provider': topStream.provider,
+            'originalLanguage': movie.originalLanguage,
           },
         );
       } else {

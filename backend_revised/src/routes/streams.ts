@@ -23,6 +23,7 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
   const season = query.season ? Number(query.season) : undefined;
   const episode = query.episode ? Number(query.episode) : undefined;
   const defaultLanguage = query.default_language?.trim();
+  const originalLanguage = (query.original_language || query.orig_lang)?.trim().toLowerCase();
 
   if (mediaType === 'tv' && (!season || !episode || isNaN(season) || isNaN(episode))) {
     return c.json(
@@ -36,7 +37,7 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
     (c.req.header('Accept')?.includes('text/event-stream') ?? false);
 
   const origin = new URL(c.req.url).origin;
-  const cacheKey = `${origin}/api/v1/streams/${mediaType}/${imdbId}/${season || 0}/${episode || 0}/${defaultLanguage || ''}`;
+  const cacheKey = `${origin}/api/v1/streams/${mediaType}/${imdbId}/${season || 0}/${episode || 0}/${defaultLanguage || ''}/${originalLanguage || ''}`;
   const cacheService = new CacheService();
 
   const trace = c.get('trace');
@@ -63,6 +64,7 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
           season,
           episode,
           defaultLanguage,
+          originalLanguage,
           onProgress: async (progress) => {
             await stream.writeSSE({
               event: 'progress',
@@ -101,6 +103,7 @@ streamsRouter.get('/:media_type/:imdb_id', async (c) => {
     season,
     episode,
     defaultLanguage,
+    originalLanguage,
   });
   if (trace) trace.add(`streams: ${data.streams.length} links ${Date.now() - tFetch}ms`);
 

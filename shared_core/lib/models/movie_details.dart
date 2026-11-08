@@ -32,7 +32,6 @@ class MovieDetails extends MovieSummary {
   final List<SeasonSummary> seasons;
   final String? status;
   final bool isOngoing;
-  final String? originalLanguage;
 
   const MovieDetails({
     required super.imdbId,
@@ -46,12 +45,12 @@ class MovieDetails extends MovieSummary {
     required super.voteCount,
     required super.mediaType,
     required super.genres,
+    super.originalLanguage,
     this.runtime,
     this.cast = const [],
     this.seasons = const [],
     this.status,
     this.isOngoing = false,
-    this.originalLanguage,
   });
 
   String get genreNamesString => genres.map((g) => g.name).join(', ');
@@ -106,7 +105,7 @@ class MovieDetails extends MovieSummary {
           .toList(),
       status: json['status'] as String?,
       isOngoing: json['is_ongoing'] as bool? ?? false,
-      originalLanguage: json['original_language'] as String?,
+      originalLanguage: json['original_language'] as String? ?? summary?.originalLanguage,
     );
   }
 

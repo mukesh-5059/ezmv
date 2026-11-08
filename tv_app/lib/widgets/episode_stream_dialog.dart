@@ -11,6 +11,7 @@ class EpisodeStreamDialog extends StatefulWidget {
   final int seasonNumber;
   final TvEpisode episode;
   final bool autoPlay;
+  final String? originalLanguage;
   final void Function(StreamSource stream)? onStreamSelected;
   final void Function(StreamSource stream, List<StreamSource> allStreams)? onStreamSelectedWithAll;
 
@@ -21,6 +22,7 @@ class EpisodeStreamDialog extends StatefulWidget {
     required this.seasonNumber,
     required this.episode,
     this.autoPlay = true,
+    this.originalLanguage,
     this.onStreamSelected,
     this.onStreamSelectedWithAll,
   });
@@ -71,6 +73,7 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
       widget.imdbId,
       season: widget.seasonNumber,
       episode: widget.episode.episodeNumber,
+      originalLanguage: widget.originalLanguage,
     ).listen(
       (event) {
         if (!mounted) return;

@@ -12,6 +12,7 @@ class MovieSummary {
   final int voteCount;
   final String mediaType;
   final List<Genre> genres;
+  final String? originalLanguage;
 
   const MovieSummary({
     required this.imdbId,
@@ -25,6 +26,7 @@ class MovieSummary {
     required this.voteCount,
     required this.mediaType,
     required this.genres,
+    this.originalLanguage,
   });
 
   bool get isTv => mediaType == 'tv';
@@ -54,7 +56,6 @@ class MovieSummary {
 
   double get voteAverage => ratingScore;
   List<String> get genreTags => genres.map((g) => g.name).toList();
-  String? get originalLanguage => null;
 
   factory MovieSummary.fromJson(Map<String, dynamic> json) {
     final rawGenres = json['genres'] as List? ?? [];
@@ -72,6 +73,7 @@ class MovieSummary {
       genres: rawGenres
           .map((g) => Genre.fromJson(g as Map<String, dynamic>))
           .toList(),
+      originalLanguage: json['original_language'] as String?,
     );
   }
 
@@ -87,6 +89,7 @@ class MovieSummary {
     'vote_count': voteCount,
     'media_type': mediaType,
     'genres': genres.map((g) => g.toJson()).toList(),
+    'original_language': originalLanguage,
   };
 }
 

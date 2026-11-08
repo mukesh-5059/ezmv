@@ -51,6 +51,7 @@ class PlayerScreen extends StatefulWidget {
   final double? ratingScore;
   final int? voteCount;
   final List<String>? genres;
+  final String? originalLanguage;
 
   const PlayerScreen({
     super.key,
@@ -74,6 +75,7 @@ class PlayerScreen extends StatefulWidget {
     this.ratingScore,
     this.voteCount,
     this.genres,
+    this.originalLanguage,
   });
 
   factory PlayerScreen.fromMap(Map<String, dynamic> map) {
@@ -98,6 +100,7 @@ class PlayerScreen extends StatefulWidget {
       ratingScore: (map['ratingScore'] as num?)?.toDouble(),
       voteCount: (map['voteCount'] as num?)?.toInt(),
       genres: (map['genres'] as List?)?.map((g) => g.toString()).toList(),
+      originalLanguage: map['originalLanguage'] as String?,
     );
   }
 
@@ -753,6 +756,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       widget.imdbId,
       season: _currentSeason,
       episode: _currentEpisode,
+      originalLanguage: widget.originalLanguage,
     ).listen(
       (event) {
         if (!mounted) return;
@@ -873,6 +877,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       widget.imdbId,
       season: seasonNum,
       episode: episode.episodeNumber,
+      originalLanguage: widget.originalLanguage,
     ).listen(
       (event) async {
         if (!mounted) return;
@@ -1671,10 +1676,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     final ep = episodes[idx];
                     final isPlayingThis = ep.episodeNumber == _currentEpisode &&
                         (_currentDrawerSeason?.seasonNumber ?? _currentSeason) == _currentSeason;
+                    final subtitleParts = <String>[];
+                    if (ep.formattedRuntime.isNotEmpty) subtitleParts.add(ep.formattedRuntime);
+                    if (ep.formattedAirDate.isNotEmpty) {
+                      subtitleParts.add(ep.isUpcoming ? 'Airs ${ep.formattedAirDate}' : ep.formattedAirDate);
+                    }
+                    if (ep.isUpcoming) subtitleParts.add('Unreleased');
                     return _DrawerTile(
                       autofocus: isPlayingThis || (idx == 0 && _currentEpisode == null),
                       title: 'E${ep.episodeNumber}: ${ep.name}',
-                      subtitle: ep.formattedRuntime.isNotEmpty ? ep.formattedRuntime : ep.airDate,
+                      subtitle: subtitleParts.isNotEmpty ? subtitleParts.join(' • ') : null,
                       isSelected: isPlayingThis,
                       onTap: () => _selectEpisodeInDrawer(ep),
                       onBack: _closeDrawer,

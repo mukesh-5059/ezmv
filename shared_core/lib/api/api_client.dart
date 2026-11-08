@@ -127,14 +127,20 @@ class ApiClient {
     String imdbId, {
     int? season,
     int? episode,
+    String? originalLanguage,
     String? defaultLanguage,
+    bool refresh = false,
   }) async {
     final queryParams = <String, String>{};
     if (season != null) queryParams['season'] = '$season';
     if (episode != null) queryParams['episode'] = '$episode';
+    if (originalLanguage != null && originalLanguage.isNotEmpty) {
+      queryParams['original_language'] = originalLanguage;
+    }
     if (defaultLanguage != null && defaultLanguage.isNotEmpty) {
       queryParams['default_language'] = defaultLanguage;
     }
+    if (refresh) queryParams['refresh'] = 'true';
 
     final data = await _get('/api/v1/streams/$mediaType/$imdbId', queryParams);
     final map = data as Map<String, dynamic>;
@@ -147,14 +153,20 @@ class ApiClient {
     String imdbId, {
     int? season,
     int? episode,
+    String? originalLanguage,
     String? defaultLanguage,
+    bool refresh = false,
   }) async* {
     final queryParams = <String, String>{'sse': 'true'};
     if (season != null) queryParams['season'] = '$season';
     if (episode != null) queryParams['episode'] = '$episode';
+    if (originalLanguage != null && originalLanguage.isNotEmpty) {
+      queryParams['original_language'] = originalLanguage;
+    }
     if (defaultLanguage != null && defaultLanguage.isNotEmpty) {
       queryParams['default_language'] = defaultLanguage;
     }
+    if (refresh) queryParams['refresh'] = 'true';
 
     final uri = _buildUri('/api/v1/streams/$mediaType/$imdbId', queryParams);
     final request = http.Request('GET', uri);

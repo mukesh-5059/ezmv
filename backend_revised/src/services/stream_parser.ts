@@ -28,6 +28,9 @@ export const LANGUAGE_MAP: Record<string, string> = {
   pa: 'Punjabi',
   pan: 'Punjabi',
   punjabi: 'Punjabi',
+  gu: 'Gujarati',
+  guj: 'Gujarati',
+  gujarati: 'Gujarati',
   fr: 'French',
   fre: 'French',
   fra: 'French',
@@ -62,6 +65,24 @@ export function normalizeLanguage(langOrCode?: string): string | undefined {
   if (!langOrCode) return undefined;
   const clean = langOrCode.trim().toLowerCase();
   return LANGUAGE_MAP[clean] || (clean.charAt(0).toUpperCase() + clean.slice(1));
+}
+
+export const INDIAN_LANGUAGES = new Set([
+  'Tamil',
+  'Telugu',
+  'Hindi',
+  'Malayalam',
+  'Kannada',
+  'Bengali',
+  'Marathi',
+  'Punjabi',
+  'Gujarati',
+]);
+
+export function isIndianLanguage(langOrCode?: string): boolean {
+  if (!langOrCode) return false;
+  const norm = normalizeLanguage(langOrCode);
+  return norm ? INDIAN_LANGUAGES.has(norm) : false;
 }
 
 export function parseLanguages(text: string, defaultLanguage?: string): string[] {
@@ -120,7 +141,8 @@ export function calculatePriority(
   languages?: string[],
   defaultLanguage?: string,
   host?: string,
-  sizeBytes?: number
+  sizeBytes?: number,
+  originalLanguage?: string
 ): number {
   let score = 100;
   const pLow = provider.toLowerCase();
@@ -128,7 +150,6 @@ export function calculatePriority(
   else if (pLow === 'plaviohd') score -= 20;
   else if (pLow === 'penguplay') score -= 10;
 
-  // Host speed weighting
   if (host) {
     const hLow = host.toLowerCase();
     if (
@@ -148,30 +169,33 @@ export function calculatePriority(
     }
   }
 
-  // Size spectrum: slight bonus for reasonable sizes (< 4 GB) over 30 GB remuxes
   if (sizeBytes && sizeBytes > 0) {
     const gb = sizeBytes / (1024 * 1024 * 1024);
     if (gb <= 3.5) score -= 5;
     else if (gb > 25) score += 5;
   }
 
-  const hasTamil = languages?.some((l) => l.toLowerCase() === 'tamil');
-  if (hasTamil) {
-    score -= 30;
-  } else if (
-    defaultLanguage &&
-    languages?.some((l) => l.toLowerCase() === defaultLanguage.toLowerCase())
-  ) {
-    score -= 15;
+  const isIndian = isIndianLanguage(originalLanguage);
+  const normOrig = normalizeLanguage(originalLanguage);
+  const normDefault = normalizeLanguage(defaultLanguage);
+
+  if (isIndian) {
+    const hasTamil = languages?.some((l) => l.toLowerCase() === 'tamil');
+    if (hasTamil) score -= 30;
+    else if (normOrig && languages?.some((l) => l.toLowerCase() === normOrig.toLowerCase())) score -= 20;
+    else if (normDefault && languages?.some((l) => l.toLowerCase() === normDefault.toLowerCase())) score -= 15;
+  } else if (originalLanguage) {
+    if (normOrig && languages?.some((l) => l.toLowerCase() === normOrig.toLowerCase())) score -= 30;
+    else if (normDefault && languages?.some((l) => l.toLowerCase() === normDefault.toLowerCase())) score -= 15;
+  } else {
+    const hasTamil = languages?.some((l) => l.toLowerCase() === 'tamil');
+    if (hasTamil) score -= 30;
+    else if (normDefault && languages?.some((l) => l.toLowerCase() === normDefault.toLowerCase())) score -= 15;
   }
 
-  if (quality === '1080p') {
-    score -= 20;
-  } else if (quality === '4K UHD') {
-    score -= 10;
-  } else if (quality === '720p') {
-    score -= 5;
-  }
+  if (quality === '1080p') score -= 20;
+  else if (quality === '4K UHD') score -= 10;
+  else if (quality === '720p') score -= 5;
 
   return score;
 }
@@ -179,7 +203,8 @@ export function calculatePriority(
 export function parseStreamItem(
   raw: any,
   provider: string,
-  defaultLanguage?: string
+  defaultLanguage?: string,
+  originalLanguage?: string
 ): StreamSource | null {
   const url = raw.url;
   if (!url || typeof url !== 'string' || !url.startsWith('http')) return null;
@@ -187,14 +212,12 @@ export function parseStreamItem(
   const filename = extractFilename(raw);
   const fullText = `${raw.name || ''} ${raw.description || ''} ${filename || ''}`;
 
-  if (/donation|support the project|discord\.gg/i.test(fullText) && !raw.behaviorHints?.videoSize) {
-    return null;
-  }
+  if (/donation|support the project|discord\.gg/i.test(fullText) && !raw.behaviorHints?.videoSize) return null;
 
   const quality = parseQuality(fullText);
   if (quality === '4K UHD') return null;
 
-  const languages = parseLanguages(fullText, defaultLanguage);
+  const languages = parseLanguages(fullText, defaultLanguage || originalLanguage);
 
   const sizeBytes =
     typeof raw.behaviorHints?.videoSize === 'number' && raw.behaviorHints.videoSize > 0
@@ -210,9 +233,7 @@ export function parseStreamItem(
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   };
-  if (raw.behaviorHints?.proxyHeaders?.request) {
-    Object.assign(headers, raw.behaviorHints.proxyHeaders.request);
-  }
+  if (raw.behaviorHints?.proxyHeaders?.request) Object.assign(headers, raw.behaviorHints.proxyHeaders.request);
 
   return {
     url,
@@ -220,7 +241,7 @@ export function parseStreamItem(
     filename,
     size_bytes: sizeBytes,
     formatted_size: formatSizeBytes(sizeBytes),
-    priority: calculatePriority(provider, quality, languages, defaultLanguage, host, sizeBytes),
+    priority: calculatePriority(provider, quality, languages, defaultLanguage, host, sizeBytes, originalLanguage),
     provider,
     host,
     languages: languages.length > 0 ? languages : undefined,

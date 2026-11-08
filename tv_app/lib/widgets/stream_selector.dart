@@ -35,6 +35,9 @@ class StreamSelector extends StatelessWidget {
     String mediaType = 'movie',
     int? season,
     int? episode,
+    String? originalLanguage,
+    String? defaultLanguage,
+    bool refresh = false,
     int? runtimeMinutes,
     bool autoPlay = false,
     ValueChanged<List<StreamSource>>? onStreamsLoaded,
@@ -51,6 +54,9 @@ class StreamSelector extends StatelessWidget {
           mediaType: mediaType,
           season: season,
           episode: episode,
+          originalLanguage: originalLanguage,
+          defaultLanguage: defaultLanguage,
+          refresh: refresh,
           runtimeMinutes: runtimeMinutes,
           autoPlay: autoPlay,
           onStreamsLoaded: onStreamsLoaded,
@@ -248,6 +254,9 @@ class _StreamSelectorDialog extends StatefulWidget {
   final String mediaType;
   final int? season;
   final int? episode;
+  final String? originalLanguage;
+  final String? defaultLanguage;
+  final bool refresh;
   final int? runtimeMinutes;
   final bool autoPlay;
   final ValueChanged<List<StreamSource>>? onStreamsLoaded;
@@ -260,6 +269,9 @@ class _StreamSelectorDialog extends StatefulWidget {
     this.mediaType = 'movie',
     this.season,
     this.episode,
+    this.originalLanguage,
+    this.defaultLanguage,
+    this.refresh = false,
     this.runtimeMinutes,
     this.autoPlay = false,
     this.onStreamsLoaded,
@@ -289,7 +301,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
     if (_isLoading) _startFetching();
   }
 
-  void _startFetching() {
+  void _startFetching({bool isRetry = false}) {
     _sseSubscription?.cancel();
     setState(() {
       _isLoading = true;
@@ -303,6 +315,9 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
           widget.imdbId!,
           season: widget.season,
           episode: widget.episode,
+          originalLanguage: widget.originalLanguage,
+          defaultLanguage: widget.defaultLanguage,
+          refresh: isRetry || widget.refresh,
         )
         .listen(
       (event) {
@@ -563,7 +578,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
                                   backgroundColor: TVTheme.primary,
                                   foregroundColor: Colors.black,
                                 ),
-                                onPressed: _startFetching,
+                                onPressed: () => _startFetching(isRetry: true),
                                 icon: const Icon(Icons.refresh),
                                 label: const Text('Retry'),
                               ),

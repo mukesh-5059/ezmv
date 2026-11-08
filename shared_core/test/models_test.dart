@@ -166,6 +166,19 @@ void main() {
       expect(ep.stillUrl, 'https://image.tmdb.org/t/p/w500/still.jpg');
       expect(ep.formattedRuntime, '62m');
       expect(ep.isReleased, true);
+      expect(ep.formattedAirDate, 'Apr 17, 2011');
+      expect(ep.isUpcoming, false);
+
+      final upcomingJson = {
+        'episode_number': 2,
+        'name': 'The Kingsroad',
+        'overview': 'Overview...',
+        'air_date': '2099-12-31',
+        'is_released': false,
+      };
+      final upcomingEp = TvEpisode.fromJson(upcomingJson);
+      expect(upcomingEp.formattedAirDate, 'Dec 31, 2099');
+      expect(upcomingEp.isUpcoming, true);
     });
 
     test('TvSeason fromJson', () {

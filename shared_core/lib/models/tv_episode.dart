@@ -17,6 +17,11 @@ class TvEpisode {
     this.isReleased = true,
   });
 
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
   String get stillUrl {
     if (stillPath == null || stillPath!.isEmpty) return '';
     if (stillPath!.startsWith('http')) return stillPath!;
@@ -26,6 +31,31 @@ class TvEpisode {
   String get formattedRuntime {
     if (runtime == null || runtime! <= 0) return '';
     return '${runtime}m';
+  }
+
+  bool get isUpcoming {
+    if (!isReleased) return true;
+    if (airDate == null || airDate!.trim().isEmpty) return false;
+    try {
+      final date = DateTime.tryParse(airDate!);
+      if (date != null) {
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        return date.isAfter(today);
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  String get formattedAirDate {
+    if (airDate == null || airDate!.trim().isEmpty) return '';
+    try {
+      final d = DateTime.tryParse(airDate!);
+      if (d != null && d.month >= 1 && d.month <= 12) {
+        return '${_months[d.month - 1]} ${d.day}, ${d.year}';
+      }
+    } catch (_) {}
+    return airDate!;
   }
 
   factory TvEpisode.fromJson(Map<String, dynamic> json) => TvEpisode(
