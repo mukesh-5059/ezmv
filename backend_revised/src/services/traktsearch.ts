@@ -1,6 +1,7 @@
 import { Bindings, PaginatedMoviesResponse, RequestTrace, SearchFilters } from '../types/api';
 import { TraktSearchItem } from '../types/upstream';
 import { CatalogService } from './catalog';
+import { isProfane } from './profanity';
 
 export class TraktSearchService {
   private clientId: string;
@@ -31,7 +32,7 @@ export class TraktSearchService {
       next_page: null,
     };
 
-    if (!cleanQuery) return emptyResponse;
+    if (!cleanQuery || isProfane(cleanQuery)) return emptyResponse;
 
     let endpointType = 'movie,show';
     if (filters?.media_type === 'movie')   endpointType = 'movie';
@@ -69,6 +70,7 @@ export class TraktSearchService {
 
       for (const item of rawItems) {
         const payload = item.movie || item.show;
+        if (isProfane(payload?.title)) continue;
         const imdbId = payload?.ids?.imdb;
         if (imdbId && imdbId.startsWith('tt')) imdbIds.push(imdbId);
       }
@@ -112,7 +114,7 @@ export class TraktSearchService {
       next_page: null,
     };
 
-    if (!this.tmdbApiKey) return emptyResponse;
+    if (!this.tmdbApiKey || isProfane(cleanQuery)) return emptyResponse;
 
     let path = 'search/multi';
     if (filters?.media_type === 'movie') path = 'search/movie';
@@ -135,6 +137,8 @@ export class TraktSearchService {
       const tmdbItems: Array<{ id: number; media_type: 'movie' | 'tv' }> = [];
 
       for (const item of results) {
+        if (item.adult === true) continue;
+        if (isProfane(item.title || item.name)) continue;
         const mType = item.media_type || (filters?.media_type === 'tv' ? 'tv' : 'movie');
         if (mType === 'movie' || mType === 'tv') {
           tmdbItems.push({ id: item.id, media_type: mType });

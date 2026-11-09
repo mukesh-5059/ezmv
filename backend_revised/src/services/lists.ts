@@ -1,5 +1,6 @@
 import { Bindings, ListFilters, PaginatedListsResponse, PaginatedMoviesResponse, RequestTrace, TraktListSummary } from '../types/api';
 import { CatalogService } from './catalog';
+import { isProfane } from './profanity';
 
 export class ListsService {
   private clientId: string;
@@ -56,6 +57,7 @@ export class ListsService {
       for (const entry of rawItems) {
         const l = entry.list;
         if (!l?.ids?.trakt) continue;
+        if (isProfane(l.name) || isProfane(l.description) || isProfane(l.ids?.slug)) continue;
 
         items.push({
           id: l.ids.trakt,
@@ -93,7 +95,7 @@ export class ListsService {
       next_page: null,
     };
 
-    if (!this.clientId || !cleanQuery) return emptyResponse;
+    if (!this.clientId || !cleanQuery || isProfane(cleanQuery)) return emptyResponse;
 
     const url = `${this.baseUrl}/search/list?query=${encodeURIComponent(cleanQuery)}&page=${page}&limit=${limit}`;
 
@@ -118,6 +120,7 @@ export class ListsService {
       for (const entry of rawItems) {
         const l = entry.list;
         if (!l?.ids?.trakt) continue;
+        if (isProfane(l.name) || isProfane(l.description) || isProfane(l.ids?.slug)) continue;
 
         items.push({
           id: l.ids.trakt,
