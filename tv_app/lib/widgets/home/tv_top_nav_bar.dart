@@ -84,94 +84,99 @@ class _TvTopNavBarState extends State<TvTopNavBar> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 68,
-      padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin, vertical: 8),
-      color: Colors.transparent,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // App Brand Logo / Title
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: TVTheme.primary,
-                  borderRadius: TVTheme.borderRadiusSm,
-                  boxShadow: [
-                    BoxShadow(
-                      color: TVTheme.primary.withValues(alpha: 0.4),
-                      blurRadius: 10,
-                      spreadRadius: 1,
+    return FocusTraversalGroup(
+      policy: WidgetOrderTraversalPolicy(),
+      child: Container(
+        height: 68,
+        padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin, vertical: 8),
+        color: Colors.transparent,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // App Brand Logo / Title
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: TVTheme.primary,
+                    borderRadius: TVTheme.borderRadiusSm,
+                    boxShadow: [
+                      BoxShadow(
+                        color: TVTheme.primary.withValues(alpha: 0.4),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: const Text(
+                    'EzMV',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                      color: Colors.white,
                     ),
-                  ],
-                ),
-                child: const Text(
-                  'EzMV',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.2,
-                    color: Colors.white,
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 32),
+              ],
+            ),
+            const SizedBox(width: 32),
 
-          // Dashboard Category Tabs
-          ..._dashboards.asMap().entries.map((entry) {
-            final idx = entry.key;
-            final dash = entry.value;
-            final id = dash['id']!;
-            final label = dash['label']!;
-            final isSelected = widget.activeDashboardId == id;
-            final isLastTab = idx == _dashboards.length - 1;
+            // Dashboard Category Tabs
+            ..._dashboards.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final dash = entry.value;
+              final id = dash['id']!;
+              final label = dash['label']!;
+              final isSelected = widget.activeDashboardId == id;
+              final isLastTab = idx == _dashboards.length - 1;
 
-            return Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: _NavTabItem(
-                focusNode: _getTabFocusNode(id),
-                label: label,
-                isSelected: isSelected,
-                onSelected: () => widget.onDashboardChanged(id),
-                onDown: widget.onNavigateDown,
-                onRight: isLastTab ? () => _effectiveSearchNode.requestFocus() : null,
-              ),
-            );
-          }),
+              return Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: _NavTabItem(
+                  focusNode: _getTabFocusNode(id),
+                  label: label,
+                  isSelected: isSelected,
+                  onSelected: () => widget.onDashboardChanged(id),
+                  onDown: widget.onNavigateDown,
+                  onLeft: idx == 0 ? () {} : null,
+                  onRight: isLastTab ? () => _effectiveSearchNode.requestFocus() : null,
+                ),
+              );
+            }),
 
-          const Spacer(),
+            const Spacer(),
 
-          // Right-aligned Actions
-          _NavIconButton(
-            focusNode: _effectiveSearchNode,
-            icon: Icons.search_rounded,
-            label: 'Search',
-            onTap: widget.onSearchTap,
-            onDown: widget.onNavigateDown,
-            onLeft: () => _getTabFocusNode('anime').requestFocus(),
-          ),
-          const SizedBox(width: 12),
-          _NavIconButton(
-            focusNode: _curatedFocusNode,
-            icon: Icons.playlist_play_rounded,
-            label: 'Curated Lists',
-            onTap: widget.onCuratedListsTap,
-            onDown: widget.onNavigateDown,
-          ),
-          const SizedBox(width: 12),
-          _NavIconButton(
-            focusNode: _settingsFocusNode,
-            icon: Icons.settings_rounded,
-            label: 'Settings',
-            onTap: widget.onSettingsTap,
-            onDown: widget.onNavigateDown,
-          ),
-        ],
+            // Right-aligned Actions
+            _NavIconButton(
+              focusNode: _effectiveSearchNode,
+              icon: Icons.search_rounded,
+              label: 'Search',
+              onTap: widget.onSearchTap,
+              onDown: widget.onNavigateDown,
+              onLeft: () => _getTabFocusNode('anime').requestFocus(),
+            ),
+            const SizedBox(width: 12),
+            _NavIconButton(
+              focusNode: _curatedFocusNode,
+              icon: Icons.playlist_play_rounded,
+              label: 'Curated Lists',
+              onTap: widget.onCuratedListsTap,
+              onDown: widget.onNavigateDown,
+            ),
+            const SizedBox(width: 12),
+            _NavIconButton(
+              focusNode: _settingsFocusNode,
+              icon: Icons.settings_rounded,
+              label: 'Settings',
+              onTap: widget.onSettingsTap,
+              onDown: widget.onNavigateDown,
+              onRight: () {},
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -184,6 +189,7 @@ class _NavTabItem extends StatefulWidget {
   final VoidCallback onSelected;
   final VoidCallback? onDown;
   final VoidCallback? onRight;
+  final VoidCallback? onLeft;
 
   const _NavTabItem({
     required this.focusNode,
@@ -192,6 +198,7 @@ class _NavTabItem extends StatefulWidget {
     required this.onSelected,
     this.onDown,
     this.onRight,
+    this.onLeft,
   });
 
   @override
@@ -207,13 +214,20 @@ class _NavTabItemState extends State<_NavTabItem> {
       focusNode: widget.focusNode,
       onFocusChange: (focused) => setState(() => _isFocused = focused),
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft && widget.onLeft != null) {
+            if (event is KeyDownEvent) widget.onLeft!();
+            return KeyEventResult.handled;
+          }
           if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onDown != null) {
-            widget.onDown!();
+            if (event is KeyDownEvent) widget.onDown!();
             return KeyEventResult.handled;
           }
           if (event.logicalKey == LogicalKeyboardKey.arrowRight && widget.onRight != null) {
-            widget.onRight!();
+            if (event is KeyDownEvent) widget.onRight!();
             return KeyEventResult.handled;
           }
         }
@@ -311,17 +325,20 @@ class _NavIconButtonState extends State<_NavIconButton> {
       focusNode: widget.focusNode,
       onFocusChange: (focused) => setState(() => _isFocused = focused),
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            return KeyEventResult.handled;
+          }
           if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onDown != null) {
-            widget.onDown!();
+            if (event is KeyDownEvent) widget.onDown!();
             return KeyEventResult.handled;
           }
           if (event.logicalKey == LogicalKeyboardKey.arrowLeft && widget.onLeft != null) {
-            widget.onLeft!();
+            if (event is KeyDownEvent) widget.onLeft!();
             return KeyEventResult.handled;
           }
           if (event.logicalKey == LogicalKeyboardKey.arrowRight && widget.onRight != null) {
-            widget.onRight!();
+            if (event is KeyDownEvent) widget.onRight!();
             return KeyEventResult.handled;
           }
         }

@@ -380,7 +380,7 @@ void main() {
 
       // Tap Sources button
       await tester.tap(find.text('Sources'));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       // Sources drawer title and stream tiles should be visible
       expect(find.text('Sources'), findsWidgets);
@@ -388,7 +388,7 @@ void main() {
 
       // Press Back key to close drawer
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.text('BackupCDN Stream'), findsNothing);
     });

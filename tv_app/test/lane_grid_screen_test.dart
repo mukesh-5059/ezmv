@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_core/shared_core.dart';
 import 'package:tv_app/screens/lane_grid_screen.dart';
 import 'package:tv_app/theme.dart';
+import 'package:tv_app/widgets/tv_focus_button.dart';
 import 'package:tv_app/widgets/tv_focus_card.dart';
 import 'package:tv_app/widgets/tv_pill_chip.dart';
 
@@ -147,8 +148,10 @@ void main() {
       final gridFinder = find.byKey(const PageStorageKey('lane_grid_english_en_action'));
       expect(gridFinder, findsOneWidget);
 
-      final grid = tester.widget<GridView>(gridFinder);
-      final delegate = grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+      final grid = tester.widget<CustomScrollView>(gridFinder);
+      expect(grid, isNotNull);
+      final sliverGrid = tester.widget<SliverGrid>(find.byType(SliverGrid));
+      final delegate = sliverGrid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
       expect(delegate.crossAxisCount, 5);
       expect(delegate.crossAxisSpacing, 16);
       expect(delegate.mainAxisSpacing, 16);
@@ -220,7 +223,7 @@ void main() {
       expect(mockApi.lastGenre, 'comedy');
     });
 
-    testWidgets('Dismissing filter strip via Left arrow or Back key preserves current filter',
+    testWidgets('Pressing Left arrow moves focus to movie grid, and Back key dismisses filter strip',
         (tester) async {
       configureTvResolution(tester);
       mockApi.mockItems = generateMockMovies(5);
@@ -233,11 +236,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Media Type'), findsOneWidget);
 
-      // Send D-pad Left key
+      // Send D-pad Left key: moves focus to movies grid, strip remains open
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pumpAndSettle();
+      expect(find.text('Media Type'), findsOneWidget);
 
-      // Strip closed, filter untouched
+      // Send Back key: dismisses filter strip
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
       expect(find.text('Media Type'), findsNothing);
       expect(find.text('Type'), findsOneWidget);
     });
@@ -287,7 +293,7 @@ void main() {
       expect(mockApi.lastPage, 1);
 
       // Drag grid up to reveal card 10 (< 30 - 15 = 15)
-      await tester.drag(find.byType(GridView), const Offset(0, -300));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -300));
       await tester.pumpAndSettle();
 
       final card10 = find.byKey(const ValueKey('movie_tt00010_10'));
@@ -299,7 +305,7 @@ void main() {
       expect(mockApi.getLaneCallCount, 1);
 
       // Drag further down to reveal card 16 (>= 15), focusing it MUST trigger prefetch for page 2!
-      await tester.drag(find.byType(GridView), const Offset(0, -1200));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -1200));
       await tester.pumpAndSettle();
 
       final card16 = find.byKey(const ValueKey('movie_tt00016_16'));
@@ -343,11 +349,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // Scroll down
-      await tester.drag(find.byType(GridView), const Offset(0, -600));
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
       await tester.pumpAndSettle();
 
       final scrollable = tester.state<ScrollableState>(
-        find.descendant(of: find.byType(GridView), matching: find.byType(Scrollable)),
+        find.descendant(of: find.byType(CustomScrollView), matching: find.byType(Scrollable)),
       );
       expect(scrollable.position.pixels, greaterThan(20));
 
@@ -392,6 +398,97 @@ void main() {
 
       expect(find.text('Trending'), findsNothing);
       expect(find.text('Home Screen'), findsOneWidget);
+    });
+  });
+
+  group('LaneGridScreen - D-Pad Navigation & Focus Flows', () {
+    testWidgets('Initial autofocus lands on Card 0 (Row 0, Col 0)', (tester) async {
+      configureTvResolution(tester);
+      mockApi.mockItems = generateMockMovies(10);
+      mockApi.mockHasMore = false;
+
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      final card0 = find.byKey(const ValueKey('movie_tt0000_0'));
+      expect(card0, findsOneWidget);
+      expect(Focus.of(tester.element(card0)).hasFocus, isTrue);
+    });
+
+    testWidgets('Sort pill arrowRight to Clear Filters and arrowLeft back to Sort pill', (tester) async {
+      configureTvResolution(tester);
+      mockApi.mockItems = generateMockMovies(5);
+      mockApi.mockHasMore = false;
+
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      final sortPill = find.text('Sort');
+      expect(sortPill, findsOneWidget);
+      final sortFocus = Focus.of(tester.element(sortPill));
+      sortFocus.requestFocus();
+      await tester.pumpAndSettle();
+      expect(sortFocus.hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+
+      final clearFiltersBtn = find.widgetWithText(TvFocusButton, 'Clear Filters');
+      final clearFiltersFocus = Focus.of(tester.element(clearFiltersBtn));
+      expect(clearFiltersFocus.hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(sortFocus.hasFocus, isTrue);
+    });
+
+    testWidgets('Clear Filters arrowDown focuses Card 0', (tester) async {
+      configureTvResolution(tester);
+      mockApi.mockItems = generateMockMovies(5);
+      mockApi.mockHasMore = false;
+
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      final clearFiltersBtn = find.widgetWithText(TvFocusButton, 'Clear Filters');
+      final clearFiltersFocus = Focus.of(tester.element(clearFiltersBtn));
+      clearFiltersFocus.requestFocus();
+      await tester.pumpAndSettle();
+      expect(clearFiltersFocus.hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      final card0 = find.byKey(const ValueKey('movie_tt0000_0'));
+      expect(card0, findsOneWidget);
+      expect(Focus.of(tester.element(card0)).hasFocus, isTrue);
+    });
+
+    testWidgets('Filter panel arrowDown on last option does not escape to movie grid', (tester) async {
+      configureTvResolution(tester);
+      mockApi.mockItems = generateMockMovies(5);
+      mockApi.mockHasMore = false;
+
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      // Open Type filter strip
+      await tester.tap(find.text('Type'));
+      await tester.pumpAndSettle();
+      expect(find.text('Media Type'), findsOneWidget);
+
+      // Focus last option in Type strip (TV)
+      final tvOption = find.text('TV');
+      expect(tvOption, findsOneWidget);
+      final tvFocus = Focus.of(tester.element(tvOption));
+      tvFocus.requestFocus();
+      await tester.pumpAndSettle();
+      expect(tvFocus.hasFocus, isTrue);
+
+      // Press Arrow Down -> stays clamped on TV option, does NOT move to movie grid
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(tvFocus.hasFocus, isTrue);
     });
   });
 }

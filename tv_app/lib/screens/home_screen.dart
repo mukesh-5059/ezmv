@@ -56,11 +56,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final ScrollController _verticalScrollController = ScrollController();
   final GlobalKey<TvContinueWatchingLaneState> _continueWatchingKey = GlobalKey();
+  final GlobalKey<TvActorsLaneState> _actorsKey = GlobalKey();
 
   final FocusNode _navActiveTabFocusNode = FocusNode(debugLabel: 'NavActiveTab');
   final FocusNode _navSearchFocusNode = FocusNode(debugLabel: 'NavSearch');
-  final FocusNode _billboardPlayFocusNode = FocusNode(debugLabel: 'BillboardPlay');
-  final FocusNode _billboardDetailsFocusNode = FocusNode(debugLabel: 'BillboardDetails');
+  final FocusNode _billboardFocusNode = FocusNode(debugLabel: 'Billboard');
   final FocusNode _continueWatchingHeaderNode = FocusNode(debugLabel: 'CWHeader');
   final FocusNode _actorsHeaderNode = FocusNode(debugLabel: 'ActorsHeader');
   final Map<String, FocusNode> _laneHeaderNodes = {};
@@ -68,7 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
   FocusNode _getLaneHeaderNode(String laneId) =>
       _laneHeaderNodes.putIfAbsent(laneId, () => FocusNode(debugLabel: 'LaneHeader_$laneId'));
 
-  bool _isScrolledDown = false;
+  final ValueNotifier<bool> _isScrolledDown = ValueNotifier<bool>(false);
   DateTime? _lastBackPressTime;
 
   @override
@@ -82,10 +82,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _verticalScrollController.removeListener(_onVerticalScroll);
     _verticalScrollController.dispose();
+    _isScrolledDown.dispose();
     _navActiveTabFocusNode.dispose();
     _navSearchFocusNode.dispose();
-    _billboardPlayFocusNode.dispose();
-    _billboardDetailsFocusNode.dispose();
+    _billboardFocusNode.dispose();
     _continueWatchingHeaderNode.dispose();
     _actorsHeaderNode.dispose();
     for (final node in _laneHeaderNodes.values) {
@@ -97,8 +97,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onVerticalScroll() {
     if (!_verticalScrollController.hasClients) return;
     final scrolled = _verticalScrollController.offset > 320;
-    if (scrolled != _isScrolledDown) {
-      setState(() => _isScrolledDown = scrolled);
+    if (scrolled != _isScrolledDown.value) {
+      _isScrolledDown.value = scrolled;
     }
   }
 
@@ -118,6 +118,14 @@ class _HomeScreenState extends State<HomeScreen> {
           _dashboard = dash;
           _isLoading = false;
         });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (_billboardFocusNode.canRequestFocus) {
+            _billboardFocusNode.requestFocus();
+          } else {
+            _navActiveTabFocusNode.requestFocus();
+          }
+        });
       }
     } catch (_) {
       if (mounted) {
@@ -132,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onDashboardChanged(String id) {
     if (_activeDashboardId == id) return;
+    _scrollToTop();
     setState(() {
       _activeDashboardId = id;
     });
@@ -162,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (ro != null && ro.attached) {
           Scrollable.maybeOf(focusedContext, axis: Axis.vertical)?.position.ensureVisible(
             ro,
-            alignment: 0.22,
+            alignment: 0.5,
             duration: Duration.zero,
           );
         }
@@ -173,6 +182,11 @@ class _HomeScreenState extends State<HomeScreen> {
   void _handleBackPress() {
     if (_verticalScrollController.hasClients && _verticalScrollController.offset > 240) {
       _scrollToTop();
+      if (_dashboard?.lanes.isNotEmpty == true) {
+        _billboardFocusNode.requestFocus();
+      } else {
+        _navActiveTabFocusNode.requestFocus();
+      }
       return;
     }
 
@@ -240,24 +254,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToDetails(MovieSummary movie) async {
+    final currentFocus = FocusManager.instance.primaryFocus;
     if (widget.onDetailsTap != null) {
       widget.onDetailsTap!(movie);
       return;
     }
     await Navigator.pushNamed(context, '/details', arguments: movie);
-    if (mounted) _ensureFocusedVisible();
+    if (mounted) {
+      currentFocus?.requestFocus();
+      _ensureFocusedVisible();
+    }
   }
 
   void _navigateToActor(ActorSummary actor) async {
+    final currentFocus = FocusManager.instance.primaryFocus;
     if (widget.onActorTap != null) {
       widget.onActorTap!(actor);
       return;
     }
     await Navigator.pushNamed(context, '/actor', arguments: actor);
-    if (mounted) _ensureFocusedVisible();
+    if (mounted) {
+      currentFocus?.requestFocus();
+      _ensureFocusedVisible();
+    }
   }
 
   void _navigateToLaneGrid(DashboardLane lane) async {
+    final currentFocus = FocusManager.instance.primaryFocus;
     if (widget.onShowAllLane != null) {
       widget.onShowAllLane!(lane);
       return;
@@ -272,25 +295,36 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-    if (mounted) _ensureFocusedVisible();
+    if (mounted) {
+      currentFocus?.requestFocus();
+      _ensureFocusedVisible();
+    }
   }
 
   void _navigateToSearch() async {
+    final currentFocus = FocusManager.instance.primaryFocus;
     if (widget.onSearchTap != null) {
       widget.onSearchTap!();
       return;
     }
     await Navigator.pushNamed(context, '/search');
-    if (mounted) _ensureFocusedVisible();
+    if (mounted) {
+      currentFocus?.requestFocus();
+      _ensureFocusedVisible();
+    }
   }
 
   void _showSettings() async {
+    final currentFocus = FocusManager.instance.primaryFocus;
     if (widget.onSettingsTap != null) {
       widget.onSettingsTap!();
       return;
     }
     await Navigator.pushNamed(context, '/settings');
-    if (mounted) _ensureFocusedVisible();
+    if (mounted) {
+      currentFocus?.requestFocus();
+      _ensureFocusedVisible();
+    }
   }
 
   @override
@@ -385,25 +419,31 @@ class _HomeScreenState extends State<HomeScreen> {
     return Stack(
       children: [
         // Scrollable content area
-        ListView(
-          controller: _verticalScrollController,
-          padding: const EdgeInsets.only(top: 68),
-          children: [
+        FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: ListView(
+            controller: _verticalScrollController,
+            padding: const EdgeInsets.only(top: 68),
+            children: [
             // 1. Hero Billboard Carousel
             if (lanes.isNotEmpty)
               RepaintBoundary(
-                child: TvBillboard(
-                  lanes: lanes,
-                  isVisible: !_isScrolledDown,
-                  playButtonFocusNode: _billboardPlayFocusNode,
-                  detailsButtonFocusNode: _billboardDetailsFocusNode,
-                  onPlay: _handlePlayMovie,
-                  onDetails: _navigateToDetails,
-                  onNavigateUp: () {
-                    _scrollToTop();
-                    _navActiveTabFocusNode.requestFocus();
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: _isScrolledDown,
+                  builder: (context, isScrolledDown, child) {
+                    return TvBillboard(
+                      lanes: lanes,
+                      isVisible: !isScrolledDown,
+                      focusNode: _billboardFocusNode,
+                      onSelect: _navigateToDetails,
+                      onPlay: _handlePlayMovie,
+                      onNavigateUp: () {
+                        _scrollToTop();
+                        _navActiveTabFocusNode.requestFocus();
+                      },
+                      onNavigateDown: _focusFirstLaneHeader,
+                    );
                   },
-                  onNavigateDown: _focusFirstLaneHeader,
                 ),
               ),
 
@@ -415,7 +455,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onResume: _handleResumeWatching,
                 onNavigateUpFromHeader: () {
                   _scrollToTop();
-                  _billboardPlayFocusNode.requestFocus();
+                  _billboardFocusNode.requestFocus();
                 },
                 onNavigateDownFromCard: () {
                   if (lanes.isNotEmpty) {
@@ -442,7 +482,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _continueWatchingHeaderNode.requestFocus();
                       } else {
                         _scrollToTop();
-                        _billboardPlayFocusNode.requestFocus();
+                        _billboardFocusNode.requestFocus();
                       }
                     } else {
                       _getLaneHeaderNode(lanes[i - 1].id).requestFocus();
@@ -452,7 +492,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     if (i < lanes.length - 1) {
                       _getLaneHeaderNode(lanes[i + 1].id).requestFocus();
                     } else if (_activeDashboardId == 'tamil') {
-                      _actorsHeaderNode.requestFocus();
+                      if (_actorsKey.currentState != null) {
+                        _actorsKey.currentState!.focusCard();
+                      } else {
+                        _actorsHeaderNode.requestFocus();
+                      }
                     }
                   },
                 ),
@@ -462,6 +506,7 @@ class _HomeScreenState extends State<HomeScreen> {
             // 4. Tamil Actors Lane (Tamil Dashboard Only Shelf)
             if (_activeDashboardId == 'tamil')
               TvActorsLane(
+                key: _actorsKey,
                 headerFocusNode: _actorsHeaderNode,
                 onActorTap: _navigateToActor,
                 onNavigateUpFromHeader: () {
@@ -474,6 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 48),
           ],
         ),
+      ),
 
         // Pinned Top Navigation Bar with subtle scrim backdrop
         Positioned(
@@ -504,7 +550,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onNavigateDown: () {
                 _scrollToTop();
                 if (lanes.isNotEmpty) {
-                  _billboardPlayFocusNode.requestFocus();
+                  _billboardFocusNode.requestFocus();
                 } else {
                   _focusFirstLaneHeader();
                 }

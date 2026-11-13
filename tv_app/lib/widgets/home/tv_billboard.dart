@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../../theme.dart';
-import '../tv_focus_button.dart';
 
 /// 10-Foot Hero Billboard Carousel for Android TV.
 ///
@@ -17,27 +16,34 @@ import '../tv_focus_button.dart';
 ///   5. Fallback: Top 5 rated/popular titles in that dashboard (when zero comedy titles exist).
 /// - Auto-scroll timer with auto-pause on focus and cancel on vertical scroll.
 /// - Display typography (38sp bold), rating badge, release year, overview.
-/// - Dual CTA: "Play Now" (primary red) and "Details" (tonal).
+/// - Carousel cycling via Left / Right D-pad arrows when focused.
+/// - Full card focusable button: brightens on focus, dims on unfocus.
 class TvBillboard extends StatefulWidget {
   final List<DashboardLane> lanes;
   final bool isVisible;
-  final void Function(MovieSummary movie) onPlay;
-  final void Function(MovieSummary movie) onDetails;
+  final void Function(MovieSummary movie)? onSelect;
+  final void Function(MovieSummary movie)? onPlay;
+  final void Function(MovieSummary movie)? onDetails;
+  final FocusNode? focusNode;
   final FocusNode? playButtonFocusNode;
   final FocusNode? detailsButtonFocusNode;
   final VoidCallback? onNavigateUp;
   final VoidCallback? onNavigateDown;
+  final bool autofocus;
 
   const TvBillboard({
     super.key,
     required this.lanes,
     this.isVisible = true,
-    required this.onPlay,
-    required this.onDetails,
+    this.onSelect,
+    this.onPlay,
+    this.onDetails,
+    this.focusNode,
     this.playButtonFocusNode,
     this.detailsButtonFocusNode,
     this.onNavigateUp,
     this.onNavigateDown,
+    this.autofocus = false,
   });
 
   @override
@@ -49,21 +55,17 @@ class _TvBillboardState extends State<TvBillboard> {
   int _currentIndex = 0;
   Timer? _autoScrollTimer;
   bool _hasFocus = false;
+  int _lastRepeatMs = 0;
 
-  final FocusNode _billboardScopeNode = FocusNode();
-  final FocusNode _playButtonFocusNode = FocusNode();
-  final FocusNode _detailsButtonFocusNode = FocusNode();
-
-  FocusNode get _effectivePlayButtonNode => widget.playButtonFocusNode ?? _playButtonFocusNode;
-  FocusNode get _effectiveDetailsButtonNode => widget.detailsButtonFocusNode ?? _detailsButtonFocusNode;
+  final FocusNode _localFocusNode = FocusNode(debugLabel: 'TvBillboard');
+  FocusNode get _effectiveFocusNode =>
+      widget.focusNode ?? widget.playButtonFocusNode ?? _localFocusNode;
 
   @override
   void initState() {
     super.initState();
     _computeFeaturedMovies();
-    _billboardScopeNode.addListener(_onFocusScopeChange);
-    _effectivePlayButtonNode.addListener(_onFocusScopeChange);
-    _effectiveDetailsButtonNode.addListener(_onFocusScopeChange);
+    _effectiveFocusNode.addListener(_onFocusChange);
     _resetTimer();
   }
 
@@ -73,12 +75,11 @@ class _TvBillboardState extends State<TvBillboard> {
     if (oldWidget.lanes != widget.lanes) {
       _computeFeaturedMovies();
     }
-    if (oldWidget.playButtonFocusNode != widget.playButtonFocusNode ||
-        oldWidget.detailsButtonFocusNode != widget.detailsButtonFocusNode) {
-      oldWidget.playButtonFocusNode?.removeListener(_onFocusScopeChange);
-      oldWidget.detailsButtonFocusNode?.removeListener(_onFocusScopeChange);
-      _effectivePlayButtonNode.addListener(_onFocusScopeChange);
-      _effectiveDetailsButtonNode.addListener(_onFocusScopeChange);
+    final oldEffective = oldWidget.focusNode ?? oldWidget.playButtonFocusNode;
+    final newEffective = widget.focusNode ?? widget.playButtonFocusNode;
+    if (oldEffective != newEffective) {
+      oldEffective?.removeListener(_onFocusChange);
+      _effectiveFocusNode.addListener(_onFocusChange);
     }
     if (oldWidget.isVisible != widget.isVisible) {
       if (widget.isVisible) {
@@ -92,29 +93,42 @@ class _TvBillboardState extends State<TvBillboard> {
   @override
   void dispose() {
     _stopTimer();
-    _billboardScopeNode.removeListener(_onFocusScopeChange);
-    _effectivePlayButtonNode.removeListener(_onFocusScopeChange);
-    _effectiveDetailsButtonNode.removeListener(_onFocusScopeChange);
-    _billboardScopeNode.dispose();
-    _playButtonFocusNode.dispose();
-    _detailsButtonFocusNode.dispose();
+    _effectiveFocusNode.removeListener(_onFocusChange);
+    _localFocusNode.dispose();
     super.dispose();
   }
 
-  void _onFocusScopeChange() {
-    final hasFocusNow = _billboardScopeNode.hasFocus ||
-        _effectivePlayButtonNode.hasFocus ||
-        _effectiveDetailsButtonNode.hasFocus;
-
+  void _onFocusChange() {
+    final hasFocusNow = _effectiveFocusNode.hasFocus;
     if (_hasFocus != hasFocusNow) {
       setState(() => _hasFocus = hasFocusNow);
       if (_hasFocus) {
-        // MUST pause timer when focus enters Billboard
         _stopTimer();
       } else if (widget.isVisible) {
-        // Resume timer when focus leaves Billboard (if still visible)
         _resetTimer();
       }
+    }
+  }
+
+  void _previousMovie() {
+    if (_currentIndex <= 0) return;
+    setState(() => _currentIndex--);
+    _stopTimer();
+  }
+
+  void _nextMovie() {
+    if (_currentIndex >= _featuredMovies.length - 1) return;
+    setState(() => _currentIndex++);
+    _stopTimer();
+  }
+
+  void _handleSelect(MovieSummary movie) {
+    if (widget.onSelect != null) {
+      widget.onSelect!(movie);
+    } else if (widget.onDetails != null) {
+      widget.onDetails!(movie);
+    } else if (widget.onPlay != null) {
+      widget.onPlay!(movie);
     }
   }
 
@@ -248,37 +262,100 @@ class _TvBillboardState extends State<TvBillboard> {
     final movie = _featuredMovies[_currentIndex];
 
     return Focus(
-      focusNode: _billboardScopeNode,
-      child: Container(
-        height: 460,
-        margin: const EdgeInsets.only(bottom: 16),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Backdrop Image with Smooth Cross-Fade
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 700),
-              switchInCurve: Curves.easeIn,
-              switchOutCurve: Curves.easeOut,
-              child: SizedBox(
-                key: ValueKey<String>(movie.imdbId),
-                width: double.infinity,
-                height: double.infinity,
-                child: movie.backdropUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: movie.backdropUrl,
-                        fit: BoxFit.cover,
-                        alignment: Alignment.topCenter,
-                        memCacheWidth: 1280,
-                        memCacheHeight: 720,
-                        maxWidthDiskCache: 1280,
-                        errorWidget: (context, url, error) => Container(
-                          color: TVTheme.surfaceElevated,
-                        ),
-                      )
-                    : Container(color: TVTheme.surfaceElevated),
+      focusNode: _effectiveFocusNode,
+      autofocus: widget.autofocus,
+      onFocusChange: (focused) {
+        if (_hasFocus != focused) {
+          setState(() => _hasFocus = focused);
+          if (_hasFocus) {
+            _stopTimer();
+          } else if (widget.isVisible) {
+            _resetTimer();
+          }
+        }
+      },
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            final now = DateTime.now().millisecondsSinceEpoch;
+            if (event is KeyDownEvent || now - _lastRepeatMs > 180) {
+              _lastRepeatMs = now;
+              _previousMovie();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            final now = DateTime.now().millisecondsSinceEpoch;
+            if (event is KeyDownEvent || now - _lastRepeatMs > 180) {
+              _lastRepeatMs = now;
+              _nextMovie();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            if (event is KeyDownEvent && widget.onNavigateUp != null) {
+              widget.onNavigateUp!();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            if (event is KeyDownEvent && widget.onNavigateDown != null) {
+              widget.onNavigateDown!();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.select ||
+                  event.logicalKey == LogicalKeyboardKey.enter ||
+                  event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+                  event.logicalKey == LogicalKeyboardKey.space)) {
+            _handleSelect(movie);
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: () => _handleSelect(movie),
+        child: Container(
+          height: 460,
+          margin: const EdgeInsets.only(bottom: 16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Backdrop Image with Smooth Cross-Fade
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 700),
+                switchInCurve: Curves.easeIn,
+                switchOutCurve: Curves.easeOut,
+                child: SizedBox(
+                  key: ValueKey<String>(movie.imdbId),
+                  width: double.infinity,
+                  height: double.infinity,
+                  child: movie.backdropUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: movie.backdropUrl,
+                          fit: BoxFit.cover,
+                          alignment: Alignment.topCenter,
+                          memCacheWidth: 1280,
+                          memCacheHeight: 720,
+                          maxWidthDiskCache: 1280,
+                          errorWidget: (context, url, error) => Container(
+                            color: TVTheme.surfaceElevated,
+                          ),
+                        )
+                      : Container(color: TVTheme.surfaceElevated),
+                ),
               ),
-            ),
+
+              // Dimming Scrim: Darkens when out of focus, clears when in focus
+              Positioned.fill(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutCubic,
+                  color: Colors.black.withValues(alpha: _hasFocus ? 0.0 : 0.42),
+                ),
+              ),
 
             // Left-to-Right Obsidian Cinematic Dark Gradient (Ensures text legibility)
             Positioned.fill(
@@ -323,10 +400,13 @@ class _TvBillboardState extends State<TvBillboard> {
               left: TVTheme.overscanMargin,
               bottom: 32,
               right: 160,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 250),
+                opacity: _hasFocus ? 1.0 : 0.75,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                   // Title Typography (Display 38sp bold)
                   Text(
                     movie.title,
@@ -459,95 +539,109 @@ class _TvBillboardState extends State<TvBillboard> {
                         ),
                       ),
                     ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
-                  // Action Buttons Row
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TvFocusButton(
-                        focusNode: _effectivePlayButtonNode,
-                        autofocus: true,
-                        label: 'Play Now',
-                        icon: Icons.play_arrow_rounded,
-                        isPrimary: true,
-                        onPressed: () => widget.onPlay(movie),
-                        onKeyEvent: (node, event) {
-                          if (event is KeyDownEvent) {
-                            if (event.logicalKey == LogicalKeyboardKey.arrowUp && widget.onNavigateUp != null) {
-                              widget.onNavigateUp!();
-                              return KeyEventResult.handled;
-                            }
-                            if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onNavigateDown != null) {
-                              widget.onNavigateDown!();
-                              return KeyEventResult.handled;
-                            }
-                          }
-                          return KeyEventResult.ignored;
-                        },
+                  // Action Hint Pill (Revealed when focused)
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity: _hasFocus ? 1.0 : 0.0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: TVTheme.primary,
+                        borderRadius: TVTheme.borderRadiusMd,
+                        boxShadow: [
+                          BoxShadow(
+                            color: TVTheme.primary.withValues(alpha: 0.45),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 16),
-                      TvFocusButton(
-                        focusNode: _effectiveDetailsButtonNode,
-                        label: 'Details',
-                        icon: Icons.info_outline_rounded,
-                        isPrimary: false,
-                        onPressed: () => widget.onDetails(movie),
-                        onKeyEvent: (node, event) {
-                          if (event is KeyDownEvent) {
-                            if (event.logicalKey == LogicalKeyboardKey.arrowUp && widget.onNavigateUp != null) {
-                              widget.onNavigateUp!();
-                              return KeyEventResult.handled;
-                            }
-                            if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onNavigateDown != null) {
-                              widget.onNavigateDown!();
-                              return KeyEventResult.handled;
-                            }
-                          }
-                          return KeyEventResult.ignored;
-                        },
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.play_arrow_rounded, color: Colors.white, size: 18),
+                          SizedBox(width: 6),
+                          Text(
+                            'View Details',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ],
               ),
             ),
+          ),
 
             // Carousel Slide Indicators (Bottom Right)
             if (_featuredMovies.length > 1)
               Positioned(
                 right: TVTheme.overscanMargin,
                 bottom: 36,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(_featuredMovies.length, (index) {
-                    final isActive = index == _currentIndex;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: isActive ? 22 : 8,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? TVTheme.primary
-                            : Colors.white.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(3),
-                        boxShadow: isActive
-                            ? [
-                                BoxShadow(
-                                  color: TVTheme.primary.withValues(alpha: 0.6),
-                                  blurRadius: 6,
-                                ),
-                              ]
-                            : null,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: _hasFocus ? 1.0 : 0.6,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_hasFocus) ...[
+                        Icon(
+                          Icons.chevron_left_rounded,
+                          size: 20,
+                          color: Colors.white.withValues(alpha: 0.8),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(_featuredMovies.length, (index) {
+                          final isActive = index == _currentIndex;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            width: isActive ? 22 : 8,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? TVTheme.primary
+                                  : Colors.white.withValues(alpha: _hasFocus ? 0.4 : 0.2),
+                              borderRadius: BorderRadius.circular(3),
+                              boxShadow: isActive
+                                  ? [
+                                      BoxShadow(
+                                        color: TVTheme.primary.withValues(alpha: 0.6),
+                                        blurRadius: 6,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                          );
+                        }),
                       ),
-                    );
-                  }),
+                      if (_hasFocus) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 20,
+                          color: Colors.white.withValues(alpha: 0.8),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

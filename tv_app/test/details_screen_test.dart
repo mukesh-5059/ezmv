@@ -10,7 +10,6 @@ import 'package:tv_app/screens/details_screen.dart';
 import 'package:tv_app/screens/player_screen.dart';
 import 'package:tv_app/theme.dart';
 import 'package:tv_app/widgets/cast_carousel.dart';
-import 'package:tv_app/widgets/episode_stream_dialog.dart';
 import 'package:tv_app/widgets/tv_focus_button.dart';
 
 void main() {

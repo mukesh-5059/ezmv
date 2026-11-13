@@ -60,6 +60,11 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
   final FocusNode _yearPillFocusNode = FocusNode();
   final FocusNode _ratingPillFocusNode = FocusNode();
   final FocusNode _sortPillFocusNode = FocusNode();
+  final FocusNode _resetFiltersFocusNode = FocusNode();
+
+  final Map<int, FocusNode> _cardFocusNodes = {};
+  final FocusNode _firstFilterOptionFocusNode = FocusNode();
+  int _lastFocusedCardIndex = 0;
 
   FocusNode? _lastFocusedPillNode;
 
@@ -140,6 +145,25 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
     super.initState();
     _apiClient = widget.apiClient ?? ApiClient();
     _scrollController = ScrollController();
+
+    _backButtonFocusNode.onKeyEvent = _handleBackButtonKeyEvent;
+    _clearFiltersFocusNode.onKeyEvent = _handleClearFiltersKeyEvent;
+
+    _resetFiltersFocusNode.onKeyEvent = (node, event) {
+      if (event is KeyDownEvent) {
+        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+            event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+            event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.ignored;
+    };
+
     _fetchLane(page: 1, reset: true);
   }
 
@@ -148,11 +172,16 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
     _scrollController.dispose();
     _backButtonFocusNode.dispose();
     _clearFiltersFocusNode.dispose();
+    _resetFiltersFocusNode.dispose();
     _typePillFocusNode.dispose();
     _genrePillFocusNode.dispose();
     _yearPillFocusNode.dispose();
     _ratingPillFocusNode.dispose();
     _sortPillFocusNode.dispose();
+    for (final node in _cardFocusNodes.values) {
+      node.dispose();
+    }
+    _firstFilterOptionFocusNode.dispose();
     super.dispose();
   }
 
@@ -230,6 +259,14 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
         }
         _items.addAll(response.items);
       });
+
+      if (reset && response.items.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _items.isNotEmpty) {
+            _getCardFocusNode(0).requestFocus();
+          }
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -271,10 +308,121 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
     }
   }
 
+  FocusNode _getCardFocusNode(int index) {
+    return _cardFocusNodes.putIfAbsent(index, () => FocusNode());
+  }
+
   void _onCardFocused(int index) {
-    if (index >= _items.length - 15 && _hasMore && !_isFetchingMore && !_isLoading) {
+    _lastFocusedCardIndex = index;
+    if (index >= 15 && index >= _items.length - 15 && _hasMore && !_isFetchingMore && !_isLoading) {
       _fetchMore();
     }
+  }
+
+  KeyEventResult _handleBackButtonKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _clearFiltersFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+        event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleClearFiltersKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _sortPillFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _backButtonFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_items.isNotEmpty) {
+        _getCardFocusNode(0).requestFocus();
+      } else if (_resetFiltersFocusNode.canRequestFocus) {
+        _resetFiltersFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handlePillKeyEvent(KeyEvent event, FocusNode currentNode) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _backButtonFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_items.isNotEmpty) {
+        _getCardFocusNode(0).requestFocus();
+      } else if (_resetFiltersFocusNode.canRequestFocus) {
+        _resetFiltersFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (currentNode == _typePillFocusNode && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      return KeyEventResult.handled;
+    }
+    if (currentNode == _sortPillFocusNode && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _clearFiltersFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleCardKeyEvent(KeyEvent event, int index) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    final col = index % 5;
+    final row = index ~/ 5;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && row == 0) {
+      (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      if (_activeFilterDimension != null && (col == 4 || index == _items.length - 1)) {
+        _firstFilterOptionFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (index < _items.length - 1) {
+        _getCardFocusNode(index + 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      if (index > 0) {
+        _getCardFocusNode(index - 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown && index + 5 >= _items.length) {
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
   }
 
   DateTime? _lastBackPressTime;
@@ -335,7 +483,12 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
   void _closeFilterStrip() {
     _lastBackPressTime = DateTime.now();
     setState(() => _activeFilterDimension = null);
-    _lastFocusedPillNode?.requestFocus();
+    if (_items.isNotEmpty) {
+      final target = _lastFocusedCardIndex.clamp(0, _items.length - 1);
+      _getCardFocusNode(target).requestFocus();
+    } else {
+      _lastFocusedPillNode?.requestFocus();
+    }
   }
 
   void _applyFilterOption(FilterDimension dimension, String option) {
@@ -422,7 +575,6 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
       child: Scaffold(
         backgroundColor: TVTheme.background,
         body: Focus(
-          autofocus: true,
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent) {
               if (event.logicalKey == LogicalKeyboardKey.escape ||
@@ -476,6 +628,7 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
       children: [
         TvFocusButton(
           focusNode: _backButtonFocusNode,
+          onKeyEvent: _handleBackButtonKeyEvent,
           label: 'Back',
           icon: Icons.arrow_back_rounded,
           isPrimary: false,
@@ -497,6 +650,7 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
         const SizedBox(width: 20),
         TvFocusButton(
           focusNode: _clearFiltersFocusNode,
+          onKeyEvent: _handleClearFiltersKeyEvent,
           label: 'Clear Filters',
           icon: Icons.clear_rounded,
           isPrimary: false,
@@ -522,6 +676,10 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
             focusNode: _typePillFocusNode,
             label: _selectedType == 'All' ? 'Type' : 'Type: $_selectedType',
             isSelected: _selectedType != 'All' || isTypeOpen,
+            onFocusChanged: (f) {
+              if (f) _lastFocusedPillNode = _typePillFocusNode;
+            },
+            onKeyEvent: (node, event) => _handlePillKeyEvent(event, _typePillFocusNode),
             onTap: () => _openFilterStrip(FilterDimension.type, _typePillFocusNode),
           ),
           const SizedBox(width: 12),
@@ -529,6 +687,10 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
             focusNode: _genrePillFocusNode,
             label: _selectedGenre == 'All' ? 'Genre' : 'Genre: $_selectedGenre',
             isSelected: _selectedGenre != 'All' || isGenreOpen,
+            onFocusChanged: (f) {
+              if (f) _lastFocusedPillNode = _genrePillFocusNode;
+            },
+            onKeyEvent: (node, event) => _handlePillKeyEvent(event, _genrePillFocusNode),
             onTap: () => _openFilterStrip(FilterDimension.genre, _genrePillFocusNode),
           ),
           const SizedBox(width: 12),
@@ -536,6 +698,10 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
             focusNode: _yearPillFocusNode,
             label: _selectedYear == 'All' ? 'Year' : 'Year: $_selectedYear',
             isSelected: _selectedYear != 'All' || isYearOpen,
+            onFocusChanged: (f) {
+              if (f) _lastFocusedPillNode = _yearPillFocusNode;
+            },
+            onKeyEvent: (node, event) => _handlePillKeyEvent(event, _yearPillFocusNode),
             onTap: () => _openFilterStrip(FilterDimension.year, _yearPillFocusNode),
           ),
           const SizedBox(width: 12),
@@ -543,6 +709,10 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
             focusNode: _ratingPillFocusNode,
             label: _selectedRating == 'All' ? 'Rating' : 'Rating: $_selectedRating',
             isSelected: _selectedRating != 'All' || isRatingOpen,
+            onFocusChanged: (f) {
+              if (f) _lastFocusedPillNode = _ratingPillFocusNode;
+            },
+            onKeyEvent: (node, event) => _handlePillKeyEvent(event, _ratingPillFocusNode),
             onTap: () => _openFilterStrip(FilterDimension.rating, _ratingPillFocusNode),
           ),
           const SizedBox(width: 12),
@@ -550,6 +720,10 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
             focusNode: _sortPillFocusNode,
             label: _selectedSort == 'Popular' ? 'Sort' : 'Sort: $_selectedSort',
             isSelected: _selectedSort != 'Popular' || isSortOpen,
+            onFocusChanged: (f) {
+              if (f) _lastFocusedPillNode = _sortPillFocusNode;
+            },
+            onKeyEvent: (node, event) => _handlePillKeyEvent(event, _sortPillFocusNode),
             onTap: () => _openFilterStrip(FilterDimension.sort, _sortPillFocusNode),
           ),
         ],
@@ -599,6 +773,7 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
             ),
             const SizedBox(height: 20),
             TvFocusButton(
+              focusNode: _resetFiltersFocusNode,
               label: 'Reset Filters',
               icon: Icons.filter_alt_off_rounded,
               isPrimary: false,
@@ -609,76 +784,85 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
       );
     }
 
-    return Column(
-      children: [
-        Expanded(
-          child: GridView.builder(
-            key: PageStorageKey('lane_grid_${widget.dashboardId}_${widget.laneId}'),
-            controller: _scrollController,
-            cacheExtent: 600,
-            padding: const EdgeInsets.only(bottom: 24),
+    return CustomScrollView(
+      key: PageStorageKey('lane_grid_${widget.dashboardId}_${widget.laneId}'),
+      controller: _scrollController,
+      cacheExtent: 600,
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.only(bottom: 24),
+          sliver: SliverGrid(
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 5,
               childAspectRatio: 150 / 225,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
             ),
-            itemCount: _items.length,
-            itemBuilder: (context, index) {
-              final movie = _items[index];
-              return FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: 162,
-                  height: 241,
-                  child: TvFocusCard(
-                    key: ValueKey('movie_${movie.imdbId}_$index'),
-                    posterUrl: movie.posterUrl,
-                    title: movie.title,
-                    rating: movie.ratingScore > 0 ? movie.ratingScore : null,
-                    year: movie.year.isNotEmpty ? movie.year : null,
-                    isTv: movie.isTv,
-                    width: 150,
-                    height: 225,
-                    showTitleBelow: false,
-                    onTap: () {
-                      if (widget.onMovieSelected != null) {
-                        widget.onMovieSelected!(movie);
-                      }
-                    },
-                    onFocusChanged: (focused) {
-                      if (focused) {
-                        _onCardFocused(index);
-                      }
-                    },
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final movie = _items[index];
+                return FittedBox(
+                  fit: BoxFit.contain,
+                  child: SizedBox(
+                    width: 162,
+                    height: 241,
+                    child: TvFocusCard(
+                      key: ValueKey('movie_${movie.imdbId}_$index'),
+                      focusNode: _getCardFocusNode(index),
+                      autofocus: index == 0 && _lastFocusedCardIndex == 0,
+                      onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
+                      posterUrl: movie.posterUrl,
+                      title: movie.title,
+                      rating: movie.ratingScore > 0 ? movie.ratingScore : null,
+                      year: movie.year.isNotEmpty ? movie.year : null,
+                      isTv: movie.isTv,
+                      width: 150,
+                      height: 225,
+                      showTitleBelow: false,
+                      onTap: () {
+                        if (widget.onMovieSelected != null) {
+                          widget.onMovieSelected!(movie);
+                        }
+                      },
+                      onFocusChanged: (focused) {
+                        if (focused) {
+                          _onCardFocused(index);
+                        }
+                      },
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+              childCount: _items.length,
+            ),
           ),
         ),
         if (_isFetchingMore)
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            alignment: Alignment.center,
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  'Loading more titles...',
-                  style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
-                ),
-              ],
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              alignment: Alignment.center,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Loading more titles...',
+                    style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           )
         else if (!_hasMore && _items.isNotEmpty)
-          _buildEndOfCatalogBanner(),
+          SliverToBoxAdapter(
+            child: _buildEndOfCatalogBanner(),
+          ),
       ],
     );
   }
@@ -749,64 +933,77 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
     final options = _getFilterStripOptions(dimension);
     final selectedOption = _getCurrentFilterValue(dimension);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: TVTheme.surface,
-        borderRadius: TVTheme.borderRadiusMd,
-        border: Border.all(
-          color: TVTheme.surfaceElevated,
-          width: 1.5,
+    return FocusScope(
+      child: Container(
+        decoration: BoxDecoration(
+          color: TVTheme.surface,
+          borderRadius: TVTheme.borderRadiusMd,
+          border: Border.all(
+            color: TVTheme.surfaceElevated,
+            width: 1.5,
+          ),
         ),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: TVTheme.textPrimary,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: TVTheme.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                '‹ Back',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: TVTheme.textMuted,
+                const SizedBox(width: 8),
+                const Text(
+                  '‹ Back',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: TVTheme.textMuted,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Divider(color: TVTheme.surfaceElevated, height: 1),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ListView.separated(
-              itemCount: options.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final option = options[index];
-                final isSelected = option == selectedOption;
-                return _FilterOptionTile(
-                  key: ValueKey('filter_option_${dimension.name}_$option'),
-                  label: option,
-                  isSelected: isSelected,
-                  autofocus: isSelected,
-                  onSelect: () => _applyFilterOption(dimension, option),
-                  onDismiss: _closeFilterStrip,
-                );
-              },
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            const Divider(color: TVTheme.surfaceElevated, height: 1),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView.separated(
+                itemCount: options.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final option = options[index];
+                  final isSelected = option == selectedOption;
+                  return _FilterOptionTile(
+                    key: ValueKey('filter_option_${dimension.name}_$option'),
+                    focusNode: index == 0 ? _firstFilterOptionFocusNode : null,
+                    isFirst: index == 0,
+                    isLast: index == options.length - 1,
+                    label: option,
+                    isSelected: isSelected,
+                    autofocus: isSelected,
+                    onSelect: () => _applyFilterOption(dimension, option),
+                    onDismiss: _closeFilterStrip,
+                    onLeft: () {
+                      final idx = _items.isEmpty ? 0 : _lastFocusedCardIndex.clamp(0, _items.length - 1);
+                      if (_items.isNotEmpty) {
+                        _getCardFocusNode(idx).requestFocus();
+                      } else if (_resetFiltersFocusNode.canRequestFocus) {
+                        _resetFiltersFocusNode.requestFocus();
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -816,16 +1013,24 @@ class _FilterOptionTile extends StatefulWidget {
   final String label;
   final bool isSelected;
   final bool autofocus;
+  final FocusNode? focusNode;
+  final bool isFirst;
+  final bool isLast;
   final VoidCallback onSelect;
   final VoidCallback onDismiss;
+  final VoidCallback? onLeft;
 
   const _FilterOptionTile({
     super.key,
     required this.label,
     required this.isSelected,
     required this.autofocus,
+    this.focusNode,
+    this.isFirst = false,
+    this.isLast = false,
     required this.onSelect,
     required this.onDismiss,
+    this.onLeft,
   });
 
   @override
@@ -833,12 +1038,13 @@ class _FilterOptionTile extends StatefulWidget {
 }
 
 class _FilterOptionTileState extends State<_FilterOptionTile> {
-  final FocusNode _focusNode = FocusNode();
+  late final FocusNode _focusNode;
   bool _isFocused = false;
 
   @override
   void initState() {
     super.initState();
+    _focusNode = widget.focusNode ?? FocusNode();
     if (widget.isSelected) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -850,7 +1056,9 @@ class _FilterOptionTileState extends State<_FilterOptionTile> {
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    if (widget.focusNode == null) {
+      _focusNode.dispose();
+    }
     super.dispose();
   }
 
@@ -895,16 +1103,28 @@ class _FilterOptionTileState extends State<_FilterOptionTile> {
         }
       },
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
           if (TvShortcuts.isActivateKey(event.logicalKey)) {
             widget.onSelect();
             return KeyEventResult.handled;
           }
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-              event.logicalKey == LogicalKeyboardKey.escape ||
+          if (event.logicalKey == LogicalKeyboardKey.escape ||
               event.logicalKey == LogicalKeyboardKey.backspace ||
               event.logicalKey == LogicalKeyboardKey.goBack) {
             widget.onDismiss();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            widget.onLeft?.call();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            return KeyEventResult.handled;
+          }
+          if (widget.isFirst && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            return KeyEventResult.handled;
+          }
+          if (widget.isLast && event.logicalKey == LogicalKeyboardKey.arrowDown) {
             return KeyEventResult.handled;
           }
         }

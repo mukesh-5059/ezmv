@@ -29,8 +29,7 @@ class TvContinueWatchingLane extends StatefulWidget {
   State<TvContinueWatchingLane> createState() => TvContinueWatchingLaneState();
 }
 
-class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
-    with AutomaticKeepAliveClientMixin {
+class TvContinueWatchingLaneState extends State<TvContinueWatchingLane> with AutomaticKeepAliveClientMixin {
   List<ContinueWatchingEntry> _entries = [];
   bool _isLoading = true;
   bool get hasEntries => !_isLoading && _entries.isNotEmpty;
@@ -38,6 +37,7 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   final ScrollController _scrollController = ScrollController();
   final List<FocusNode> _itemFocusNodes = [];
   int _lastFocusedIndex = 0;
+  int _lastCardRepeatMs = 0;
 
   FocusNode get _effectiveHeaderFocusNode => widget.headerFocusNode ?? _headerFocusNode;
 
@@ -51,6 +51,16 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final saved = PageStorage.maybeOf(context)?.readState(
+      context,
+      identifier: 'cw_lane_focus',
+    );
+    if (saved is int) _lastFocusedIndex = saved;
+  }
+
+  @override
   void dispose() {
     _headerFocusNode.dispose();
     _scrollController.dispose();
@@ -58,6 +68,51 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
       node.dispose();
     }
     super.dispose();
+  }
+
+  void _onCardFocused(int index) {
+    _lastFocusedIndex = index;
+    PageStorage.maybeOf(context)?.writeState(
+      context,
+      index,
+      identifier: 'cw_lane_focus',
+    );
+  }
+
+  void _focusTargetCard() {
+    if (_entries.isEmpty) return;
+
+    if (_lastFocusedIndex >= 0 && _lastFocusedIndex < _entries.length) {
+      final node = _getFocusNode(_lastFocusedIndex);
+      if (node.parent != null) {
+        node.requestFocus();
+        return;
+      }
+    }
+
+    int target = 0;
+    if (_scrollController.hasClients) {
+      target = (_scrollController.offset / 162.0).round().clamp(0, _entries.length - 1);
+      final node = _getFocusNode(target);
+      if (node.parent != null) {
+        _onCardFocused(target);
+        node.requestFocus();
+        return;
+      }
+    }
+
+    for (int i = 0; i < _entries.length; i++) {
+      if (i < _itemFocusNodes.length && _itemFocusNodes[i].parent != null) {
+        _onCardFocused(i);
+        _itemFocusNodes[i].requestFocus();
+        return;
+      }
+    }
+
+    _onCardFocused(target);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _getFocusNode(target).requestFocus();
+    });
   }
 
   FocusNode _getFocusNode(int index) {
@@ -68,18 +123,20 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   }
 
   KeyEventResult _handleHeaderKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        if (_entries.isNotEmpty) {
-          final targetIndex = _lastFocusedIndex.clamp(0, _entries.length - 1);
-          _getFocusNode(targetIndex).requestFocus();
-          return KeyEventResult.handled;
-        }
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        if (widget.onNavigateUpFromHeader != null) {
+        _focusTargetCard();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (event is KeyDownEvent && widget.onNavigateUpFromHeader != null) {
           widget.onNavigateUpFromHeader!();
-          return KeyEventResult.handled;
         }
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        return KeyEventResult.handled;
       }
     }
     return KeyEventResult.ignored;
@@ -105,14 +162,32 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   }
 
   KeyEventResult _handleCardKeyEvent(KeyEvent event, int index) {
-    if (event is KeyDownEvent) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
       if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _effectiveHeaderFocusNode.requestFocus();
+        if (event is KeyDownEvent) {
+          _effectiveHeaderFocusNode.requestFocus();
+        }
         return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        if (widget.onNavigateDownFromCard != null) {
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (event is KeyDownEvent && widget.onNavigateDownFromCard != null) {
           widget.onNavigateDownFromCard!();
-          return KeyEventResult.handled;
+        }
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft && index == 0) {
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+          index == _entries.length - 1) {
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (event is KeyRepeatEvent) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - _lastCardRepeatMs < 140) return KeyEventResult.handled;
+          _lastCardRepeatMs = now;
         }
       }
     }
@@ -122,7 +197,6 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
     if (_isLoading || _entries.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -142,40 +216,44 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane>
           ),
         ),
         const SizedBox(height: 8),
-        SizedBox(
-          height: 290,
-          child: ListView.builder(
-            key: const PageStorageKey('lane_continue_watching'),
-            controller: _scrollController,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
-            itemCount: _entries.length,
-            itemBuilder: (context, index) {
-              final entry = _entries[index];
-              final subtitle = entry.isTv && entry.season != null
-                  ? 'S${entry.season} E${entry.episode ?? 1}'
-                  : null;
+        FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: SizedBox(
+            height: 290,
+            child: ListView.builder(
+              key: const PageStorageKey('lane_continue_watching'),
+              controller: _scrollController,
+              clipBehavior: Clip.none,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
+              itemCount: _entries.length,
+              itemBuilder: (context, index) {
+                final entry = _entries[index];
+                final subtitle = entry.isTv && entry.season != null
+                    ? 'S${entry.season} E${entry.episode ?? 1}'
+                    : null;
 
-              return Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: TvFocusCard(
-                  focusNode: _getFocusNode(index),
-                  posterUrl: entry.posterUrl,
-                  title: entry.title,
-                  width: 150,
-                  height: 225,
-                  isTv: entry.isTv,
-                  progress: entry.progress,
-                  year: subtitle,
-                  showTitleBelow: true,
-                  onFocusChanged: (focused) {
-                    if (focused) _lastFocusedIndex = index;
-                  },
-                  onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
-                  onTap: () => widget.onResume(entry),
-                ),
-              );
-            },
+                return Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: TvFocusCard(
+                    focusNode: _getFocusNode(index),
+                    posterUrl: entry.posterUrl,
+                    title: entry.title,
+                    width: 150,
+                    height: 225,
+                    isTv: entry.isTv,
+                    progress: entry.progress,
+                    year: subtitle,
+                    showTitleBelow: true,
+                    onFocusChanged: (focused) {
+                      if (focused) _onCardFocused(index);
+                    },
+                    onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
+                    onTap: () => widget.onResume(entry),
+                  ),
+                );
+              },
+            ),
           ),
         ),
         const SizedBox(height: 20),

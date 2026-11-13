@@ -55,18 +55,25 @@ class _SearchScreenState extends State<SearchScreen> {
   final ScrollController _gridScrollController = ScrollController();
 
   // Control bar focus nodes
-  final FocusNode _backButtonFocusNode = FocusNode();
+  late final FocusNode _backButtonFocusNode;
   late final FocusNode _textFieldFocusNode;
-  final FocusNode _clearSearchFocusNode = FocusNode();
-  final FocusNode _clearHistoryFocusNode = FocusNode();
+  late final FocusNode _searchButtonFocusNode;
+  late final FocusNode _clearSearchFocusNode;
+  late final FocusNode _clearHistoryFocusNode;
 
   // Filter pill focus nodes
-  final FocusNode _typePillFocusNode = FocusNode();
-  final FocusNode _genrePillFocusNode = FocusNode();
-  final FocusNode _yearPillFocusNode = FocusNode();
-  final FocusNode _ratingPillFocusNode = FocusNode();
-  final FocusNode _sortPillFocusNode = FocusNode();
-  final FocusNode _clearFiltersFocusNode = FocusNode();
+  late final FocusNode _typePillFocusNode;
+  late final FocusNode _genrePillFocusNode;
+  late final FocusNode _yearPillFocusNode;
+  late final FocusNode _ratingPillFocusNode;
+  late final FocusNode _sortPillFocusNode;
+  late final FocusNode _clearFiltersFocusNode;
+  late final FocusNode _resetFiltersFocusNode;
+
+  final Map<int, FocusNode> _historyFocusNodes = {};
+  final Map<int, FocusNode> _cardFocusNodes = {};
+  final FocusNode _firstFilterOptionFocusNode = FocusNode();
+  int _lastFocusedCardIndex = 0;
 
   FocusNode? _lastFocusedPillNode;
 
@@ -147,14 +154,216 @@ class _SearchScreenState extends State<SearchScreen> {
     'Title',
   ];
 
+  KeyEventResult _handleBackButtonKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _textFieldFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_history.isNotEmpty) {
+        _getHistoryFocusNode(0).requestFocus();
+      } else {
+        (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+        event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleClearHistoryKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft && _history.isNotEmpty) {
+      _getHistoryFocusNode(_history.length - 1).requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _textFieldFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      _clearFiltersFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleClearFiltersKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _sortPillFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (_history.isNotEmpty) {
+        _clearHistoryFocusNode.requestFocus();
+      } else {
+        _textFieldFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_items.isNotEmpty) {
+        _getCardFocusNode(0).requestFocus();
+      } else if (_resetFiltersFocusNode.canRequestFocus) {
+        _resetFiltersFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleHistoryPillKeyEvent(KeyEvent event, int index) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _textFieldFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      if (index > 0) {
+        _getHistoryFocusNode(index - 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      if (index < _history.length - 1) {
+        _getHistoryFocusNode(index + 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      _clearHistoryFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  FocusNode _getHistoryFocusNode(int index) {
+    return _historyFocusNodes.putIfAbsent(index, () => FocusNode());
+  }
+
+  FocusNode _getCardFocusNode(int index) {
+    return _cardFocusNodes.putIfAbsent(index, () => FocusNode());
+  }
+
+  void _onCardFocused(int index) {
+    _lastFocusedCardIndex = index;
+    if (index >= 15 && index >= _items.length - 15 && _hasMore && !_isFetchingMore && !_isLoading) {
+      _fetchMore();
+    }
+  }
+
+  KeyEventResult _handlePillKeyEvent(KeyEvent event, FocusNode currentNode) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (_history.isNotEmpty) {
+        _getHistoryFocusNode(0).requestFocus();
+      } else {
+        _textFieldFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_items.isNotEmpty) {
+        _getCardFocusNode(0).requestFocus();
+      } else if (_resetFiltersFocusNode.canRequestFocus) {
+        _resetFiltersFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (currentNode == _typePillFocusNode && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      return KeyEventResult.handled;
+    }
+    if (currentNode == _sortPillFocusNode && event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _clearFiltersFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleCardKeyEvent(KeyEvent event, int index) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.escape ||
+        event.logicalKey == LogicalKeyboardKey.backspace ||
+        event.logicalKey == LogicalKeyboardKey.goBack) {
+      _handleBack();
+      return KeyEventResult.handled;
+    }
+
+    final col = index % 5;
+    final row = index ~/ 5;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp && row == 0) {
+      (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      if (_activeFilterDimension != null && (col == 4 || index == _items.length - 1)) {
+        _firstFilterOptionFocusNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (index < _items.length - 1) {
+        _getCardFocusNode(index + 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      if (index > 0) {
+        _getCardFocusNode(index - 1).requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown && index + 5 >= _items.length) {
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  void _onSearchTextChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void initState() {
     super.initState();
     _apiClient = widget.apiClient ?? ApiClient.instance;
+    _searchController.addListener(_onSearchTextChanged);
+
+    _backButtonFocusNode = FocusNode(onKeyEvent: _handleBackButtonKeyEvent);
 
     _textFieldFocusNode = FocusNode(
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.backspace) {
+            if (_searchController.text.isEmpty || _searchController.selection.start <= 0) {
+              return KeyEventResult.handled;
+            }
+          }
           if (event.logicalKey == LogicalKeyboardKey.escape ||
               event.logicalKey == LogicalKeyboardKey.goBack) {
             _handleBack();
@@ -164,12 +373,99 @@ class _SearchScreenState extends State<SearchScreen> {
             _backButtonFocusNode.requestFocus();
             return KeyEventResult.handled;
           }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            _searchButtonFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
             if (_history.isNotEmpty) {
-              FocusScope.of(context).nextFocus();
+              _getHistoryFocusNode(0).requestFocus();
             } else {
-              _typePillFocusNode.requestFocus();
+              (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
             }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+
+    _searchButtonFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            if (_history.isNotEmpty) {
+              _getHistoryFocusNode(0).requestFocus();
+            } else {
+              (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            _textFieldFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            if (_searchController.text.isNotEmpty) {
+              _clearSearchFocusNode.requestFocus();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+
+    _clearSearchFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            if (_history.isNotEmpty) {
+              _getHistoryFocusNode(0).requestFocus();
+            } else {
+              _clearFiltersFocusNode.requestFocus();
+            }
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            _searchButtonFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+              event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+
+    _clearHistoryFocusNode = FocusNode(onKeyEvent: _handleClearHistoryKeyEvent);
+
+    _typePillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _typePillFocusNode));
+    _genrePillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _genrePillFocusNode));
+    _yearPillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _yearPillFocusNode));
+    _ratingPillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _ratingPillFocusNode));
+    _sortPillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _sortPillFocusNode));
+    _clearFiltersFocusNode = FocusNode(onKeyEvent: _handleClearFiltersKeyEvent);
+
+    _resetFiltersFocusNode = FocusNode(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+              event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+              event.logicalKey == LogicalKeyboardKey.arrowRight) {
             return KeyEventResult.handled;
           }
         }
@@ -189,10 +485,12 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _searchController.removeListener(_onSearchTextChanged);
     _searchController.dispose();
     _gridScrollController.dispose();
     _backButtonFocusNode.dispose();
     _textFieldFocusNode.dispose();
+    _searchButtonFocusNode.dispose();
     _clearSearchFocusNode.dispose();
     _clearHistoryFocusNode.dispose();
     _typePillFocusNode.dispose();
@@ -201,6 +499,14 @@ class _SearchScreenState extends State<SearchScreen> {
     _ratingPillFocusNode.dispose();
     _sortPillFocusNode.dispose();
     _clearFiltersFocusNode.dispose();
+    _resetFiltersFocusNode.dispose();
+    for (final node in _historyFocusNodes.values) {
+      node.dispose();
+    }
+    for (final node in _cardFocusNodes.values) {
+      node.dispose();
+    }
+    _firstFilterOptionFocusNode.dispose();
     super.dispose();
   }
 
@@ -265,26 +571,11 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  void _onCardFocused(int index) {
-    if (index >= _items.length - 15 && _hasMore && !_isFetchingMore && !_isLoading) {
-      _fetchMore();
-    }
-  }
-
   Future<void> _executeSearch({bool reset = true}) async {
     final query = _searchController.text.trim();
-    if (query.isEmpty) {
-      setState(() {
-        _items.clear();
-        _isLoading = false;
-        _hasMore = false;
-        _hasSearched = false;
-        _errorMessage = null;
-      });
-      return;
+    if (query.isNotEmpty) {
+      _saveHistory(query);
     }
-
-    _saveHistory(query);
 
     if (reset) {
       setState(() {
@@ -319,6 +610,14 @@ class _SearchScreenState extends State<SearchScreen> {
         if (reset) _items.clear();
         _items.addAll(resultItems);
       });
+
+      if (reset && resultItems.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _items.isNotEmpty) {
+            _getCardFocusNode(0).requestFocus();
+          }
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -332,7 +631,6 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_isFetchingMore || !_hasMore || _isLoading) return;
 
     final query = _searchController.text.trim();
-    if (query.isEmpty) return;
 
     setState(() => _isFetchingMore = true);
 
@@ -444,7 +742,12 @@ class _SearchScreenState extends State<SearchScreen> {
   void _closeFilterStrip() {
     _lastBackPressTime = DateTime.now();
     setState(() => _activeFilterDimension = null);
-    _lastFocusedPillNode?.requestFocus();
+    if (_items.isNotEmpty) {
+      final target = _lastFocusedCardIndex.clamp(0, _items.length - 1);
+      _getCardFocusNode(target).requestFocus();
+    } else {
+      _lastFocusedPillNode?.requestFocus();
+    }
   }
 
   void _applyFilterOption(SearchFilterDimension dimension, String option) {
@@ -470,9 +773,7 @@ class _SearchScreenState extends State<SearchScreen> {
     });
 
     _lastFocusedPillNode?.requestFocus();
-    if (_searchController.text.trim().isNotEmpty) {
-      _executeSearch(reset: true);
-    }
+    _executeSearch(reset: true);
   }
 
   List<String> _getFilterStripOptions(SearchFilterDimension dimension) {
@@ -549,11 +850,9 @@ class _SearchScreenState extends State<SearchScreen> {
       child: Scaffold(
         backgroundColor: TVTheme.background,
         body: Focus(
-          autofocus: true,
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent) {
               if (event.logicalKey == LogicalKeyboardKey.escape ||
-                  event.logicalKey == LogicalKeyboardKey.backspace ||
                   event.logicalKey == LogicalKeyboardKey.goBack) {
                 _handleBack();
                 return KeyEventResult.handled;
@@ -607,6 +906,7 @@ class _SearchScreenState extends State<SearchScreen> {
       children: [
         TvFocusButton(
           focusNode: _backButtonFocusNode,
+          onKeyEvent: _handleBackButtonKeyEvent,
           label: 'Back',
           icon: Icons.arrow_back_rounded,
           isPrimary: false,
@@ -625,6 +925,7 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         const SizedBox(width: 16),
         TvFocusButton(
+          focusNode: _searchButtonFocusNode,
           label: 'Search',
           icon: Icons.search_rounded,
           isPrimary: true,
@@ -673,15 +974,20 @@ class _SearchScreenState extends State<SearchScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                for (final query in _history) ...[
+                for (var i = 0; i < _history.length; i++) ...[
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: TvPillChip(
-                      label: query,
+                      focusNode: _getHistoryFocusNode(i),
+                      onKeyEvent: (node, event) => _handleHistoryPillKeyEvent(event, i),
+                      label: _history[i],
                       isSelected: false,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       onTap: () {
-                        _searchController.text = query;
+                        _searchController.value = TextEditingValue(
+                          text: _history[i],
+                          selection: TextSelection.collapsed(offset: _history[i].length),
+                        );
                         _executeSearch(reset: true);
                       },
                     ),
@@ -694,6 +1000,7 @@ class _SearchScreenState extends State<SearchScreen> {
         const SizedBox(width: 8),
         TvFocusButton(
           focusNode: _clearHistoryFocusNode,
+          onKeyEvent: _handleClearHistoryKeyEvent,
           label: 'Clear History',
           icon: Icons.delete_sweep_rounded,
           isPrimary: false,
@@ -723,6 +1030,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   focusNode: _typePillFocusNode,
                   label: _selectedType == 'All' ? 'Type' : 'Type: $_selectedType',
                   isSelected: _selectedType != 'All' || isTypeOpen,
+                  onFocusChanged: (f) {
+                    if (f) _lastFocusedPillNode = _typePillFocusNode;
+                  },
+                  onKeyEvent: (node, event) => _handlePillKeyEvent(event, _typePillFocusNode),
                   onTap: () => _openFilterStrip(SearchFilterDimension.type, _typePillFocusNode),
                 ),
                 const SizedBox(width: 12),
@@ -730,6 +1041,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   focusNode: _genrePillFocusNode,
                   label: _selectedGenre == 'All' ? 'Genre' : 'Genre: $_selectedGenre',
                   isSelected: _selectedGenre != 'All' || isGenreOpen,
+                  onFocusChanged: (f) {
+                    if (f) _lastFocusedPillNode = _genrePillFocusNode;
+                  },
+                  onKeyEvent: (node, event) => _handlePillKeyEvent(event, _genrePillFocusNode),
                   onTap: () => _openFilterStrip(SearchFilterDimension.genre, _genrePillFocusNode),
                 ),
                 const SizedBox(width: 12),
@@ -737,6 +1052,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   focusNode: _yearPillFocusNode,
                   label: _selectedYear == 'All' ? 'Year' : 'Year: $_selectedYear',
                   isSelected: _selectedYear != 'All' || isYearOpen,
+                  onFocusChanged: (f) {
+                    if (f) _lastFocusedPillNode = _yearPillFocusNode;
+                  },
+                  onKeyEvent: (node, event) => _handlePillKeyEvent(event, _yearPillFocusNode),
                   onTap: () => _openFilterStrip(SearchFilterDimension.year, _yearPillFocusNode),
                 ),
                 const SizedBox(width: 12),
@@ -744,6 +1063,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   focusNode: _ratingPillFocusNode,
                   label: _selectedRating == 'All' ? 'Rating' : 'Rating: $_selectedRating',
                   isSelected: _selectedRating != 'All' || isRatingOpen,
+                  onFocusChanged: (f) {
+                    if (f) _lastFocusedPillNode = _ratingPillFocusNode;
+                  },
+                  onKeyEvent: (node, event) => _handlePillKeyEvent(event, _ratingPillFocusNode),
                   onTap: () => _openFilterStrip(SearchFilterDimension.rating, _ratingPillFocusNode),
                 ),
                 const SizedBox(width: 12),
@@ -751,6 +1074,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   focusNode: _sortPillFocusNode,
                   label: _selectedSort == 'Popular' ? 'Sort' : 'Sort: $_selectedSort',
                   isSelected: _selectedSort != 'Popular' || isSortOpen,
+                  onFocusChanged: (f) {
+                    if (f) _lastFocusedPillNode = _sortPillFocusNode;
+                  },
+                  onKeyEvent: (node, event) => _handlePillKeyEvent(event, _sortPillFocusNode),
                   onTap: () => _openFilterStrip(SearchFilterDimension.sort, _sortPillFocusNode),
                 ),
               ],
@@ -760,6 +1087,7 @@ class _SearchScreenState extends State<SearchScreen> {
         const SizedBox(width: 16),
         TvFocusButton(
           focusNode: _clearFiltersFocusNode,
+          onKeyEvent: _handleClearFiltersKeyEvent,
           label: 'Clear Filters',
           icon: Icons.clear_rounded,
           isPrimary: false,
@@ -820,6 +1148,7 @@ class _SearchScreenState extends State<SearchScreen> {
             if (_hasSearched) ...[
               const SizedBox(height: 20),
               TvFocusButton(
+                focusNode: _resetFiltersFocusNode,
                 label: 'Reset Filters',
                 icon: Icons.filter_alt_off_rounded,
                 isPrimary: false,
@@ -831,83 +1160,81 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
 
-    return Column(
-      children: [
-        Expanded(
-          child: GridView.builder(
-            key: const PageStorageKey('tv_search_grid'),
-            controller: _gridScrollController,
-            cacheExtent: 600,
-            padding: const EdgeInsets.only(bottom: 24),
+    return CustomScrollView(
+      key: const PageStorageKey('tv_search_grid'),
+      controller: _gridScrollController,
+      cacheExtent: 600,
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.only(bottom: 24),
+          sliver: SliverGrid(
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 5,
               childAspectRatio: 150 / 225,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
             ),
-            itemCount: _items.length,
-            itemBuilder: (context, index) {
-              final movie = _items[index];
-              return FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: 162,
-                  height: 241,
-                  child: TvFocusCard(
-                    key: ValueKey('search_movie_${movie.imdbId}_$index'),
-                    posterUrl: movie.posterUrl,
-                    title: movie.title,
-                    rating: movie.ratingScore > 0 ? movie.ratingScore : null,
-                    year: movie.year.isNotEmpty ? movie.year : null,
-                    isTv: movie.isTv,
-                    width: 150,
-                    height: 225,
-                    showTitleBelow: false,
-                    onTap: () => _navigateToDetails(movie),
-                    onKeyEvent: (node, event) {
-                      if (event is KeyDownEvent) {
-                        if (event.logicalKey == LogicalKeyboardKey.escape ||
-                            event.logicalKey == LogicalKeyboardKey.backspace ||
-                            event.logicalKey == LogicalKeyboardKey.goBack) {
-                          _handleBack();
-                          return KeyEventResult.handled;
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final movie = _items[index];
+                return FittedBox(
+                  fit: BoxFit.contain,
+                  child: SizedBox(
+                    width: 162,
+                    height: 241,
+                    child: TvFocusCard(
+                      key: ValueKey('search_movie_${movie.imdbId}_$index'),
+                      focusNode: _getCardFocusNode(index),
+                      autofocus: index == 0 && _lastFocusedCardIndex == 0,
+                      onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
+                      posterUrl: movie.posterUrl,
+                      title: movie.title,
+                      rating: movie.ratingScore > 0 ? movie.ratingScore : null,
+                      year: movie.year.isNotEmpty ? movie.year : null,
+                      isTv: movie.isTv,
+                      width: 150,
+                      height: 225,
+                      showTitleBelow: false,
+                      onTap: () => _navigateToDetails(movie),
+                      onFocusChanged: (focused) {
+                        if (focused) {
+                          _onCardFocused(index);
                         }
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    onFocusChanged: (focused) {
-                      if (focused) {
-                        _onCardFocused(index);
-                      }
-                    },
+                      },
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+              childCount: _items.length,
+            ),
           ),
         ),
         if (_isFetchingMore)
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            alignment: Alignment.center,
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
-                ),
-                SizedBox(width: 10),
-                Text(
-                  'Loading more titles...',
-                  style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
-                ),
-              ],
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              alignment: Alignment.center,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Loading more titles...',
+                    style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           )
         else if (!_hasMore && _items.isNotEmpty)
-          _buildEndOfCatalogBanner(),
+          SliverToBoxAdapter(
+            child: _buildEndOfResultsBanner(),
+          ),
       ],
     );
   }
@@ -947,9 +1274,9 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  Widget _buildEndOfCatalogBanner() {
+  Widget _buildEndOfResultsBanner() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       alignment: Alignment.center,
       child: const Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -958,7 +1285,7 @@ class _SearchScreenState extends State<SearchScreen> {
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              'End of Catalog',
+              'End of Results',
               style: TextStyle(
                 color: TVTheme.textSecondary,
                 fontSize: 14,
@@ -978,64 +1305,77 @@ class _SearchScreenState extends State<SearchScreen> {
     final options = _getFilterStripOptions(dimension);
     final selectedOption = _getCurrentFilterValue(dimension);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: TVTheme.surface,
-        borderRadius: TVTheme.borderRadiusMd,
-        border: Border.all(
-          color: TVTheme.surfaceElevated,
-          width: 1.5,
+    return FocusScope(
+      child: Container(
+        decoration: BoxDecoration(
+          color: TVTheme.surface,
+          borderRadius: TVTheme.borderRadiusMd,
+          border: Border.all(
+            color: TVTheme.surfaceElevated,
+            width: 1.5,
+          ),
         ),
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: TVTheme.textPrimary,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: TVTheme.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                '‹ Back',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: TVTheme.textMuted,
+                const SizedBox(width: 8),
+                const Text(
+                  '‹ Back',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: TVTheme.textMuted,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          const Divider(color: TVTheme.surfaceElevated, height: 1),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ListView.separated(
-              itemCount: options.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final option = options[index];
-                final isSelected = option == selectedOption;
-                return _FilterOptionTile(
-                  key: ValueKey('search_filter_option_${dimension.name}_$option'),
-                  label: option,
-                  isSelected: isSelected,
-                  autofocus: isSelected,
-                  onSelect: () => _applyFilterOption(dimension, option),
-                  onDismiss: _closeFilterStrip,
-                );
-              },
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            const Divider(color: TVTheme.surfaceElevated, height: 1),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView.separated(
+                itemCount: options.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final option = options[index];
+                  final isSelected = option == selectedOption;
+                  return _FilterOptionTile(
+                    key: ValueKey('search_filter_option_${dimension.name}_$option'),
+                    label: option,
+                    isSelected: isSelected,
+                    autofocus: isSelected,
+                    isFirst: index == 0,
+                    isLast: index == options.length - 1,
+                    focusNode: index == 0 ? _firstFilterOptionFocusNode : null,
+                    onSelect: () => _applyFilterOption(dimension, option),
+                    onDismiss: _closeFilterStrip,
+                    onLeft: () {
+                      final idx = _items.isEmpty ? 0 : _lastFocusedCardIndex.clamp(0, _items.length - 1);
+                      if (_items.isNotEmpty) {
+                        _getCardFocusNode(idx).requestFocus();
+                      } else if (_resetFiltersFocusNode.canRequestFocus) {
+                        _resetFiltersFocusNode.requestFocus();
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1087,6 +1427,11 @@ class _TvSearchInputFieldState extends State<_TvSearchInputField> {
   }
 
   void _onFocusChange() {
+    if (widget.focusNode.hasFocus) {
+      widget.controller.selection = TextSelection.collapsed(
+        offset: widget.controller.text.length,
+      );
+    }
     if (_isFocused != widget.focusNode.hasFocus && mounted) {
       setState(() => _isFocused = widget.focusNode.hasFocus);
     }
@@ -1133,16 +1478,24 @@ class _FilterOptionTile extends StatefulWidget {
   final String label;
   final bool isSelected;
   final bool autofocus;
+  final bool isFirst;
+  final bool isLast;
+  final FocusNode? focusNode;
   final VoidCallback onSelect;
   final VoidCallback onDismiss;
+  final VoidCallback? onLeft;
 
   const _FilterOptionTile({
     super.key,
     required this.label,
     required this.isSelected,
     required this.autofocus,
+    this.isFirst = false,
+    this.isLast = false,
+    this.focusNode,
     required this.onSelect,
     required this.onDismiss,
+    this.onLeft,
   });
 
   @override
@@ -1150,12 +1503,13 @@ class _FilterOptionTile extends StatefulWidget {
 }
 
 class _FilterOptionTileState extends State<_FilterOptionTile> {
-  final FocusNode _focusNode = FocusNode();
+  late final FocusNode _focusNode;
   bool _isFocused = false;
 
   @override
   void initState() {
     super.initState();
+    _focusNode = widget.focusNode ?? FocusNode();
     if (widget.isSelected) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -1167,7 +1521,9 @@ class _FilterOptionTileState extends State<_FilterOptionTile> {
 
   @override
   void dispose() {
-    _focusNode.dispose();
+    if (widget.focusNode == null) {
+      _focusNode.dispose();
+    }
     super.dispose();
   }
 
@@ -1212,16 +1568,28 @@ class _FilterOptionTileState extends State<_FilterOptionTile> {
         }
       },
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
           if (TvShortcuts.isActivateKey(event.logicalKey)) {
             widget.onSelect();
             return KeyEventResult.handled;
           }
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-              event.logicalKey == LogicalKeyboardKey.escape ||
+          if (event.logicalKey == LogicalKeyboardKey.escape ||
               event.logicalKey == LogicalKeyboardKey.backspace ||
               event.logicalKey == LogicalKeyboardKey.goBack) {
             widget.onDismiss();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            widget.onLeft?.call();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            return KeyEventResult.handled;
+          }
+          if (widget.isFirst && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            return KeyEventResult.handled;
+          }
+          if (widget.isLast && event.logicalKey == LogicalKeyboardKey.arrowDown) {
             return KeyEventResult.handled;
           }
         }

@@ -20,6 +20,8 @@ class TvUnifiedHeaderStrip extends StatefulWidget {
   final EdgeInsetsGeometry margin;
   final ValueChanged<bool>? onFocusChanged;
   final KeyEventResult Function(FocusNode, KeyEvent)? onKeyEvent;
+  final bool autoEnsureVisible;
+  final double scrollAlignment;
 
   const TvUnifiedHeaderStrip({
     super.key,
@@ -32,6 +34,8 @@ class TvUnifiedHeaderStrip extends StatefulWidget {
     this.margin = const EdgeInsets.only(bottom: 6),
     this.onFocusChanged,
     this.onKeyEvent,
+    this.autoEnsureVisible = true,
+    this.scrollAlignment = 0.18,
   });
 
   @override
@@ -112,12 +116,19 @@ class _TvUnifiedHeaderStripState extends State<TvUnifiedHeaderStrip> {
       autofocus: widget.autofocus,
       onFocusChange: (focused) {
         setState(() => _isFocused = focused);
-        if (focused) {
-          Scrollable.ensureVisible(
-            context,
-            alignment: 0.22,
-            duration: Duration.zero,
-          );
+        if (focused && widget.autoEnsureVisible) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final ro = context.findRenderObject();
+            if (ro != null && ro.attached) {
+              Scrollable.maybeOf(context, axis: Axis.vertical)?.position.ensureVisible(
+                ro,
+                alignment: widget.scrollAlignment,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+              );
+            }
+          });
         }
         widget.onFocusChanged?.call(focused);
       },

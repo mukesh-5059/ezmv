@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../theme.dart';
@@ -55,6 +56,26 @@ class TvFocusCard extends StatefulWidget {
 
 class _TvFocusCardState extends State<TvFocusCard> {
   bool _isFocused = false;
+  bool _shouldLoadImage = false;
+  Timer? _loadTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autofocus || widget.focusNode?.hasFocus == true) {
+      _shouldLoadImage = true;
+    } else {
+      _loadTimer = Timer(const Duration(milliseconds: 140), () {
+        if (mounted) setState(() => _shouldLoadImage = true);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _loadTimer?.cancel();
+    super.dispose();
+  }
 
   Widget _buildFallbackCard() {
     return Container(
@@ -114,6 +135,10 @@ class _TvFocusCardState extends State<TvFocusCard> {
       autofocus: widget.autofocus,
       onFocusChange: (focused) {
         setState(() => _isFocused = focused);
+        if (focused && !_shouldLoadImage) {
+          _loadTimer?.cancel();
+          setState(() => _shouldLoadImage = true);
+        }
         if (focused) {
           final RenderObject? renderObject = context.findRenderObject();
           if (renderObject != null && renderObject.attached) {
@@ -174,7 +199,7 @@ class _TvFocusCardState extends State<TvFocusCard> {
                     fit: StackFit.expand,
                     children: [
                       // Poster Image with Strict Downsampling & Static Skeleton (zero ticker jank)
-                      if (widget.posterUrl.isNotEmpty)
+                      if (widget.posterUrl.isNotEmpty && _shouldLoadImage)
                         CachedNetworkImage(
                           imageUrl: widget.posterUrl,
                           fit: BoxFit.cover,

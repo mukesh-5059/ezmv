@@ -28,25 +28,78 @@ class TvActorsLane extends StatefulWidget {
   });
 
   @override
-  State<TvActorsLane> createState() => _TvActorsLaneState();
+  State<TvActorsLane> createState() => TvActorsLaneState();
 }
 
-class _TvActorsLaneState extends State<TvActorsLane>
-    with AutomaticKeepAliveClientMixin {
+class TvActorsLaneState extends State<TvActorsLane> {
   List<ActorSummary> _actors = [];
   bool _isLoading = true;
   final FocusNode _headerFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   final List<FocusNode> _itemFocusNodes = [];
   int _lastFocusedIndex = 0;
+  int _lastCardRepeatMs = 0;
 
-  @override
-  bool get wantKeepAlive => true;
+  void _onCardFocused(int index) {
+    _lastFocusedIndex = index;
+    PageStorage.maybeOf(context)?.writeState(
+      context,
+      index,
+      identifier: 'actors_lane_focus',
+    );
+  }
+
+  void focusCard([int? index]) {
+    if (_actors.isEmpty) return;
+
+    final preferred = index ?? _lastFocusedIndex;
+    if (preferred >= 0 && preferred < _actors.length) {
+      final node = _getFocusNode(preferred);
+      if (node.parent != null) {
+        node.requestFocus();
+        return;
+      }
+    }
+
+    int target = 0;
+    if (_scrollController.hasClients) {
+      target = (_scrollController.offset / 114.0).round().clamp(0, _actors.length - 1);
+      final node = _getFocusNode(target);
+      if (node.parent != null) {
+        _onCardFocused(target);
+        node.requestFocus();
+        return;
+      }
+    }
+
+    for (int i = 0; i < _actors.length; i++) {
+      if (i < _itemFocusNodes.length && _itemFocusNodes[i].parent != null) {
+        _onCardFocused(i);
+        _itemFocusNodes[i].requestFocus();
+        return;
+      }
+    }
+
+    _onCardFocused(target);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _getFocusNode(target).requestFocus();
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     _loadActors();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final saved = PageStorage.maybeOf(context)?.readState(
+      context,
+      identifier: 'actors_lane_focus',
+    );
+    if (saved is int) _lastFocusedIndex = saved;
   }
 
   @override
@@ -100,35 +153,57 @@ class _TvActorsLaneState extends State<TvActorsLane>
   FocusNode get _effectiveHeaderFocusNode => widget.headerFocusNode ?? _headerFocusNode;
 
   KeyEventResult _handleHeaderKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        if (_actors.isNotEmpty) {
-          final targetIndex = _lastFocusedIndex.clamp(0, _actors.length - 1);
-          _getFocusNode(targetIndex).requestFocus();
-          return KeyEventResult.handled;
-        }
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        if (widget.onNavigateUpFromHeader != null) {
+        focusCard();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (event is KeyDownEvent && widget.onNavigateUpFromHeader != null) {
           widget.onNavigateUpFromHeader!();
-          return KeyEventResult.handled;
+        }
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleCardKeyEvent(KeyEvent event, int index) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (event is KeyDownEvent) {
+          _effectiveHeaderFocusNode.requestFocus();
+        }
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft && index == 0) {
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+          index == _actors.length - 1) {
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+          event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (event is KeyRepeatEvent) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - _lastCardRepeatMs < 140) return KeyEventResult.handled;
+          _lastCardRepeatMs = now;
         }
       }
     }
     return KeyEventResult.ignored;
   }
 
-  KeyEventResult _handleCardKeyEvent(KeyEvent event) {
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _effectiveHeaderFocusNode.requestFocus();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-
     if (_isLoading || _actors.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -148,30 +223,34 @@ class _TvActorsLaneState extends State<TvActorsLane>
           ),
         ),
         const SizedBox(height: 12),
-        SizedBox(
-          height: 155,
-          child: ListView.builder(
-            key: const PageStorageKey('lane_tamil_actors'),
-            controller: _scrollController,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
-            itemCount: _actors.length,
-            itemBuilder: (context, index) {
-              final actor = _actors[index];
+        FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: SizedBox(
+            height: 155,
+            child: ListView.builder(
+              key: const PageStorageKey('lane_tamil_actors'),
+              controller: _scrollController,
+              clipBehavior: Clip.none,
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: TVTheme.overscanMargin),
+              itemCount: _actors.length,
+              itemBuilder: (context, index) {
+                final actor = _actors[index];
 
-              return Padding(
-                padding: const EdgeInsets.only(right: 18),
-                child: _ActorCircleCard(
-                  focusNode: _getFocusNode(index),
-                  actor: actor,
-                  onFocusChanged: (focused) {
-                    if (focused) _lastFocusedIndex = index;
-                  },
-                  onKeyEvent: (node, event) => _handleCardKeyEvent(event),
-                  onTap: () => widget.onActorTap(actor),
-                ),
-              );
-            },
+                return Padding(
+                  padding: const EdgeInsets.only(right: 18),
+                  child: _ActorCircleCard(
+                    focusNode: _getFocusNode(index),
+                    actor: actor,
+                    onFocusChanged: (focused) {
+                      if (focused) _onCardFocused(index);
+                    },
+                    onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
+                    onTap: () => widget.onActorTap(actor),
+                  ),
+                );
+              },
+            ),
           ),
         ),
         const SizedBox(height: 32),

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -151,15 +152,15 @@ void main() {
       expect(find.byIcon(Icons.settings_rounded), findsOneWidget);
     });
 
-    testWidgets('TvBillboard selects featured movie using heuristic and renders CTAs',
+    testWidgets('TvBillboard selects featured movie, focuses as button, and supports Left/Right cycling',
         (tester) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
       final dashboard = createMockDashboard('tamil', 'Tamil Cinema');
-      MovieSummary? playedMovie;
-      MovieSummary? detailsMovie;
+      MovieSummary? selectedMovie;
+      final focusNode = FocusNode();
 
       await tester.pumpWidget(
         MaterialApp(
@@ -167,8 +168,9 @@ void main() {
           home: Scaffold(
             body: TvBillboard(
               lanes: dashboard.lanes,
-              onPlay: (m) => playedMovie = m,
-              onDetails: (m) => detailsMovie = m,
+              focusNode: focusNode,
+              autofocus: true,
+              onSelect: (m) => selectedMovie = m,
             ),
           ),
         ),
@@ -177,20 +179,30 @@ void main() {
 
       // Heuristic 1 matches: 'Trending Hit Movie' (in new_ott ∩ trending with Comedy)
       expect(find.text('Trending Hit Movie'), findsOneWidget);
-      expect(find.text('Play Now'), findsOneWidget);
-      expect(find.text('Details'), findsOneWidget);
       expect(find.text('8.5'), findsOneWidget);
       expect(find.text('(4.2K)'), findsOneWidget);
+      expect(find.text('View Details'), findsOneWidget);
 
-      // Tap Play Now
-      await tester.tap(find.text('Play Now'));
-      await tester.pumpAndSettle();
-      expect(playedMovie?.imdbId, 'tt111');
+      // Verify separate Play Now and Details buttons are removed
+      expect(find.text('Play Now'), findsNothing);
+      expect(find.text('Details'), findsNothing);
 
-      // Tap Details
-      await tester.tap(find.text('Details'));
+      // Tap the Billboard card
+      await tester.tap(find.byType(TvBillboard));
       await tester.pumpAndSettle();
-      expect(detailsMovie?.imdbId, 'tt111');
+      expect(selectedMovie?.imdbId, 'tt111');
+
+      // Test Right arrow key cycling
+      focusNode.requestFocus();
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+
+      // Test Enter key selection on cycled movie
+      selectedMovie = null;
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
+      expect(selectedMovie, isNotNull);
     });
 
     testWidgets('TvBillboard falls back through comedy stages correctly',
