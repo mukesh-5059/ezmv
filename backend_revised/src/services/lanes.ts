@@ -1,4 +1,4 @@
-import { Bindings, LaneConfig, LaneFilters, PaginatedLaneResponse, RequestTrace } from '../types/api';
+import { Bindings, Genre, LaneConfig, LaneFilters, MovieSummary, PaginatedLaneResponse, RequestTrace } from '../types/api';
 import { CatalogService, rowToMovieSummary } from './catalog';
 
 export class LanesService {
@@ -129,5 +129,106 @@ export class LanesService {
       has_more: hasMore,
       next_page: hasMore ? validPage + 1 : null,
     };
+  }
+
+  // Pre-computes up to 5 featured billboard hero titles for a given dashboard
+  computeBillboard(dashboardId: string, lanes: PaginatedLaneResponse[]): MovieSummary[] {
+    const seenIds = new Set<string>();
+    const candidates: MovieSummary[] = [];
+
+    const addCandidate = (m: MovieSummary) => {
+      if (m.backdrop_path && !seenIds.has(m.imdb_id)) {
+        seenIds.add(m.imdb_id);
+        candidates.push(m);
+      }
+    };
+
+    const getLane = (...ids: string[]) => lanes.find((l) => ids.some((id) => l.id.toLowerCase().includes(id)));
+
+    if (dashboardId === 'tamil') {
+      const newOtt = getLane('new_ott');
+      const trending = getLane('trending');
+      const isComedy = (m: MovieSummary) => m.genres?.some((g: Genre) => g.name.toLowerCase() === 'comedy' || g.slug.toLowerCase() === 'comedy');
+
+      if (newOtt && trending) {
+        const trendingIds = new Set(trending.items.map((m) => m.imdb_id));
+        for (const m of newOtt.items) {
+          if (trendingIds.has(m.imdb_id) && isComedy(m)) addCandidate(m);
+        }
+      }
+      if (candidates.length < 5 && trending) {
+        for (const m of trending.items) {
+          if (candidates.length >= 5) break;
+          if (isComedy(m)) addCandidate(m);
+        }
+      }
+      if (candidates.length < 5) {
+        for (const lane of lanes) {
+          for (const m of lane.items) {
+            if (candidates.length >= 5) break;
+            if (isComedy(m)) addCandidate(m);
+          }
+        }
+      }
+    } else if (dashboardId === 'english') {
+      const trending = getLane('trending');
+      const newReleases = getLane('releases');
+
+      if (trending && newReleases) {
+        const trendingIds = new Set(trending.items.map((m) => m.imdb_id));
+        for (const m of newReleases.items) {
+          if (trendingIds.has(m.imdb_id)) addCandidate(m);
+        }
+      }
+      if (candidates.length < 5 && trending) {
+        for (const m of trending.items) {
+          if (candidates.length >= 5) break;
+          addCandidate(m);
+        }
+      }
+      if (candidates.length < 5 && newReleases) {
+        for (const m of newReleases.items) {
+          if (candidates.length >= 5) break;
+          addCandidate(m);
+        }
+      }
+    } else if (dashboardId === 'anime') {
+      const trending = getLane('trending');
+      const movies = getLane('movies');
+
+      if (trending) {
+        for (const m of trending.items) {
+          if (candidates.length >= 5) break;
+          addCandidate(m);
+        }
+      }
+      if (candidates.length < 5 && movies) {
+        for (const m of movies.items) {
+          if (candidates.length >= 5) break;
+          addCandidate(m);
+        }
+      }
+    }
+
+    // Universal Fallback: fill up to 5 with highest popularity in dashboard
+    if (candidates.length < 5) {
+      const allRemaining: MovieSummary[] = [];
+      for (const lane of lanes) {
+        for (const m of lane.items) {
+          if (m.backdrop_path && !seenIds.has(m.imdb_id)) {
+            seenIds.add(m.imdb_id);
+            allRemaining.push(m);
+          }
+        }
+      }
+      allRemaining.sort((a, b) => b.vote_count - a.vote_count);
+      for (const m of allRemaining) {
+        if (candidates.length >= 5) break;
+        candidates.push(m);
+      }
+    }
+
+    candidates.sort((a, b) => b.vote_count - a.vote_count);
+    return candidates.slice(0, 5);
   }
 }

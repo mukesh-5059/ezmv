@@ -433,6 +433,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   builder: (context, isScrolledDown, child) {
                     return TvBillboard(
                       lanes: lanes,
+                      items: _dashboard?.billboard,
                       isVisible: !isScrolledDown,
                       focusNode: _billboardFocusNode,
                       onSelect: _navigateToDetails,

@@ -127,6 +127,7 @@ export interface PaginatedLaneResponse extends PaginatedMoviesResponse {
 export interface DashboardResponse {
   id: string;
   title: string;
+  billboard?: MovieSummary[];
   lanes: PaginatedLaneResponse[];
 }
 

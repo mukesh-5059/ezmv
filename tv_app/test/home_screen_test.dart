@@ -205,18 +205,17 @@ void main() {
       expect(selectedMovie, isNotNull);
     });
 
-    testWidgets('TvBillboard falls back through comedy stages correctly',
+    testWidgets('TvBillboard uses explicit items or falls back to lane items correctly',
         (tester) async {
       tester.view.physicalSize = const Size(1920, 1080);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
-      // Stage 2: new_ott ∩ trending has no comedy, but trending has comedy
-      final comedyAction = const MovieSummary(
+      final billboardItem = const MovieSummary(
         imdbId: 'tt333',
         tmdbId: 103,
-        title: 'Only Trending Comedy',
-        overview: 'Comedy in trending only.',
+        title: 'Explicit Billboard Hero',
+        overview: 'Direct from backend.',
         releaseDate: '2024-01-01',
         posterPath: '/c1.jpg',
         backdropPath: '/c1_bg.jpg',
@@ -226,11 +225,11 @@ void main() {
         genres: [Genre(slug: 'comedy', name: 'Comedy')],
       );
 
-      final nonComedyOtt = const MovieSummary(
+      final laneItem = const MovieSummary(
         imdbId: 'tt444',
         tmdbId: 104,
-        title: 'Action OTT',
-        overview: 'Action OTT.',
+        title: 'Lane Fallback Title',
+        overview: 'From lane.',
         releaseDate: '2024-01-01',
         posterPath: '/c2.jpg',
         backdropPath: '/c2_bg.jpg',
@@ -240,16 +239,11 @@ void main() {
         genres: [Genre(slug: 'action', name: 'Action')],
       );
 
-      final fallbackLanes = [
+      final testLanes = [
         DashboardLane(
           id: 'trending',
           title: 'Trending',
-          items: [comedyAction],
-        ),
-        DashboardLane(
-          id: 'new_ott',
-          title: 'New Releases',
-          items: [nonComedyOtt],
+          items: [laneItem],
         ),
       ];
 
@@ -258,7 +252,8 @@ void main() {
           theme: TVTheme.darkTheme,
           home: Scaffold(
             body: TvBillboard(
-              lanes: fallbackLanes,
+              items: [billboardItem],
+              lanes: testLanes,
               onPlay: (_) {},
               onDetails: (_) {},
             ),
@@ -267,7 +262,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Only Trending Comedy'), findsOneWidget);
+      expect(find.text('Explicit Billboard Hero'), findsOneWidget);
     });
 
     testWidgets('TvBillboard handles empty lanes without errors', (tester) async {

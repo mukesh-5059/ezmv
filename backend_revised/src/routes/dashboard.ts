@@ -41,9 +41,12 @@ dashboardRouter.get('/:dashboard_id', async (c) => {
   );
   if (trace) trace.add(`d1: RESOLVE ${dashboard.lanes.length} LANES in ${Date.now() - tCatalog}ms`);
 
+  const billboard = lanesService.computeBillboard(dashboard.id, lanesOutput);
+
   const responsePayload: DashboardResponse = {
     id: dashboard.id,
     title: dashboard.title,
+    billboard,
     lanes: lanesOutput,
   };
   await cacheService.set(cacheKey, responsePayload, 43200);

@@ -8,18 +8,14 @@ import '../../theme.dart';
 /// 10-Foot Hero Billboard Carousel for Android TV.
 ///
 /// Features:
-/// - Selection heuristic:
-///   1. Intersect `new_ott` ∩ `trending` with comedy genre.
-///   2. Fallback: (`trending` + `new_ott`) filtered to comedy genre.
-///   3. Fallback: `trending` filtered to comedy genre.
-///   4. Fallback: All dashboard titles filtered to comedy genre.
-///   5. Fallback: Top 5 rated/popular titles in that dashboard (when zero comedy titles exist).
+/// - Hero items sourced directly from backend pre-computed billboard, with minimal lane fallback.
 /// - Auto-scroll timer with auto-pause on focus and cancel on vertical scroll.
 /// - Display typography (38sp bold), rating badge, release year, overview.
-/// - Carousel cycling via Left / Right D-pad arrows when focused.
+/// - Carousel continuous cycling via Left / Right D-pad arrows when focused.
 /// - Full card focusable button: brightens on focus, dims on unfocus.
 class TvBillboard extends StatefulWidget {
   final List<DashboardLane> lanes;
+  final List<MovieSummary>? items;
   final bool isVisible;
   final void Function(MovieSummary movie)? onSelect;
   final void Function(MovieSummary movie)? onPlay;
@@ -34,6 +30,7 @@ class TvBillboard extends StatefulWidget {
   const TvBillboard({
     super.key,
     required this.lanes,
+    this.items,
     this.isVisible = true,
     this.onSelect,
     this.onPlay,
@@ -111,14 +108,18 @@ class _TvBillboardState extends State<TvBillboard> {
   }
 
   void _previousMovie() {
-    if (_currentIndex <= 0) return;
-    setState(() => _currentIndex--);
+    if (_featuredMovies.length <= 1) return;
+    setState(() {
+      _currentIndex = (_currentIndex - 1 + _featuredMovies.length) % _featuredMovies.length;
+    });
     _stopTimer();
   }
 
   void _nextMovie() {
-    if (_currentIndex >= _featuredMovies.length - 1) return;
-    setState(() => _currentIndex++);
+    if (_featuredMovies.length <= 1) return;
+    setState(() {
+      _currentIndex = (_currentIndex + 1) % _featuredMovies.length;
+    });
     _stopTimer();
   }
 
@@ -133,109 +134,27 @@ class _TvBillboardState extends State<TvBillboard> {
   }
 
   void _computeFeaturedMovies() {
+    if (widget.items != null && widget.items!.isNotEmpty) {
+      _featuredMovies = widget.items!.take(5).toList();
+      if (_currentIndex >= _featuredMovies.length) _currentIndex = 0;
+      return;
+    }
+
     if (widget.lanes.isEmpty) {
       _featuredMovies = [];
       return;
     }
 
-    DashboardLane? newOttLane;
-    DashboardLane? trendingLane;
-
+    final allItems = <MovieSummary>[];
+    final seenIds = <String>{};
     for (final lane in widget.lanes) {
-      final id = lane.id.toLowerCase();
-      if (id == 'new_ott' || id.contains('new_ott') || id.contains('releases')) {
-        newOttLane = lane;
-      }
-      if (id == 'trending' || id.contains('trending')) {
-        trendingLane = lane;
+      for (final item in lane.items) {
+        if (seenIds.add(item.imdbId)) allItems.add(item);
       }
     }
 
-    bool isComedy(MovieSummary m) {
-      return m.genres.any((g) {
-        final name = g.name.toLowerCase();
-        final slug = g.slug.toLowerCase();
-        return name == 'comedy' || slug == 'comedy';
-      });
-    }
-
-    List<MovieSummary> candidates = [];
-
-    // Stage 1: Intersect new_ott ∩ trending with comedy genre
-    if (newOttLane != null && trendingLane != null) {
-      final trendingMap = {for (final m in trendingLane.items) m.imdbId: m};
-      for (final m in newOttLane.items) {
-        if (trendingMap.containsKey(m.imdbId) && isComedy(m)) {
-          candidates.add(m);
-        }
-      }
-    }
-
-    // Stage 2 Fallback: (trending + new_ott) filtered to comedy genre
-    if (candidates.isEmpty) {
-      final seenIds = <String>{};
-      if (trendingLane != null) {
-        for (final m in trendingLane.items) {
-          if (isComedy(m) && seenIds.add(m.imdbId)) {
-            candidates.add(m);
-          }
-        }
-      }
-      if (newOttLane != null) {
-        for (final m in newOttLane.items) {
-          if (isComedy(m) && seenIds.add(m.imdbId)) {
-            candidates.add(m);
-          }
-        }
-      }
-    }
-
-    // Stage 3 Fallback: trending filtered to comedy genre
-    if (candidates.isEmpty && trendingLane != null) {
-      candidates = trendingLane.items.where(isComedy).toList();
-    }
-
-    // Stage 4 Fallback: All dashboard titles filtered to comedy genre
-    if (candidates.isEmpty) {
-      final seenIds = <String>{};
-      for (final lane in widget.lanes) {
-        for (final item in lane.items) {
-          if (isComedy(item) && seenIds.add(item.imdbId)) {
-            candidates.add(item);
-          }
-        }
-      }
-    }
-
-    // Stage 5 Fallback: If and only if zero comedy titles in the entire dashboard,
-    // fallback to top 5 highest rated/popular titles in the dashboard
-    if (candidates.isEmpty) {
-      final allItems = <MovieSummary>[];
-      final seenIds = <String>{};
-      for (final lane in widget.lanes) {
-        for (final item in lane.items) {
-          if (seenIds.add(item.imdbId)) {
-            allItems.add(item);
-          }
-        }
-      }
-      allItems.sort((a, b) {
-        final cmp = b.ratingScore.compareTo(a.ratingScore);
-        if (cmp != 0) return cmp;
-        return b.voteCount.compareTo(a.voteCount);
-      });
-      candidates = allItems.take(5).toList();
-    }
-
-    // Popularity Sort Directive:
-    // Before picking the top 5 featured movies from whichever candidate tier matches,
-    // order the candidates by their popularity (voteCount descending).
-    candidates.sort((a, b) => b.voteCount.compareTo(a.voteCount));
-    _featuredMovies = candidates.take(5).toList();
-
-    if (_currentIndex >= _featuredMovies.length) {
-      _currentIndex = 0;
-    }
+    _featuredMovies = allItems.take(5).toList();
+    if (_currentIndex >= _featuredMovies.length) _currentIndex = 0;
   }
 
   void _resetTimer() {
