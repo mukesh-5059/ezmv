@@ -70,6 +70,8 @@
 - [ ] **Multi-Audio Track Selection & Support**:
   - Audio track switcher in the video player for streams containing multiple embedded audio channels (e.g. Tamil, English, Hindi dubs).
   - Accurate language tagging and stream track enumeration from demuxer metadata.
+- [ ] **Auto Subtitle Sync**:
+  - Implement automated subtitle timing synchronization using audio speech detection / voice activity (e.g. VAD or cross-correlation) to auto-align subtitle delay with spoken dialog without manual adjustments.
 
 ### 2. Playback & Streaming Architecture
 - [ ] **Client-Side Stream Link Probing**:

@@ -32,3 +32,5 @@ local
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
+.comments/
+.vscode/
