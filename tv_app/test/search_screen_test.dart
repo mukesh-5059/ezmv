@@ -443,5 +443,51 @@ void main() {
       expect(mockApi.lastQuery, 'Avatar');
       expect(find.text("Search: 'Avatar'"), findsOneWidget);
     });
+
+    testWidgets('Clear query button arrowDown focuses Clear History or Clear Filters', (tester) async {
+      configureTvResolution(tester);
+      SharedPreferences.setMockInitialValues({'tv_search_history': ['Avatar']});
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Avatar'));
+      await tester.pumpAndSettle();
+
+      final clearSearchBtn = find.widgetWithIcon(TvFocusButton, Icons.close_rounded);
+      expect(clearSearchBtn, findsOneWidget);
+      Focus.of(tester.element(clearSearchBtn)).requestFocus();
+      await tester.pumpAndSettle();
+      expect(Focus.of(tester.element(clearSearchBtn)).hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      final clearHistoryBtn = find.widgetWithText(TvFocusButton, 'Clear History');
+      expect(Focus.of(tester.element(clearHistoryBtn)).hasFocus, isTrue);
+    });
+
+    testWidgets('Reset Filters button arrowUp focuses type pill and blocks left/right', (tester) async {
+      configureTvResolution(tester);
+      mockApi.mockItems = [];
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      final resetBtn = find.widgetWithText(TvFocusButton, 'Reset Filters');
+      expect(resetBtn, findsOneWidget);
+      expect(Focus.of(tester.element(resetBtn)).hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(Focus.of(tester.element(resetBtn)).hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(Focus.of(tester.element(resetBtn)).hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      final typePill = find.text('Type');
+      expect(Focus.of(tester.element(typePill)).hasFocus, isTrue);
+    });
   });
 }

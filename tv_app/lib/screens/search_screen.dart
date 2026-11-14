@@ -219,9 +219,9 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       if (_history.isNotEmpty) {
-        _getHistoryFocusNode(_history.length - 1).requestFocus();
+        _clearHistoryFocusNode.requestFocus();
       } else {
-        _sortPillFocusNode.requestFocus();
+        _clearFiltersFocusNode.requestFocus();
       }
       return KeyEventResult.handled;
     }
@@ -281,6 +281,21 @@ class _SearchScreenState extends State<SearchScreen> {
     return KeyEventResult.ignored;
   }
 
+  KeyEventResult _handleResetFiltersKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+        event.logicalKey == LogicalKeyboardKey.arrowRight ||
+        event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   KeyEventResult _handleHistoryPillKeyEvent(KeyEvent event, int index) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
 
@@ -312,6 +327,11 @@ class _SearchScreenState extends State<SearchScreen> {
 
   FocusNode _getHistoryFocusNode(int index) {
     return _historyFocusNodes.putIfAbsent(index, () => FocusNode());
+  }
+
+  void _clearCardFocusNodes() {
+    for (final node in _cardFocusNodes.values) node.dispose();
+    _cardFocusNodes.clear();
   }
 
   FocusNode _getCardFocusNode(int index) {
@@ -421,26 +441,9 @@ class _SearchScreenState extends State<SearchScreen> {
     _ratingPillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _ratingPillFocusNode));
     _sortPillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, _sortPillFocusNode));
     _clearFiltersFocusNode = FocusNode(onKeyEvent: _handleClearFiltersKeyEvent);
-
-    _resetFiltersFocusNode = FocusNode(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
-              event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-              event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-    );
+    _resetFiltersFocusNode = FocusNode(onKeyEvent: _handleResetFiltersKeyEvent);
 
     _loadHistory();
-    _gridScrollController.addListener(_onScroll);
     _executeSearch(reset: true);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -469,9 +472,7 @@ class _SearchScreenState extends State<SearchScreen> {
     for (final node in _historyFocusNodes.values) {
       node.dispose();
     }
-    for (final node in _cardFocusNodes.values) {
-      node.dispose();
-    }
+    _clearCardFocusNodes();
     _firstFilterOptionFocusNode.dispose();
     super.dispose();
   }
@@ -525,18 +526,6 @@ class _SearchScreenState extends State<SearchScreen> {
     return double.tryParse(_selectedRating.replaceAll('+', ''));
   }
 
-  void _onScroll() {
-    if (!_gridScrollController.hasClients) return;
-    final maxScroll = _gridScrollController.position.maxScrollExtent;
-    final currentScroll = _gridScrollController.position.pixels;
-    // Fetch next page when user scrolls past 80%
-    if (maxScroll > 0 && currentScroll >= maxScroll * 0.8) {
-      if (!_isLoading && !_isFetchingMore && _hasMore) {
-        _fetchMore();
-      }
-    }
-  }
-
   Future<void> _executeSearch({bool reset = true}) async {
     final query = _searchController.text.trim();
     if (query.isNotEmpty) {
@@ -544,6 +533,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     if (reset) {
+      _clearCardFocusNodes();
       setState(() {
         _isLoading = true;
         _errorMessage = null;
@@ -1134,6 +1124,7 @@ class _SearchScreenState extends State<SearchScreen> {
               const SizedBox(height: 20),
               TvFocusButton(
                 focusNode: _resetFiltersFocusNode,
+                onKeyEvent: _handleResetFiltersKeyEvent,
                 label: 'Reset Filters',
                 icon: Icons.filter_alt_off_rounded,
                 isPrimary: false,
@@ -1145,82 +1136,86 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
 
-    return CustomScrollView(
-      key: const PageStorageKey('tv_search_grid'),
-      controller: _gridScrollController,
-      cacheExtent: 600,
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.only(bottom: 24),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 5,
-              childAspectRatio: 150 / 225,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final movie = _items[index];
-                return FittedBox(
-                  fit: BoxFit.contain,
-                  child: SizedBox(
-                    width: 162,
-                    height: 241,
-                    child: TvFocusCard(
-                      key: ValueKey('search_movie_${movie.imdbId}_$index'),
-                      focusNode: _getCardFocusNode(index),
-                      autofocus: index == 0 && _lastFocusedCardIndex == 0,
-                      onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
-                      posterUrl: movie.posterUrl,
-                      title: movie.title,
-                      rating: movie.ratingScore > 0 ? movie.ratingScore : null,
-                      year: movie.year.isNotEmpty ? movie.year : null,
-                      isTv: movie.isTv,
-                      width: 150,
-                      height: 225,
-                      showTitleBelow: false,
-                      onTap: () => _navigateToDetails(movie),
-                      onFocusChanged: (focused) {
-                        if (focused) {
-                          _onCardFocused(index);
-                        }
-                      },
+    return RepaintBoundary(
+      child: CustomScrollView(
+        key: const PageStorageKey('tv_search_grid'),
+        controller: _gridScrollController,
+        cacheExtent: 240,
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 24),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 5,
+                childAspectRatio: 150 / 225,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final movie = _items[index];
+                  return FittedBox(
+                    fit: BoxFit.contain,
+                    child: SizedBox(
+                      width: 162,
+                      height: 241,
+                      child: TvFocusCard(
+                        key: ValueKey('search_movie_${movie.imdbId}_$index'),
+                        focusNode: _getCardFocusNode(index),
+                        autofocus: index == 0 && _lastFocusedCardIndex == 0,
+                        onKeyEvent: (node, event) => _handleCardKeyEvent(event, index),
+                        posterUrl: movie.posterUrl,
+                        title: movie.title,
+                        rating: movie.ratingScore > 0 ? movie.ratingScore : null,
+                        year: movie.year.isNotEmpty ? movie.year : null,
+                        isTv: movie.isTv,
+                        width: 150,
+                        height: 225,
+                        showTitleBelow: false,
+                        onTap: () => _navigateToDetails(movie),
+                        onFocusChanged: (focused) {
+                          if (focused) {
+                            _onCardFocused(index);
+                          }
+                        },
+                      ),
                     ),
-                  ),
-                );
-              },
-              childCount: _items.length,
-            ),
-          ),
-        ),
-        if (_isFetchingMore)
-          SliverToBoxAdapter(
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              alignment: Alignment.center,
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
-                  ),
-                  SizedBox(width: 10),
-                  Text(
-                    'Loading more titles...',
-                    style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
-                  ),
-                ],
+                  );
+                },
+                childCount: _items.length,
+                addAutomaticKeepAlives: false,
+                addRepaintBoundaries: true,
               ),
             ),
-          )
-        else if (!_hasMore && _items.isNotEmpty)
-          SliverToBoxAdapter(
-            child: _buildEndOfResultsBanner(),
           ),
-      ],
+          if (_isFetchingMore)
+            SliverToBoxAdapter(
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                alignment: Alignment.center,
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: TVTheme.primary),
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Loading more titles...',
+                      style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (!_hasMore && _items.isNotEmpty)
+            SliverToBoxAdapter(
+              child: _buildEndOfResultsBanner(),
+            ),
+        ],
+      ),
     );
   }
 
