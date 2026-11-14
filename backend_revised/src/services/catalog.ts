@@ -5,6 +5,7 @@ import { ConfigService } from './config';
 import { resolveGenres } from '../config/genres';
 
 const RATING_TTL_SECONDS = 86400 * 2;
+const TOMBSTONE_TTL_SECONDS = 86400;
 
 function isRatingStale(ratingsUpdatedAt?: number | null): boolean {
   if (!ratingsUpdatedAt) return true;
@@ -30,9 +31,11 @@ export class CatalogService {
 
     // 1. Check D1 for known items
     const lookup = new Map<string, MovieSummary>();
+    const tombstonedIds = new Set<string>();
     const missingIds: string[] = [];
 
     const cleanIds = imdbIds.filter(Boolean);
+    const now = Math.floor(Date.now() / 1000);
 
     const tD1 = Date.now();
     if (this.db && cleanIds.length > 0) {
@@ -42,6 +45,10 @@ export class CatalogService {
       const { results } = await this.db.prepare(query).bind(...cleanIds).all<any>();
 
       for (const row of results || []) {
+        if (row.title === '[UNAVAILABLE]') {
+          if (now - (row.metadata_updated_at || 0) < TOMBSTONE_TTL_SECONDS) tombstonedIds.add(row.imdb_id);
+          continue;
+        }
         if (isRatingStale(row.ratings_updated_at)) continue;
 
         const summary = rowToMovieSummary(row);
@@ -49,9 +56,9 @@ export class CatalogService {
       }
     }
     const d1ReadDuration = Date.now() - tD1;
-    if (trace) trace.add(`d1_read: HIT ${lookup.size}/${cleanIds.length} in ${d1ReadDuration}ms`);
+    if (trace) trace.add(`d1_read: HIT ${lookup.size}/${cleanIds.length} (tombstones: ${tombstonedIds.size}) in ${d1ReadDuration}ms`);
 
-    for (const id of cleanIds) if (!lookup.has(id)) missingIds.push(id);
+    for (const id of cleanIds) if (!lookup.has(id) && !tombstonedIds.has(id)) missingIds.push(id);
 
     // 2. Batch fetch missing items from MDBList
     if (missingIds.length > 0) {
@@ -59,15 +66,22 @@ export class CatalogService {
       const fetchedItems = await this.mdblist.batchMovies(missingIds, mediaType);
       if (trace) trace.add(`mdblist: FETCH ${Date.now() - tMdb}ms (${fetchedItems.length} items)`);
 
+      const fetchedIdSet = new Set<string>();
       if (fetchedItems.length > 0) {
         const tUpsert = Date.now();
         const freshSummaries = await this.upsertBatch(fetchedItems);
         if (trace && this.db) trace.add(`d1_upsert: ${Date.now() - tUpsert}ms`);
 
         for (const summary of freshSummaries) {
-          if (summary.imdb_id) lookup.set(summary.imdb_id, summary);
+          if (summary.imdb_id) {
+            lookup.set(summary.imdb_id, summary);
+            fetchedIdSet.add(summary.imdb_id);
+          }
         }
       }
+
+      const unindexedIds = missingIds.filter((id) => !fetchedIdSet.has(id));
+      if (unindexedIds.length > 0 && this.db) await this.tombstoneImdbIds(unindexedIds);
     }
 
     // 3. Assemble results matching requested ordering
@@ -78,6 +92,20 @@ export class CatalogService {
     }
 
     return finalResults;
+  }
+
+  private async tombstoneImdbIds(ids: string[]): Promise<void> {
+    if (!this.db || !ids.length) return;
+    const now = Math.floor(Date.now() / 1000);
+    const statements = ids.map((id) =>
+      this.db
+        .prepare(
+          `INSERT INTO movies (imdb_id, title, updated_at) VALUES (?, '[UNAVAILABLE]', ?)
+           ON CONFLICT(imdb_id) DO UPDATE SET title = '[UNAVAILABLE]', updated_at = excluded.updated_at`
+        )
+        .bind(id, now)
+    );
+    await this.db.batch(statements).catch((err) => console.warn('[Tombstone error]:', err?.message));
   }
 
   async resolveByTmdbItems(

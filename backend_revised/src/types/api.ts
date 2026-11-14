@@ -2,7 +2,6 @@ export type Bindings = {
   DB: D1Database;
   CONFIG_KV: KVNamespace;
   MDBLIST_API_KEY?: string;
-  TRAKT_CLIENT_ID?: string;
   TMDB_API_KEY?: string;
   TMDB_READ_ACCESS_TOKEN?: string;
   PENGUPLAY_MANIFEST_URL?: string;

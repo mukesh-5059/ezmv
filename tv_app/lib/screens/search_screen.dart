@@ -340,7 +340,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _onCardFocused(int index) {
     _lastFocusedCardIndex = index;
-    if (index >= 15 && index >= _items.length - 15 && _hasMore && !_isFetchingMore && !_isLoading) {
+    final threshold = (_items.length * 0.75).floor();
+    if (index >= threshold && _hasMore && !_isFetchingMore && !_isLoading) {
       _fetchMore();
     }
   }
@@ -526,6 +527,31 @@ class _SearchScreenState extends State<SearchScreen> {
     return double.tryParse(_selectedRating.replaceAll('+', ''));
   }
 
+  bool _matchesFilters(MovieSummary m) {
+    if (_selectedType == 'Movies' && m.mediaType != 'movie') return false;
+    if (_selectedType == 'TV' && m.mediaType != 'tv') return false;
+    if (_selectedGenre != 'All') {
+      final target = _selectedGenre.toLowerCase();
+      if (!m.genres.any((g) => g.slug.toLowerCase() == target)) return false;
+    }
+    if (_selectedRating != 'All') {
+      final min = double.tryParse(_selectedRating.replaceAll('+', ''));
+      if (min != null && m.ratingScore < min) return false;
+    }
+    if (_selectedYear != 'All') {
+      final y = int.tryParse(m.year);
+      if (y == null) return false;
+      if (_selectedYear == '2020s' && (y < 2020 || y > 2029)) return false;
+      if (_selectedYear == '2010s' && (y < 2010 || y > 2019)) return false;
+      if (_selectedYear == '2000s' && (y < 2000 || y > 2009)) return false;
+      if (_selectedYear == '90s' && (y < 1990 || y > 1999)) return false;
+      if (_selectedYear == 'classic' && y >= 1990) return false;
+      final target = int.tryParse(_selectedYear);
+      if (target != null && y != target) return false;
+    }
+    return true;
+  }
+
   Future<void> _executeSearch({bool reset = true}) async {
     final query = _searchController.text.trim();
     if (query.isNotEmpty) {
@@ -556,7 +582,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
       if (!mounted) return;
 
-      var resultItems = response.items;
+      var resultItems = response.items.where(_matchesFilters).toList();
       _applySort(resultItems);
 
       setState(() {
@@ -611,7 +637,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
       if (!mounted) return;
 
-      var resultItems = response.items;
+      var resultItems = response.items.where(_matchesFilters).toList();
       _applySort(resultItems);
 
       setState(() {

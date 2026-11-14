@@ -1,17 +1,17 @@
 import { Hono } from 'hono';
 import { Bindings, PaginatedMoviesResponse, SearchFilters, Variables } from '../types';
-import { TraktSearchService } from '../services/traktsearch';
+import { TmdbSearchService } from '../services/tmdbsearch';
 import { CacheService } from '../services/cache';
 import { rowToMovieSummary } from '../services/catalog';
 
 export const searchRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// GET /api/v1/search (Fixed 100 items per page)
+// GET /api/v1/search (TMDb fallback search, default 20 items per page)
 searchRouter.get('/', async (c) => {
   const query = c.req.query('query')?.trim() || c.req.query('q')?.trim() || '';
 
   const page = Math.max(1, Number(c.req.query('page') || 1));
-  const PAGE_SIZE = 100;
+  const PAGE_SIZE = 20;
 
   const typeParam = (c.req.query('type') || c.req.query('media_type'))?.trim().toLowerCase();
   const media_type: SearchFilters['media_type'] = (typeParam === 'movie' || typeParam === 'tv') ? typeParam : 'all';
@@ -54,8 +54,15 @@ searchRouter.get('/', async (c) => {
       params.push(`%"${filters.genre.toLowerCase()}"%`);
     }
     if (filters.year !== undefined) {
-      conditions.push('year = ?');
-      params.push(filters.year);
+      if (filters.year === 2020) conditions.push('year >= 2020 AND year <= 2029');
+      else if (filters.year === 2010) conditions.push('year >= 2010 AND year <= 2019');
+      else if (filters.year === 2000) conditions.push('year >= 2000 AND year <= 2009');
+      else if (filters.year === 1990) conditions.push('year >= 1990 AND year <= 1999');
+      else if (filters.year === 1980) conditions.push('year < 1990');
+      else {
+        conditions.push('year = ?');
+        params.push(filters.year);
+      }
     }
     if (filters.min_rating !== undefined && filters.min_rating > 0) {
       conditions.push('rating_score >= ?');
@@ -104,8 +111,8 @@ searchRouter.get('/', async (c) => {
     });
   }
 
-  const trakt = new TraktSearchService(c.env);
-  const result = await trakt.search(query, page, PAGE_SIZE, filters, trace);
+  const tmdbSearch = new TmdbSearchService(c.env);
+  const result = await tmdbSearch.search(query, page, filters, trace);
 
   if (result.items.length > 0) {
     await cacheService.set(cacheKey, result, 43200);

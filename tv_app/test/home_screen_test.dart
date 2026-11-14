@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_core/shared_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tv_app/screens/home_screen.dart';
 import 'package:tv_app/theme.dart';
 import 'package:tv_app/widgets/home/tv_actors_lane.dart';
 import 'package:tv_app/widgets/home/tv_billboard.dart';
@@ -399,6 +400,88 @@ void main() {
       await tester.pumpAndSettle();
       // Verifies widget builds cleanly without errors
       expect(find.byType(TvActorsLane), findsOneWidget);
+    });
+
+    testWidgets('Preserves vertical scroll offset and card focus when returning from DetailsScreen', (tester) async {
+      tester.view.physicalSize = const Size(1920, 1080);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+      SharedPreferences.setMockInitialValues({});
+
+      final client = MockClient((request) async {
+        final dashboard = Dashboard(
+          id: 'tamil',
+          title: 'Tamil Cinema',
+          lanes: List.generate(
+            6,
+            (laneIdx) => DashboardLane(
+              id: 'lane_$laneIdx',
+              title: 'Lane $laneIdx',
+              items: List.generate(
+                10,
+                (itemIdx) => MovieSummary(
+                  imdbId: 'tt_${laneIdx}_$itemIdx',
+                  tmdbId: 1000 + laneIdx * 10 + itemIdx,
+                  title: 'Movie ${laneIdx}_$itemIdx',
+                  overview: 'Overview',
+                  releaseDate: '2024-01-01',
+                  posterPath: '/p.jpg',
+                  backdropPath: '',
+                  ratingScore: 8.0,
+                  voteCount: 100,
+                  mediaType: 'movie',
+                  genres: [],
+                ),
+              ),
+            ),
+          ),
+        );
+        return http.Response(json.encode(dashboard.toJson()), 200, headers: {'content-type': 'application/json'});
+      });
+      ApiClient.instance = ApiClient(client: client);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TVTheme.darkTheme,
+          home: const HomeScreen(),
+          routes: {
+            '/details': (context) => Scaffold(
+                  appBar: AppBar(title: const Text('Details')),
+                  body: const Center(child: Text('Details Body')),
+                ),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final listView = tester.widget<ListView>(find.byType(ListView).first);
+      final scrollController = listView.controller!;
+
+      // Navigate down to Lane 1 cards
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      final savedOffset = scrollController.offset;
+      expect(savedOffset, greaterThan(0));
+
+      // Press Select / Enter to open Details
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
+      expect(find.text('Details Body'), findsOneWidget);
+
+      // Pop back from Details
+      final nav = tester.state<NavigatorState>(find.byType(Navigator));
+      nav.pop();
+      await tester.pumpAndSettle();
+
+      expect(scrollController.offset, equals(savedOffset));
+      expect(FocusManager.instance.primaryFocus, isNotNull);
     });
   });
 }

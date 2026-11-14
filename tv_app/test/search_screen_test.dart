@@ -246,6 +246,71 @@ void main() {
       expect(find.text('Genre'), findsOneWidget);
       expect(mockApi.lastGenre, isNull);
     });
+
+    testWidgets('client-side filtering excludes items violating rating and year pills', (tester) async {
+      configureTvResolution(tester);
+      mockApi.mockItems = [
+        const MovieSummary(
+          imdbId: 'tt001',
+          tmdbId: 1,
+          title: 'Matching 2024 Hit',
+          overview: '',
+          releaseDate: '2024-05-10',
+          posterPath: '',
+          backdropPath: '',
+          ratingScore: 8.5,
+          voteCount: 100,
+          mediaType: 'movie',
+          genres: [Genre(slug: 'action', name: 'Action')],
+        ),
+        const MovieSummary(
+          imdbId: 'tt002',
+          tmdbId: 2,
+          title: 'Old 2021 Show',
+          overview: '',
+          releaseDate: '2021-06-09',
+          posterPath: '',
+          backdropPath: '',
+          ratingScore: 8.2,
+          voteCount: 100,
+          mediaType: 'movie',
+          genres: [Genre(slug: 'action', name: 'Action')],
+        ),
+        const MovieSummary(
+          imdbId: 'tt003',
+          tmdbId: 3,
+          title: 'Low Rated 2024 Short',
+          overview: '',
+          releaseDate: '2024-07-01',
+          posterPath: '',
+          backdropPath: '',
+          ratingScore: 6.0,
+          voteCount: 100,
+          mediaType: 'movie',
+          genres: [Genre(slug: 'action', name: 'Action')],
+        ),
+      ];
+
+      await tester.pumpWidget(buildTestApp());
+      await tester.pumpAndSettle();
+
+      // Select Year: 2024
+      await tester.tap(find.text('Year'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('search_filter_option_year_2024')));
+      await tester.pumpAndSettle();
+
+      // Select Rating: 8.0+
+      await tester.tap(find.text('Rating'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('search_filter_option_rating_8.0+')));
+      await tester.pumpAndSettle();
+
+      // Only 'Matching 2024 Hit' should be rendered
+      expect(find.text('Matching 2024 Hit'), findsOneWidget);
+      expect(find.text('Old 2021 Show'), findsNothing);
+      expect(find.text('Low Rated 2024 Short'), findsNothing);
+    });
   });
 
   group('SearchScreen - Back Key Hierarchy', () {

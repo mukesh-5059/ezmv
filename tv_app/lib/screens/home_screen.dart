@@ -162,23 +162,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _ensureFocusedVisible() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final focusedContext = FocusManager.instance.primaryFocus?.context;
-      if (focusedContext != null) {
-        final ro = focusedContext.findRenderObject();
-        if (ro != null && ro.attached) {
-          Scrollable.maybeOf(focusedContext, axis: Axis.vertical)?.position.ensureVisible(
-            ro,
-            alignment: 0.5,
-            duration: Duration.zero,
-          );
-        }
-      }
-    });
-  }
-
   void _handleBackPress() {
     if (_verticalScrollController.hasClients && _verticalScrollController.offset > 240) {
       _scrollToTop();
@@ -228,7 +211,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (streams.isNotEmpty) {
         final topStream = streams.first;
-        Navigator.pushNamed(
+        final currentFocus = FocusManager.instance.primaryFocus;
+        await Navigator.pushNamed(
           context,
           '/player',
           arguments: {
@@ -241,6 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'originalLanguage': movie.originalLanguage,
           },
         );
+        if (mounted) currentFocus?.requestFocus();
       } else {
         _navigateToDetails(movie);
       }
@@ -262,7 +247,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.pushNamed(context, '/details', arguments: movie);
     if (mounted) {
       currentFocus?.requestFocus();
-      _ensureFocusedVisible();
     }
   }
 
@@ -275,7 +259,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.pushNamed(context, '/actor', arguments: actor);
     if (mounted) {
       currentFocus?.requestFocus();
-      _ensureFocusedVisible();
     }
   }
 
@@ -297,7 +280,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (mounted) {
       currentFocus?.requestFocus();
-      _ensureFocusedVisible();
     }
   }
 
@@ -310,7 +292,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.pushNamed(context, '/search');
     if (mounted) {
       currentFocus?.requestFocus();
-      _ensureFocusedVisible();
     }
   }
 
@@ -323,7 +304,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.pushNamed(context, '/settings');
     if (mounted) {
       currentFocus?.requestFocus();
-      _ensureFocusedVisible();
     }
   }
 

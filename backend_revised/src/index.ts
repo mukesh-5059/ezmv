@@ -5,7 +5,6 @@ import { dashboardRouter } from './routes/dashboard';
 import { moviesRouter } from './routes/movies';
 import { searchRouter } from './routes/search';
 import { subtitlesRouter } from './routes/subtitles';
-import { listsRouter } from './routes/lists';
 import { actorsRouter } from './routes/actors';
 import { streamsRouter } from './routes/streams';
 import { GENRES } from './config/genres';
@@ -50,7 +49,6 @@ app.route('/api/v1/movies', moviesRouter);
 app.route('/api/v1/search', searchRouter);
 app.route('/api/v1/subtitles', subtitlesRouter);
 app.route('/api/v1/streams', streamsRouter);
-app.route('/api/v1/lists', listsRouter);
 app.route('/api/v1/actors', actorsRouter);
 
 // Canonical genre list for client filter pills

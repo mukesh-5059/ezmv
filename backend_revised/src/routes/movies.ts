@@ -2,8 +2,30 @@ import { Hono } from 'hono';
 import { Bindings, AdditionalMovieDetails, TvSeasonResponse, Variables } from '../types';
 import { CatalogService } from '../services/catalog';
 import { CacheService } from '../services/cache';
+import { isProfane } from '../services/profanity';
 
 export const moviesRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+// POST /api/v1/movies/resolve
+moviesRouter.post('/resolve', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const imdbIds: string[] = Array.isArray(body?.imdb_ids) ? body.imdb_ids : [];
+  if (!imdbIds.length) return c.json({ items: [] });
+
+  const mediaType = body?.media_type === 'movie' || body?.media_type === 'tv' ? body.media_type : 'all';
+  const minRating = typeof body?.min_rating === 'number' ? body.min_rating : undefined;
+
+  const catalog = new CatalogService(c.env);
+  const trace = c.get('trace');
+  let movies = await catalog.resolveMovies(imdbIds.slice(0, 100), trace, mediaType);
+  movies = movies.filter((m) => !isProfane(m.title) && !isProfane(m.overview));
+  if (mediaType !== 'all')
+    movies = movies.filter((m) => m.media_type === mediaType);
+  if (minRating !== undefined && minRating > 0)
+    movies = movies.filter((m) => m.rating_score >= minRating);
+
+  return c.json({ items: movies });
+});
 
 // GET /api/v1/movies/tv/:tmdb_id/season/:season_number
 moviesRouter.get('/tv/:tmdb_id/season/:season_number', async (c) => {

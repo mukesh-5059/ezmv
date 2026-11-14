@@ -466,5 +466,234 @@ void main() {
         throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 404)),
       );
     });
+
+    test('resolveMovies posts imdb_ids to backend', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/api/v1/movies/resolve');
+        expect(request.method, 'POST');
+        final body = json.decode(request.body) as Map<String, dynamic>;
+        expect(body['imdb_ids'], ['tt9140554']);
+        return http.Response(
+          json.encode({
+            'items': [
+              {
+                'imdb_id': 'tt9140554',
+                'tmdb_id': 84958,
+                'title': 'Loki',
+                'year': 2021,
+                'media_type': 'tv',
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final api = ApiClient(client: mockClient);
+      final movies = await api.resolveMovies(['tt9140554']);
+      expect(movies.length, 1);
+      expect(movies.first.title, 'Loki');
+      expect(movies.first.imdbId, 'tt9140554');
+    });
+
+    test('search with client Trakt queries Trakt and resolves via backend', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.host == 'api.trakt.tv') {
+          expect(request.url.path, '/search/movie,show');
+          expect(request.url.queryParameters['query'], 'loki');
+          expect(request.headers['trakt-api-key'], isNotEmpty);
+          return http.Response(
+            json.encode([
+              {
+                'type': 'show',
+                'show': {
+                  'title': 'Loki',
+                  'ids': {'imdb': 'tt9140554'}
+                }
+              }
+            ]),
+            200,
+            headers: {
+              'content-type': 'application/json',
+              'x-pagination-page': '1',
+              'x-pagination-page-count': '1',
+              'x-pagination-item-count': '1',
+            },
+          );
+        }
+
+        if (request.url.path == '/api/v1/movies/resolve') {
+          return http.Response(
+            json.encode({
+              'items': [
+                {
+                  'imdb_id': 'tt9140554',
+                  'tmdb_id': 84958,
+                  'title': 'Loki',
+                  'year': 2021,
+                  'media_type': 'tv',
+                }
+              ]
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        throw Exception('Unexpected request: ${request.url}');
+      });
+
+      final api = ApiClient(client: mockClient, enableClientTrakt: true);
+      final results = await api.search('loki');
+      expect(results.items.length, 1);
+      expect(results.items.first.title, 'Loki');
+      expect(results.totalItems, 1);
+    });
+
+    test('search and resolveMovies cache results in memory for 24 hours', () async {
+      int requestCount = 0;
+      final mockClient = MockClient((request) async {
+        requestCount++;
+        if (request.url.path == '/api/v1/search') {
+          return http.Response(
+            json.encode({
+              'items': [
+                {
+                  'imdb_id': 'tt0111161',
+                  'tmdb_id': 278,
+                  'title': 'The Shawshank Redemption',
+                  'year': 1994,
+                  'media_type': 'movie',
+                }
+              ],
+              'page': 1,
+              'total_pages': 1,
+              'total_items': 1,
+              'has_more': false,
+              'next_page': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        throw Exception('Unexpected request: ${request.url}');
+      });
+
+      final api = ApiClient(client: mockClient, enableClientTrakt: false);
+      final first = await api.search('shawshank');
+      expect(first.items.length, 1);
+      expect(requestCount, 1);
+
+      // Second call within 24 hours should hit in-memory cache without making an HTTP request
+      final second = await api.search('shawshank');
+      expect(second.items.length, 1);
+      expect(requestCount, 1);
+
+      // Cache clearing forces re-fetch
+      api.clearCache();
+      final third = await api.search('shawshank');
+      expect(third.items.length, 1);
+      expect(requestCount, 2);
+    });
+
+    test('search falls back to backend TMDb when Trakt returns 0 items', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.host == 'api.trakt.tv') {
+          // Trakt returns 0 items for regional/obscure title
+          return http.Response(
+            json.encode([]),
+            200,
+            headers: {
+              'content-type': 'application/json',
+              'x-pagination-page': '1',
+              'x-pagination-page-count': '0',
+              'x-pagination-item-count': '0',
+            },
+          );
+        }
+
+        if (request.url.path == '/api/v1/search') {
+          // Fallback to TMDb backend search succeeds
+          expect(request.url.queryParameters['q'], 'vikram');
+          return http.Response(
+            json.encode({
+              'items': [
+                {
+                  'imdb_id': 'tt9179430',
+                  'tmdb_id': 725201,
+                  'title': 'Vikram',
+                  'year': 2022,
+                  'media_type': 'movie',
+                }
+              ],
+              'page': 1,
+              'total_pages': 1,
+              'total_items': 1,
+              'has_more': false,
+              'next_page': null,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        throw Exception('Unexpected request: ${request.url}');
+      });
+
+      final api = ApiClient(client: mockClient, enableClientTrakt: true);
+      final results = await api.search('vikram');
+      expect(results.items.length, 1);
+      expect(results.items.first.title, 'Vikram');
+    });
+
+    test('resolveMovies and search strictly enforce minRating and year filters even on cached items', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/movies/resolve') {
+          return http.Response(
+            json.encode({
+              'items': [
+                {
+                  'imdb_id': 'tt9140554',
+                  'tmdb_id': 84958,
+                  'title': 'Loki',
+                  'release_date': '2021-06-09',
+                  'rating_score': 8.2,
+                  'media_type': 'tv',
+                  'genres': [{'slug': 'action', 'name': 'Action'}],
+                },
+                {
+                  'imdb_id': 'tt14957270',
+                  'tmdb_id': 846214,
+                  'title': 'The Good, the Bart, and the Loki',
+                  'release_date': '2021-07-07',
+                  'rating_score': 6.0,
+                  'media_type': 'movie',
+                  'genres': [{'slug': 'action', 'name': 'Action'}],
+                },
+              ]
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        throw Exception('Unexpected request: ${request.url}');
+      });
+
+      final api = ApiClient(client: mockClient, enableClientTrakt: false);
+      // First populate cache without rating filter
+      final all = await api.resolveMovies(['tt9140554', 'tt14957270']);
+      expect(all.length, 2);
+
+      // Now query with minRating 8.0 - tt14957270 (rating 6.0) must be filtered out despite being in cache
+      final filteredRating = await api.resolveMovies(['tt9140554', 'tt14957270'], minRating: 8.0);
+      expect(filteredRating.length, 1);
+      expect(filteredRating.first.imdbId, 'tt9140554');
+
+      // Now query with mediaType 'movie' - tt9140554 (tv) must be filtered out
+      final filteredMovie = await api.resolveMovies(['tt9140554', 'tt14957270'], mediaType: 'movie');
+      expect(filteredMovie.length, 1);
+      expect(filteredMovie.first.imdbId, 'tt14957270');
+    });
   });
 }
