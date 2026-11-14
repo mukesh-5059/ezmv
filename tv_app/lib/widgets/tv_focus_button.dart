@@ -8,7 +8,7 @@ import 'tv_shortcuts.dart';
 /// ("Show All", modal options). Elevates with a 1.06x scale transform,
 /// high-contrast 3dp white outline, and ambient glow halo when focused.
 class TvFocusButton extends StatefulWidget {
-  final String label;
+  final String? label;
   final VoidCallback onPressed;
   final IconData? icon;
   final bool isPrimary;
@@ -24,7 +24,7 @@ class TvFocusButton extends StatefulWidget {
 
   const TvFocusButton({
     super.key,
-    required this.label,
+    this.label,
     required this.onPressed,
     this.icon,
     this.isPrimary = true,
@@ -117,19 +117,21 @@ class _TvFocusButtonState extends State<TvFocusButton> {
                         ? Colors.white
                         : (widget.isPrimary ? Colors.white : TVTheme.textSecondary),
                   ),
-                  const SizedBox(width: 8),
+                  if (widget.label != null && widget.label!.isNotEmpty)
+                    const SizedBox(width: 8),
                 ],
-                Text(
-                  widget.label,
-                  style: TextStyle(
-                    fontSize: widget.fontSize,
-                    fontWeight: FontWeight.w600,
-                    color: _isFocused
-                        ? Colors.white
-                        : (widget.isPrimary ? Colors.white : TVTheme.textSecondary),
-                    letterSpacing: 0.2,
+                if (widget.label != null && widget.label!.isNotEmpty)
+                  Text(
+                    widget.label!,
+                    style: TextStyle(
+                      fontSize: widget.fontSize,
+                      fontWeight: FontWeight.w600,
+                      color: _isFocused
+                          ? Colors.white
+                          : (widget.isPrimary ? Colors.white : TVTheme.textSecondary),
+                      letterSpacing: 0.2,
+                    ),
                   ),
-                ),
               ],
             ),
           ),

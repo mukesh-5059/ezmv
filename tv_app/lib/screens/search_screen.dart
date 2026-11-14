@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme.dart';
+import '../widgets/search_input_dialog.dart';
 import '../widgets/tv_focus_button.dart';
 import '../widgets/tv_focus_card.dart';
 import '../widgets/tv_pill_chip.dart';
@@ -56,7 +57,6 @@ class _SearchScreenState extends State<SearchScreen> {
 
   // Control bar focus nodes
   late final FocusNode _backButtonFocusNode;
-  late final FocusNode _textFieldFocusNode;
   late final FocusNode _searchButtonFocusNode;
   late final FocusNode _clearSearchFocusNode;
   late final FocusNode _clearHistoryFocusNode;
@@ -158,19 +158,74 @@ class _SearchScreenState extends State<SearchScreen> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
 
     if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-      _textFieldFocusNode.requestFocus();
+      if (_searchController.text.trim().isNotEmpty) {
+        _clearSearchFocusNode.requestFocus();
+      } else {
+        _searchButtonFocusNode.requestFocus();
+      }
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       if (_history.isNotEmpty) {
         _getHistoryFocusNode(0).requestFocus();
       } else {
-        (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
+        _typePillFocusNode.requestFocus();
       }
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
         event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleSearchButtonKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      if (_searchController.text.trim().isNotEmpty) {
+        _clearSearchFocusNode.requestFocus();
+      } else {
+        _backButtonFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_history.isNotEmpty) {
+        _clearHistoryFocusNode.requestFocus();
+      } else {
+        _clearFiltersFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
+        event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleClearSearchKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _backButtonFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _searchButtonFocusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_history.isNotEmpty) {
+        _getHistoryFocusNode(_history.length - 1).requestFocus();
+      } else {
+        _sortPillFocusNode.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -187,7 +242,7 @@ class _SearchScreenState extends State<SearchScreen> {
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _textFieldFocusNode.requestFocus();
+      _searchButtonFocusNode.requestFocus();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
@@ -211,7 +266,7 @@ class _SearchScreenState extends State<SearchScreen> {
       if (_history.isNotEmpty) {
         _clearHistoryFocusNode.requestFocus();
       } else {
-        _textFieldFocusNode.requestFocus();
+        _searchButtonFocusNode.requestFocus();
       }
       return KeyEventResult.handled;
     }
@@ -230,7 +285,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
 
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _textFieldFocusNode.requestFocus();
+      _backButtonFocusNode.requestFocus();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
@@ -277,7 +332,7 @@ class _SearchScreenState extends State<SearchScreen> {
       if (_history.isNotEmpty) {
         _getHistoryFocusNode(0).requestFocus();
       } else {
-        _textFieldFocusNode.requestFocus();
+        _backButtonFocusNode.requestFocus();
       }
       return KeyEventResult.handled;
     }
@@ -355,97 +410,8 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchController.addListener(_onSearchTextChanged);
 
     _backButtonFocusNode = FocusNode(onKeyEvent: _handleBackButtonKeyEvent);
-
-    _textFieldFocusNode = FocusNode(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent || event is KeyRepeatEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.backspace) {
-            if (_searchController.text.isEmpty || _searchController.selection.start <= 0) {
-              return KeyEventResult.handled;
-            }
-          }
-          if (event.logicalKey == LogicalKeyboardKey.escape ||
-              event.logicalKey == LogicalKeyboardKey.goBack) {
-            _handleBack();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            _backButtonFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            _searchButtonFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            if (_history.isNotEmpty) {
-              _getHistoryFocusNode(0).requestFocus();
-            } else {
-              (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
-            }
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-    );
-
-    _searchButtonFocusNode = FocusNode(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            if (_history.isNotEmpty) {
-              _getHistoryFocusNode(0).requestFocus();
-            } else {
-              (_lastFocusedPillNode ?? _typePillFocusNode).requestFocus();
-            }
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            _textFieldFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            if (_searchController.text.isNotEmpty) {
-              _clearSearchFocusNode.requestFocus();
-              return KeyEventResult.handled;
-            }
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-    );
-
-    _clearSearchFocusNode = FocusNode(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            if (_history.isNotEmpty) {
-              _getHistoryFocusNode(0).requestFocus();
-            } else {
-              _clearFiltersFocusNode.requestFocus();
-            }
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            _searchButtonFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
-              event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-    );
+    _searchButtonFocusNode = FocusNode(onKeyEvent: _handleSearchButtonKeyEvent);
+    _clearSearchFocusNode = FocusNode(onKeyEvent: _handleClearSearchKeyEvent);
 
     _clearHistoryFocusNode = FocusNode(onKeyEvent: _handleClearHistoryKeyEvent);
 
@@ -475,10 +441,11 @@ class _SearchScreenState extends State<SearchScreen> {
 
     _loadHistory();
     _gridScrollController.addListener(_onScroll);
+    _executeSearch(reset: true);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _textFieldFocusNode.requestFocus();
+        _searchButtonFocusNode.requestFocus();
       }
     });
   }
@@ -489,7 +456,6 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchController.dispose();
     _gridScrollController.dispose();
     _backButtonFocusNode.dispose();
-    _textFieldFocusNode.dispose();
     _searchButtonFocusNode.dispose();
     _clearSearchFocusNode.dispose();
     _clearHistoryFocusNode.dispose();
@@ -617,6 +583,14 @@ class _SearchScreenState extends State<SearchScreen> {
             _getCardFocusNode(0).requestFocus();
           }
         });
+      } else if (reset && resultItems.isEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _resetFiltersFocusNode.canRequestFocus) {
+            _resetFiltersFocusNode.requestFocus();
+          } else if (mounted) {
+            _searchButtonFocusNode.requestFocus();
+          }
+        });
       }
     } catch (e) {
       if (!mounted) return;
@@ -701,7 +675,7 @@ class _SearchScreenState extends State<SearchScreen> {
     // Priority 2: Jump to Row 0 if scrolled down
     if (_gridScrollController.hasClients && _gridScrollController.offset > 20) {
       _gridScrollController.jumpTo(0);
-      _textFieldFocusNode.requestFocus();
+      _searchButtonFocusNode.requestFocus();
       return;
     }
 
@@ -727,9 +701,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _activeFilterDimension = null;
     });
 
-    if (_searchController.text.trim().isNotEmpty) {
-      _executeSearch(reset: true);
-    }
+    _executeSearch(reset: true);
   }
 
   void _openFilterStrip(SearchFilterDimension dimension, FocusNode pillNode) {
@@ -901,7 +873,19 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  void _openSearchDialog() {
+    SearchInputDialog.show(
+      context: context,
+      initialQuery: _searchController.text,
+      onSearch: (query) {
+        _searchController.text = query;
+        _executeSearch(reset: true);
+      },
+    );
+  }
+
   Widget _buildSearchHeaderRow() {
+    final queryText = _searchController.text.trim();
     return Row(
       children: [
         TvFocusButton(
@@ -913,44 +897,45 @@ class _SearchScreenState extends State<SearchScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           onPressed: _handleBack,
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 20),
         Expanded(
-          child: _TvSearchInputField(
-            controller: _searchController,
-            focusNode: _textFieldFocusNode,
-            autofocus: true,
-            hintText: 'Search movies, TV shows, actors...',
-            onSubmitted: (q) => _executeSearch(reset: true),
+          child: Text(
+            queryText.isNotEmpty ? "Search: '$queryText'" : 'Search',
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+              letterSpacing: 0.2,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: 16),
-        TvFocusButton(
-          focusNode: _searchButtonFocusNode,
-          label: 'Search',
-          icon: Icons.search_rounded,
-          isPrimary: true,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          onPressed: () => _executeSearch(reset: true),
-        ),
-        if (_searchController.text.isNotEmpty) ...[
-          const SizedBox(width: 12),
+        if (queryText.isNotEmpty) ...[
           TvFocusButton(
             focusNode: _clearSearchFocusNode,
-            label: 'Clear',
+            onKeyEvent: _handleClearSearchKeyEvent,
             icon: Icons.close_rounded,
             isPrimary: false,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.all(12),
+            borderRadius: 24,
             onPressed: () {
               _searchController.clear();
-              setState(() {
-                _items.clear();
-                _hasSearched = false;
-                _errorMessage = null;
-              });
-              _textFieldFocusNode.requestFocus();
+              _executeSearch(reset: true);
+              _searchButtonFocusNode.requestFocus();
             },
           ),
+          const SizedBox(width: 12),
         ],
+        TvFocusButton(
+          focusNode: _searchButtonFocusNode,
+          onKeyEvent: _handleSearchButtonKeyEvent,
+          icon: Icons.search_rounded,
+          isPrimary: true,
+          padding: const EdgeInsets.all(12),
+          borderRadius: 24,
+          onPressed: _openSearchDialog,
+        ),
       ],
     );
   }
@@ -1376,99 +1361,6 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _TvSearchInputField extends StatefulWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final bool autofocus;
-  final String hintText;
-  final ValueChanged<String> onSubmitted;
-
-  const _TvSearchInputField({
-    required this.controller,
-    required this.focusNode,
-    this.autofocus = true,
-    required this.hintText,
-    required this.onSubmitted,
-  });
-
-  @override
-  State<_TvSearchInputField> createState() => _TvSearchInputFieldState();
-}
-
-class _TvSearchInputFieldState extends State<_TvSearchInputField> {
-  bool _isFocused = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _isFocused = widget.focusNode.hasFocus;
-    widget.focusNode.addListener(_onFocusChange);
-  }
-
-  @override
-  void didUpdateWidget(covariant _TvSearchInputField oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.focusNode != widget.focusNode) {
-      oldWidget.focusNode.removeListener(_onFocusChange);
-      widget.focusNode.addListener(_onFocusChange);
-      _isFocused = widget.focusNode.hasFocus;
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.focusNode.removeListener(_onFocusChange);
-    super.dispose();
-  }
-
-  void _onFocusChange() {
-    if (widget.focusNode.hasFocus) {
-      widget.controller.selection = TextSelection.collapsed(
-        offset: widget.controller.text.length,
-      );
-    }
-    if (_isFocused != widget.focusNode.hasFocus && mounted) {
-      setState(() => _isFocused = widget.focusNode.hasFocus);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: TVTheme.focusDuration,
-      curve: TVTheme.focusCurve,
-      decoration: BoxDecoration(
-        color: TVTheme.surface,
-        borderRadius: TVTheme.borderRadiusMd,
-        border: Border.all(
-          color: _isFocused ? Colors.white : Colors.transparent,
-          width: _isFocused ? TVTheme.focusBorderWidth : 1.0,
-        ),
-        boxShadow: _isFocused ? TVTheme.focusShadows : TVTheme.restingShadows,
-      ),
-      child: TextField(
-        controller: widget.controller,
-        focusNode: widget.focusNode,
-        autofocus: widget.autofocus,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w500,
-          color: TVTheme.textPrimary,
-        ),
-        textInputAction: TextInputAction.search,
-        decoration: InputDecoration(
-          hintText: widget.hintText,
-          hintStyle: const TextStyle(color: TVTheme.textMuted, fontSize: 15),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          prefixIcon: const Icon(Icons.search_rounded, color: TVTheme.textMuted, size: 22),
-          border: InputBorder.none,
-        ),
-        onSubmitted: widget.onSubmitted,
       ),
     );
   }

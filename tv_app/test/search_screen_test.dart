@@ -101,12 +101,13 @@ void main() {
   }
 
   group('SearchScreen - Top Control Bar & History', () {
-    testWidgets('renders search text field, history chips, clear history, and filter pills', (tester) async {
+    testWidgets('renders search button trigger, history chips, clear history, and filter pills', (tester) async {
       configureTvResolution(tester);
       await tester.pumpWidget(buildTestApp());
       await tester.pumpAndSettle();
 
-      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('Search'), findsOneWidget);
+      expect(find.byIcon(Icons.search_rounded), findsOneWidget);
       expect(find.text('Inception'), findsOneWidget);
       expect(find.text('Interstellar'), findsOneWidget);
       expect(find.text('Clear History'), findsOneWidget);
@@ -130,7 +131,7 @@ void main() {
       await tester.tap(find.text('Inception'));
       await tester.pumpAndSettle();
 
-      expect(mockApi.searchCallCount, 1);
+      expect(mockApi.searchCallCount, 2);
       expect(mockApi.lastQuery, 'Inception');
       expect(find.byType(TvFocusCard), findsNWidgets(5));
     });
@@ -176,11 +177,6 @@ void main() {
       mockApi.mockHasMore = false;
 
       await tester.pumpWidget(buildTestApp());
-      await tester.pumpAndSettle();
-
-      // Search query first
-      await tester.enterText(find.byType(TextField), 'Batman');
-      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
 
       expect(mockApi.searchCallCount, 1);
@@ -234,10 +230,6 @@ void main() {
       await tester.pumpWidget(buildTestApp());
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'Marvel');
-      await tester.testTextInput.receiveAction(TextInputAction.search);
-      await tester.pumpAndSettle();
-
       // Open & select Genre: Action
       await tester.tap(find.text('Genre'));
       await tester.pumpAndSettle();
@@ -279,10 +271,6 @@ void main() {
       mockApi.mockHasMore = false;
 
       await tester.pumpWidget(buildTestApp());
-      await tester.pumpAndSettle();
-
-      await tester.enterText(find.byType(TextField), 'Test');
-      await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
 
       final scrollable = tester.state<ScrollableState>(
@@ -343,10 +331,6 @@ void main() {
       await tester.pumpWidget(buildTestApp());
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'Avatar');
-      await tester.testTextInput.receiveAction(TextInputAction.search);
-      await tester.pumpAndSettle();
-
       await tester.scrollUntilVisible(
         find.text('End of Results'),
         200,
@@ -372,8 +356,8 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
-      final textField = find.byType(TextField);
-      expect(Focus.of(tester.element(textField)).hasFocus, isTrue);
+      final searchButton = find.widgetWithIcon(TvFocusButton, Icons.search_rounded);
+      expect(Focus.of(tester.element(searchButton)).hasFocus, isTrue);
     });
 
     testWidgets('History pill arrowRight to Clear History and arrowLeft back to history pill', (tester) async {
@@ -431,10 +415,6 @@ void main() {
       await tester.pumpWidget(buildTestApp());
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'Test');
-      await tester.testTextInput.receiveAction(TextInputAction.search);
-      await tester.pumpAndSettle();
-
       final clearFiltersBtn = find.widgetWithText(TvFocusButton, 'Clear Filters');
       final clearFiltersFocus = Focus.of(tester.element(clearFiltersBtn));
       clearFiltersFocus.requestFocus();
@@ -449,51 +429,7 @@ void main() {
       expect(Focus.of(tester.element(card0)).hasFocus, isTrue);
     });
 
-    testWidgets('Pressing backspace on empty text box does not trigger back navigation or pop', (tester) async {
-      configureTvResolution(tester);
-      final navKey = GlobalKey<NavigatorState>();
-      await tester.pumpWidget(
-        MaterialApp(
-          navigatorKey: navKey,
-          home: Scaffold(
-            body: Builder(
-              builder: (ctx) => TextButton(
-                onPressed: () {
-                  Navigator.of(ctx).push(
-                    MaterialPageRoute(
-                      builder: (_) => SearchScreen(apiClient: mockApi),
-                    ),
-                  );
-                },
-                child: const Text('Go to Search'),
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // Open SearchScreen
-      await tester.tap(find.text('Go to Search'));
-      await tester.pumpAndSettle();
-      expect(find.byType(SearchScreen), findsOneWidget);
-
-      // Verify text field is focused and empty
-      final textField = find.byType(TextField);
-      expect(textField, findsOneWidget);
-      expect(Focus.of(tester.element(textField)).hasFocus, isTrue);
-
-      // Press Backspace multiple times on empty text field
-      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
-      await tester.pumpAndSettle();
-
-      // SearchScreen should still be displayed, not popped!
-      expect(find.byType(SearchScreen), findsOneWidget);
-    });
-
-    testWidgets('Selecting a history query positions cursor at end and text can be modified', (tester) async {
+    testWidgets('Selecting a history query updates search trigger and refetches', (tester) async {
       configureTvResolution(tester);
       SharedPreferences.setMockInitialValues({'tv_search_history': ['Avatar']});
       await tester.pumpWidget(buildTestApp());
@@ -503,22 +439,9 @@ void main() {
       await tester.tap(find.text('Avatar'));
       await tester.pumpAndSettle();
 
-      // Re-focus text field
-      final textField = find.byType(TextField);
-      final textFocus = Focus.of(tester.element(textField));
-      textFocus.requestFocus();
-      await tester.pumpAndSettle();
-      expect(textFocus.hasFocus, isTrue);
-
-      final editableText = tester.widget<EditableText>(find.byType(EditableText));
-      expect(editableText.controller.text, 'Avatar');
-      expect(editableText.controller.selection.baseOffset, 6);
-
-      // Enter updated text
-      await tester.enterText(textField, 'Batman');
-      await tester.pumpAndSettle();
-      expect(editableText.controller.text, 'Batman');
-      expect(find.byType(SearchScreen), findsOneWidget);
+      expect(mockApi.searchCallCount, 2);
+      expect(mockApi.lastQuery, 'Avatar');
+      expect(find.text("Search: 'Avatar'"), findsOneWidget);
     });
   });
 }
