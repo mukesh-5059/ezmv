@@ -47,6 +47,7 @@ class ApiClient {
   final String traktClientId;
   final bool enableClientTrakt;
   final http.Client _client;
+  http.Client get httpClient => _client;
 
   static const Duration cacheTtl = Duration(hours: 24);
   final Map<String, _CacheEntry<PaginatedResponse<MovieSummary>>> _searchCache = {};

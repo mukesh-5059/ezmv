@@ -622,8 +622,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       currentStreamUrl: _currentStreamUrl,
       mediaType: widget.mediaType,
       imdbId: widget.imdbId,
+      title: widget.movieTitle,
       season: _currentSeason,
       episode: _currentEpisode,
+      genres: widget.genres,
       originalLanguage: widget.originalLanguage,
       onStreamsDiscovered: (streams) {
         if (mounted) {
@@ -820,61 +822,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _drawerProviderStatuses.clear();
     });
     _hudController.triggerInfo('Loading S${seasonNum}E${episode.episodeNumber}...');
-    _drawerSseSubscription = ApiClient.instance.getStreamsProgressive(
-      'tv',
-      widget.imdbId,
+
+    final orchestrator = SourceOrchestrator();
+    final target = MediaScrapeTarget(
+      imdbId: widget.imdbId,
+      title: widget.movieTitle,
+      mediaType: 'tv',
       season: seasonNum,
       episode: episode.episodeNumber,
+      genres: widget.genres ?? const [],
       originalLanguage: widget.originalLanguage,
-    ).listen(
-      (event) async {
-        if (!mounted) return;
-        if (event.isDone) {
-          final streams = event.streams ?? [];
-          if (streams.isNotEmpty) {
-            _currentSeason = seasonNum;
-            _currentEpisode = episode.episodeNumber;
-            _availableStreams = streams;
-            _failedStreamUrls.clear();
-            _hudController.triggerInfo('Playing S${seasonNum}E${episode.episodeNumber}: ${episode.name}');
-            await _switchStream(streams.first, preservePosition: false);
-            _probeUnprobedAvailableStreams();
-          } else {
-            _hudController.triggerInfo('No streams available for this episode');
-          }
-          setState(() => _isLoadingDrawerEpisodeStreams = false);
-          return;
-        }
-
-        if (event.status == StreamProgressStatus.error) {
-          if (event.provider != 'all') {
-            setState(() {
-              _drawerProviderStatuses[event.provider] = (status: StreamProgressStatus.error, count: 0);
-            });
-          }
-          return;
-        }
-
-        if (event.provider != 'all') {
-          setState(() {
-            _drawerProviderStatuses[event.provider] = (
-              status: event.status,
-              count: event.count ?? _drawerProviderStatuses[event.provider]?.count ?? 0,
-            );
-          });
-        }
-      },
-      onError: (_) {
-        if (!mounted) return;
-        _hudController.triggerInfo('Failed to fetch episode streams');
-        setState(() => _isLoadingDrawerEpisodeStreams = false);
-      },
-      onDone: () {
-        if (mounted && _isLoadingDrawerEpisodeStreams) {
-          setState(() => _isLoadingDrawerEpisodeStreams = false);
-        }
-      },
     );
+
+    try {
+      final streams = await orchestrator.scrapeWithBackendFallback(
+        target: target,
+        onProgress: (msg) {
+          if (mounted) _hudController.triggerInfo(msg);
+        },
+      );
+      if (!mounted) return;
+      if (streams.isNotEmpty) {
+        _currentSeason = seasonNum;
+        _currentEpisode = episode.episodeNumber;
+        _availableStreams = streams;
+        _failedStreamUrls.clear();
+        _hudController.triggerInfo('Playing S${seasonNum}E${episode.episodeNumber}: ${episode.name}');
+        await _switchStream(streams.first, preservePosition: false);
+        _probeUnprobedAvailableStreams();
+      } else {
+        _hudController.triggerInfo('No streams available for this episode');
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _hudController.triggerInfo('Failed to fetch episode streams');
+    } finally {
+      if (mounted) setState(() => _isLoadingDrawerEpisodeStreams = false);
+    }
   }
 
   // --- Hardware Guardrail: Single-pipeline decoder cleanup ---

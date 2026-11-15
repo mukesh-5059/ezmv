@@ -10,6 +10,7 @@ class EpisodeStreamDialog extends StatefulWidget {
   final String showTitle;
   final int seasonNumber;
   final TvEpisode episode;
+  final List<String> genres;
   final bool autoPlay;
   final String? originalLanguage;
   final void Function(StreamSource stream)? onStreamSelected;
@@ -21,6 +22,7 @@ class EpisodeStreamDialog extends StatefulWidget {
     required this.showTitle,
     required this.seasonNumber,
     required this.episode,
+    this.genres = const [],
     this.autoPlay = true,
     this.originalLanguage,
     this.onStreamSelected,
@@ -65,145 +67,90 @@ class _EpisodeStreamDialogState extends State<EpisodeStreamDialog> {
       _isLoading = true;
       _providerStatuses.clear();
       _totalStreamsDiscovered = 0;
-      _statusMessage = 'Connecting to scrapers for S${widget.seasonNumber}E${widget.episode.episodeNumber}...';
+      _statusMessage = 'Searching Batch 1 scrapers for S${widget.seasonNumber}E${widget.episode.episodeNumber}...';
     });
 
-    _sseSubscription = ApiClient.instance.getStreamsProgressive(
-      'tv',
-      widget.imdbId,
+    final orchestrator = SourceOrchestrator();
+    final target = MediaScrapeTarget(
+      imdbId: widget.imdbId,
+      title: widget.showTitle,
+      mediaType: 'tv',
       season: widget.seasonNumber,
       episode: widget.episode.episodeNumber,
+      genres: widget.genres,
       originalLanguage: widget.originalLanguage,
-    ).listen(
-      (event) {
-        if (!mounted) return;
-        if (event.isDone) {
-          final resolvedStreams = event.streams ?? [];
-          if (resolvedStreams.isEmpty) {
-            setState(() {
-              _streams = [];
-              _isLoading = false;
-              _isRanking = false;
-              _statusMessage = 'No streams found for this episode.';
-            });
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _retryFocusNode.requestFocus();
-            });
-            return;
-          }
-
-          _isRanking = true;
-          setState(() {
-            _isLoading = true;
-            _statusMessage = 'Analyzing streams for optimal playback...';
-          });
-
-          StreamRanker.rankStreams(
-            resolvedStreams,
-            runtimeMinutes: widget.episode.runtime,
-            onProgress: (msg, probed, qual) {
-              if (mounted) setState(() => _statusMessage = msg);
-            },
-          ).then((ranked) {
-            if (!mounted) return;
-            final allStreams = [
-              ranked.topStream,
-              ...ranked.fallbackStreams,
-              ...ranked.unprobedStreams,
-            ];
-            if (widget.autoPlay) {
-              Navigator.of(context).pop();
-              if (widget.onStreamSelectedWithAll != null) {
-                widget.onStreamSelectedWithAll!(ranked.topStream, allStreams);
-              } else {
-                widget.onStreamSelected?.call(ranked.topStream);
-              }
-              return;
-            }
-            setState(() {
-              _streams = allStreams;
-              _isLoading = false;
-              _isRanking = false;
-            });
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              if (_streams.isNotEmpty) {
-                _firstStreamFocusNode.requestFocus();
-              } else {
-                _retryFocusNode.requestFocus();
-              }
-            });
-          }).catchError((_) {
-            if (!mounted) return;
-            if (widget.autoPlay && resolvedStreams.isNotEmpty) {
-              Navigator.of(context).pop();
-              if (widget.onStreamSelectedWithAll != null) {
-                widget.onStreamSelectedWithAll!(resolvedStreams.first, resolvedStreams);
-              } else {
-                widget.onStreamSelected?.call(resolvedStreams.first);
-              }
-              return;
-            }
-            setState(() {
-              _streams = resolvedStreams;
-              _isLoading = false;
-              _isRanking = false;
-            });
-          });
-          return;
-        }
-
-        if (event.status == StreamProgressStatus.error) {
-          if (event.provider != 'all') {
-            setState(() {
-              _providerStatuses[event.provider] = (status: StreamProgressStatus.error, count: 0);
-            });
-          }
-          return;
-        }
-
-        if (event.provider != 'all') {
-          setState(() {
-            _providerStatuses[event.provider] = (
-              status: event.status,
-              count: event.count ?? _providerStatuses[event.provider]?.count ?? 0,
-            );
-            if (event.status == StreamProgressStatus.searching) {
-              _statusMessage = 'Searching ${event.provider}...';
-            } else if (event.status == StreamProgressStatus.resolved) {
-              _statusMessage = '${event.provider}: ${event.count ?? 0} stream(s) found';
-              _totalStreamsDiscovered = _providerStatuses.values.fold(0, (acc, p) => acc + p.count);
-            }
-          });
-        }
-      },
-      onError: (err) {
-        if (!mounted) return;
-        _isRanking = false;
-        StreamRanker.checkInternetReachability().then((isOnline) {
-          if (!mounted) return;
-          final displayErr = !isOnline
-              ? 'Network error: Please check your Wi-Fi or Ethernet connection.'
-              : 'Streaming providers are temporarily slow or unavailable ($err).';
-          setState(() {
-            _isLoading = false;
-            _statusMessage = displayErr;
-          });
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _retryFocusNode.requestFocus();
-          });
-        });
-      },
-      onDone: () {
-        if (!mounted) return;
-        if (_isLoading && !_isRanking && _streams.isEmpty) {
-          setState(() => _isLoading = false);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _retryFocusNode.requestFocus();
-          });
-        }
-      },
     );
+
+    try {
+      final allStreams = await orchestrator.scrapeWithBackendFallback(
+        target: target,
+        onProgress: (msg) {
+          if (mounted) setState(() => _statusMessage = msg);
+        },
+        onProviderStatus: (provider, status, count) {
+          if (!mounted) return;
+          setState(() {
+            _providerStatuses[provider] = (status: status, count: count);
+            _totalStreamsDiscovered = _providerStatuses.values.fold(0, (sum, val) => sum + val.count);
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      if (allStreams.isEmpty) {
+        setState(() {
+          _streams = [];
+          _isLoading = false;
+          _isRanking = false;
+          _statusMessage = 'No streams found for this episode.';
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _retryFocusNode.requestFocus();
+        });
+        return;
+      }
+
+      if (widget.autoPlay) {
+        Navigator.of(context).pop();
+        if (widget.onStreamSelectedWithAll != null) {
+          widget.onStreamSelectedWithAll!(allStreams.first, allStreams);
+        } else {
+          widget.onStreamSelected?.call(allStreams.first);
+        }
+        return;
+      }
+
+      setState(() {
+        _streams = allStreams;
+        _isLoading = false;
+        _isRanking = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_streams.isNotEmpty) {
+          _firstStreamFocusNode.requestFocus();
+        } else {
+          _retryFocusNode.requestFocus();
+        }
+      });
+    } catch (err) {
+      if (!mounted) return;
+      _isRanking = false;
+      StreamRanker.checkInternetReachability().then((isOnline) {
+        if (!mounted) return;
+        final displayErr = !isOnline
+            ? 'Network error: Please check your Wi-Fi or Ethernet connection.'
+            : 'Streaming providers are temporarily slow or unavailable ($err).';
+        setState(() {
+          _isLoading = false;
+          _statusMessage = displayErr;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _retryFocusNode.requestFocus();
+        });
+      });
+    }
   }
 
   @override

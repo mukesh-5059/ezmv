@@ -22,6 +22,8 @@ export 'api/api_client.dart';
 
 // Services
 export 'services/stream_ranker.dart';
+export 'services/stream_priority.dart';
+export 'services/source_orchestrator.dart';
 
 // Storage Service
 export 'storage/storage_service.dart';

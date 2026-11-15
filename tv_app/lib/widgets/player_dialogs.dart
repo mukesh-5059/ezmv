@@ -163,9 +163,13 @@ class SourcesPickerDialog extends StatefulWidget {
   final String currentStreamUrl;
   final String mediaType;
   final String imdbId;
+  final String? title;
   final int? season;
   final int? episode;
+  final int? year;
+  final List<String>? genres;
   final String? originalLanguage;
+  final String? defaultLanguage;
   final ValueChanged<List<StreamSource>>? onStreamsDiscovered;
 
   const SourcesPickerDialog({
@@ -174,9 +178,13 @@ class SourcesPickerDialog extends StatefulWidget {
     required this.currentStreamUrl,
     required this.mediaType,
     required this.imdbId,
+    this.title,
     this.season,
     this.episode,
+    this.year,
+    this.genres,
     this.originalLanguage,
+    this.defaultLanguage,
     this.onStreamsDiscovered,
   });
 
@@ -186,9 +194,13 @@ class SourcesPickerDialog extends StatefulWidget {
     required String currentStreamUrl,
     required String mediaType,
     required String imdbId,
+    String? title,
     int? season,
     int? episode,
+    int? year,
+    List<String>? genres,
     String? originalLanguage,
+    String? defaultLanguage,
     ValueChanged<List<StreamSource>>? onStreamsDiscovered,
   }) {
     return showSidePanelDialog<StreamSource>(
@@ -200,9 +212,13 @@ class SourcesPickerDialog extends StatefulWidget {
         currentStreamUrl: currentStreamUrl,
         mediaType: mediaType,
         imdbId: imdbId,
+        title: title,
         season: season,
         episode: episode,
+        year: year,
+        genres: genres,
         originalLanguage: originalLanguage,
+        defaultLanguage: defaultLanguage,
         onStreamsDiscovered: onStreamsDiscovered,
       ),
     );
@@ -215,113 +231,95 @@ class SourcesPickerDialog extends StatefulWidget {
 class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
   late List<StreamSource> _availableStreams;
   bool _isLoading = false;
+  bool _isScrapingMore = false;
+  int _currentBatch = 1;
+  int _totalBatches = 1;
   String _sseMessage = 'Connecting to scrapers...';
-  final Map<String, ({StreamProgressStatus status, int count})> _providerStatuses = {};
-  StreamSubscription<StreamProgressEvent>? _sseSubscription;
+  late final SourceOrchestrator _orchestrator;
+  late final MediaScrapeTarget _target;
 
   @override
   void initState() {
     super.initState();
     _availableStreams = List.of(widget.streams);
+    _target = MediaScrapeTarget(
+      imdbId: widget.imdbId,
+      title: widget.title ?? widget.imdbId,
+      mediaType: widget.mediaType,
+      season: widget.season,
+      episode: widget.episode,
+      year: widget.year,
+      genres: widget.genres ?? const [],
+      originalLanguage: widget.originalLanguage,
+      defaultLanguage: widget.defaultLanguage,
+    );
+    _orchestrator = SourceOrchestrator();
+    final plans = _orchestrator.planBatches(_target);
+    _totalBatches = plans.isEmpty ? 1 : plans.length;
+
     if (_availableStreams.isEmpty && widget.imdbId.isNotEmpty) {
       _loadSources();
     }
   }
 
-  @override
-  void dispose() {
-    _sseSubscription?.cancel();
-    super.dispose();
-  }
-
-  void _loadSources() {
+  void _loadSources() async {
     setState(() {
       _isLoading = true;
-      _providerStatuses.clear();
-      _sseMessage = 'Connecting to scrapers...';
+      _currentBatch = 1;
+      _sseMessage = 'Searching Batch 1 sources...';
     });
 
-    _sseSubscription = ApiClient.instance.getStreamsProgressive(
-      widget.mediaType,
-      widget.imdbId,
-      season: widget.season,
-      episode: widget.episode,
-      originalLanguage: widget.originalLanguage,
-    ).listen(
-      (event) {
-        if (!mounted) return;
-        if (event.isDone) {
-          final resolvedStreams = event.streams ?? [];
-          if (resolvedStreams.isNotEmpty) {
-            setState(() {
-              _sseMessage = 'Ranking streams for optimal playback...';
-            });
-            StreamRanker.rankStreams(
-              resolvedStreams,
-              onProgress: (msg, probed, qual) {
-                if (mounted) setState(() => _sseMessage = msg);
-              },
-            ).then((ranked) {
-              if (!mounted) return;
-              final finalStreams = [
-                ranked.topStream,
-                ...ranked.fallbackStreams,
-                ...ranked.unprobedStreams,
-              ];
-              setState(() {
-                _availableStreams = finalStreams;
-                _isLoading = false;
-              });
-              widget.onStreamsDiscovered?.call(finalStreams);
-            }).catchError((_) {
-              if (!mounted) return;
-              setState(() {
-                _availableStreams = resolvedStreams;
-                _isLoading = false;
-              });
-              widget.onStreamsDiscovered?.call(resolvedStreams);
-            });
-          } else {
-            setState(() {
-              _availableStreams = [];
-              _isLoading = false;
-            });
-          }
-          return;
-        }
+    try {
+      final streams = await _orchestrator.scrapeWithBackendFallback(
+        target: _target,
+        onProgress: (msg) {
+          if (mounted) setState(() => _sseMessage = msg);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _availableStreams = streams;
+        _isLoading = false;
+      });
+      widget.onStreamsDiscovered?.call(streams);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+    }
+  }
 
-        if (event.status == StreamProgressStatus.error) {
-          if (event.provider != 'all') {
-            setState(() {
-              _providerStatuses[event.provider] = (status: StreamProgressStatus.error, count: 0);
-            });
-          }
-          return;
-        }
+  void _scrapeNextBatch() async {
+    if (_isScrapingMore || _currentBatch >= _totalBatches) return;
+    final nextBatch = _currentBatch + 1;
+    setState(() {
+      _isScrapingMore = true;
+      _sseMessage = 'Scraping Batch $nextBatch...';
+    });
 
-        if (event.provider != 'all') {
-          setState(() {
-            _providerStatuses[event.provider] = (
-              status: event.status,
-              count: event.count ?? _providerStatuses[event.provider]?.count ?? 0,
-            );
-            if (event.status == StreamProgressStatus.searching) {
-              _sseMessage = 'Searching ${event.provider}...';
-            } else if (event.status == StreamProgressStatus.resolved) {
-              _sseMessage = '${event.provider}: ${event.count ?? 0} found';
-            }
-          });
-        }
-      },
-      onError: (_) {
-        if (mounted) setState(() => _isLoading = false);
-      },
-      onDone: () {
-        if (mounted && _isLoading && _availableStreams.isEmpty) {
-          setState(() => _isLoading = false);
-        }
-      },
-    );
+    try {
+      final result = await _orchestrator.scrapeBatch(
+        target: _target,
+        batchNumber: nextBatch,
+        onProgress: (msg) {
+          if (mounted) setState(() => _sseMessage = msg);
+        },
+      );
+      if (!mounted) return;
+
+      final existingUrls = _availableStreams.map((s) => s.url).toSet();
+      final newStreams = result.streams.where((s) => !existingUrls.contains(s.url)).toList();
+      final combined = [..._availableStreams, ...newStreams];
+
+      setState(() {
+        _availableStreams = combined;
+        _currentBatch = nextBatch;
+        _isScrapingMore = false;
+      });
+      widget.onStreamsDiscovered?.call(combined);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isScrapingMore = false);
+    }
   }
 
   @override
@@ -391,35 +389,6 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
                               backgroundColor: Colors.white12,
                             ),
                           ),
-                          if (_providerStatuses.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              alignment: WrapAlignment.center,
-                              children: _providerStatuses.entries.map((e) {
-                                final isSearching = e.value.status == StreamProgressStatus.searching;
-                                final isResolved = e.value.status == StreamProgressStatus.resolved;
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isResolved && e.value.count > 0
-                                        ? Colors.green.withValues(alpha: 0.15)
-                                        : Colors.white.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: Colors.white12),
-                                  ),
-                                  child: Text(
-                                    isSearching ? '${e.key}...' : '${e.key} (${e.value.count})',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: isResolved && e.value.count > 0 ? Colors.greenAccent : Colors.white70,
-                                    ),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -433,17 +402,27 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
                       ),
                     )
                   : ListView.separated(
-                      itemCount: _availableStreams.length,
+                      itemCount: _availableStreams.length + ((_currentBatch < _totalBatches || _isScrapingMore) ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (ctx, idx) {
+                        if (idx == _availableStreams.length) {
+                          return _ScrapeMoreTile(
+                            currentBatch: _currentBatch,
+                            totalBatches: _totalBatches,
+                            isLoading: _isScrapingMore,
+                            onScrapeMore: _scrapeNextBatch,
+                            isLast: true,
+                          );
+                        }
                         final s = _availableStreams[idx];
                         final isSelected = s.url == widget.currentStreamUrl;
+                        final hasScrapeMore = (_currentBatch < _totalBatches || _isScrapingMore);
                         return _SourceItemTile(
                           stream: s,
                           isSelected: isSelected,
                           autofocus: isSelected || (idx == 0 && widget.currentStreamUrl.isEmpty),
                           isFirst: idx == 0,
-                          isLast: idx == _availableStreams.length - 1,
+                          isLast: !hasScrapeMore && idx == _availableStreams.length - 1,
                           onSelected: () => Navigator.of(context).pop(s),
                         );
                       },
@@ -614,6 +593,115 @@ class _SourceItemTileState extends State<_SourceItemTile> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScrapeMoreTile extends StatefulWidget {
+  final int currentBatch;
+  final int totalBatches;
+  final bool isLoading;
+  final VoidCallback onScrapeMore;
+  final bool isLast;
+
+  const _ScrapeMoreTile({
+    required this.currentBatch,
+    required this.totalBatches,
+    required this.isLoading,
+    required this.onScrapeMore,
+    this.isLast = false,
+  });
+
+  @override
+  State<_ScrapeMoreTile> createState() => _ScrapeMoreTileState();
+}
+
+class _ScrapeMoreTileState extends State<_ScrapeMoreTile> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) {
+        setState(() => _isFocused = f);
+        if (f) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      },
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
+            if (!widget.isLoading) widget.onScrapeMore();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+              event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            return KeyEventResult.handled;
+          }
+          if (widget.isLast && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: widget.isLoading ? null : widget.onScrapeMore,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: _isFocused
+                ? TVTheme.primary.withValues(alpha: 0.15)
+                : Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _isFocused ? TVTheme.primary : Colors.white12,
+              width: _isFocused ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (widget.isLoading) ...[
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    color: TVTheme.primary,
+                    strokeWidth: 2,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'Scraping next batch...',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ] else ...[
+                const Icon(Icons.add_circle_outline_rounded,
+                    color: TVTheme.primary, size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  'Scrape More (Batch ${widget.currentBatch + 1} of ${widget.totalBatches})',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

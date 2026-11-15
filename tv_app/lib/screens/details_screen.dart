@@ -163,12 +163,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
       return;
     }
 
+    final genreList = (_details?.genres ?? widget.initialMovie?.genres ?? []).map((g) => g.name).toList();
     final selected = await StreamSelector.showModal(
       context: context,
       title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
       streams: _streams,
       imdbId: widget.imdbId,
       mediaType: widget.mediaType,
+      genres: genreList,
       originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
       runtimeMinutes: _details?.runtime,
       autoPlay: true,
@@ -193,12 +195,14 @@ class _DetailsScreenState extends State<DetailsScreen> {
   }
 
   void _openManualSources() async {
+    final genreList = (_details?.genres ?? widget.initialMovie?.genres ?? []).map((g) => g.name).toList();
     final selected = await StreamSelector.showModal(
       context: context,
       title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
       streams: _streams,
       imdbId: widget.imdbId,
       mediaType: widget.mediaType,
+      genres: genreList,
       originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
       runtimeMinutes: _details?.runtime,
       autoPlay: false,
@@ -262,6 +266,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final showTitle = _details?.title ?? widget.initialMovie?.title ?? 'TV Show';
     final epTitle = '$showTitle S${_selectedSeasonNumber}E${episode.episodeNumber}: ${episode.name}';
     List<StreamSource> loadedStreams = [];
+    final genreList = (_details?.genres ?? widget.initialMovie?.genres ?? []).map((g) => g.name).toList();
     final selected = await StreamSelector.showModal(
       context: context,
       title: epTitle,
@@ -269,6 +274,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
       mediaType: 'tv',
       season: _selectedSeasonNumber,
       episode: episode.episodeNumber,
+      genres: genreList,
       originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
       runtimeMinutes: episode.runtime,
       autoPlay: true,
