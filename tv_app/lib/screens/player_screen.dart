@@ -418,22 +418,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _autoSelectTamilAudio(List<AudioTrack> tracks) {
+  void _autoSelectTamilAudio(List<AudioTrack> tracks) async {
     if (_tamilAudioSelectedForCurrentMedia || tracks.isEmpty) return;
+    final prefLang = await AppSettingsService.instance.getPreferredAudioLanguage();
+    final prefClean = prefLang.toLowerCase();
+
     for (final track in tracks) {
       final lang = track.language?.toLowerCase() ?? '';
       final title = track.title?.toLowerCase() ?? '';
-      if (lang == 'ta' ||
-          lang == 'tam' ||
-          lang.contains('tamil') ||
-          title.contains('tamil') ||
-          title.contains('[tam]') ||
-          title.contains('(tam)')) {
+      if (lang == prefClean ||
+          lang.startsWith(prefClean.substring(0, prefClean.length >= 2 ? 2 : prefClean.length)) ||
+          lang.contains(prefClean) ||
+          title.contains(prefClean) ||
+          title.contains('[$prefClean]') ||
+          title.contains('($prefClean)')) {
         if (_player.state.track.audio.id != track.id) {
           _player.setAudioTrack(track);
         }
         _tamilAudioSelectedForCurrentMedia = true;
-        _hudController.triggerInfo('Audio: Tamil');
+        _hudController.triggerInfo('Audio: $prefLang');
         break;
       }
     }
@@ -867,7 +870,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     _hudController.triggerInfo('Loading S${seasonNum}E${episode.episodeNumber}...');
 
-    final orchestrator = SourceOrchestrator();
+    final orchestrator = await SourceOrchestrator.createRemoteOrchestrator();
     final target = MediaScrapeTarget(
       imdbId: widget.imdbId,
       title: widget.movieTitle,

@@ -148,6 +148,10 @@ class StreamPriorityCalculator {
     String? host,
     int? sizeBytes,
     String? originalLanguage,
+    String? preferredAudioLanguage,
+    String? preferredQuality,
+    String? fileSizeTarget,
+    bool prioritizeAudio = true,
   }) {
     int score = 100;
     final pLow = provider.toLowerCase();
@@ -176,8 +180,23 @@ class StreamPriorityCalculator {
 
     if (sizeBytes != null && sizeBytes > 0) {
       final gb = sizeBytes / (1024 * 1024 * 1024);
-      if (gb <= 3.5) score -= 5;
-      else if (gb > 25) score += 5;
+      if (fileSizeTarget == 'dataSaver') {
+        if (gb <= 1.5) score -= 20;
+        else if (gb > 4.0) score += 30;
+      } else if (fileSizeTarget == 'highQuality') {
+        if (gb >= 4.0) score -= 20;
+        else if (gb < 1.0) score += 15;
+      } else {
+        if (gb <= 3.5) score -= 5;
+        else if (gb > 25) score += 5;
+      }
+    }
+
+    if (prioritizeAudio && preferredAudioLanguage != null && preferredAudioLanguage.isNotEmpty) {
+      final normPref = normalizeLanguage(preferredAudioLanguage);
+      if (normPref != null && (languages?.any((l) => l.toLowerCase() == normPref.toLowerCase()) ?? false)) {
+        score -= 35;
+      }
     }
 
     final isIndian = isIndianLanguage(originalLanguage);
@@ -208,12 +227,24 @@ class StreamPriorityCalculator {
       }
     }
 
-    if (quality == '1080p') {
-      score -= 20;
-    } else if (quality == '4K UHD') {
-      score -= 10;
-    } else if (quality == '720p') {
-      score -= 5;
+    final qLow = quality.toLowerCase();
+    if (preferredQuality != null && preferredQuality != 'auto') {
+      final pqLow = preferredQuality.toLowerCase();
+      if (pqLow.contains('4k') || pqLow.contains('uhd')) {
+        if (qLow.contains('4k') || qLow.contains('2160') || qLow.contains('uhd')) score -= 25;
+      } else if (pqLow.contains('1080') || pqLow.contains('fhd')) {
+        if (qLow.contains('1080') || qLow.contains('fhd')) score -= 25;
+      } else if (pqLow.contains('720') || pqLow.contains('hd')) {
+        if (qLow.contains('720') || qLow.contains('hd')) score -= 20;
+      }
+    } else {
+      if (quality == '1080p') {
+        score -= 20;
+      } else if (quality == '4K UHD') {
+        score -= 10;
+      } else if (quality == '720p') {
+        score -= 5;
+      }
     }
 
     return score;
@@ -224,6 +255,10 @@ class StreamPriorityCalculator {
     required String provider,
     String? defaultLanguage,
     String? originalLanguage,
+    String? preferredAudioLanguage,
+    String? preferredQuality,
+    String? fileSizeTarget,
+    bool prioritizeAudio = true,
   }) {
     final url = raw['url'] as String?;
     if (url == null || !url.startsWith('http')) return null;
@@ -265,6 +300,10 @@ class StreamPriorityCalculator {
       host: host,
       sizeBytes: sizeBytes,
       originalLanguage: originalLanguage,
+      preferredAudioLanguage: preferredAudioLanguage,
+      preferredQuality: preferredQuality,
+      fileSizeTarget: fileSizeTarget,
+      prioritizeAudio: prioritizeAudio,
     );
 
     return StreamSource(

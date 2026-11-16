@@ -120,7 +120,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
       _statusMessage = 'Searching scrapers for ${widget.title}...';
     });
 
-    final orchestrator = SourceOrchestrator();
+    final orchestrator = await SourceOrchestrator.createRemoteOrchestrator();
     final target = MediaScrapeTarget(
       imdbId: widget.imdbId ?? '',
       title: widget.title,

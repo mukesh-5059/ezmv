@@ -8,7 +8,7 @@ import 'screens/player_screen.dart';
 import 'screens/search_screen.dart';
 import 'theme.dart';
 import 'utils/tv_memory.dart';
-import 'widgets/settings_dialog.dart';
+import 'screens/settings_screen.dart';
 import 'widgets/tv_shortcuts.dart';
 
 void main() async {
@@ -90,14 +90,7 @@ class EzMVApp extends StatelessWidget {
               );
             case '/settings':
               return MaterialPageRoute(
-                builder: (ctx) => Scaffold(
-                  backgroundColor: TVTheme.background,
-                  body: Center(
-                    child: SettingsDialog(
-                      onSaved: () => Navigator.of(ctx).pop(),
-                    ),
-                  ),
-                ),
+                builder: (_) => const SettingsScreen(),
               );
           }
           return null;

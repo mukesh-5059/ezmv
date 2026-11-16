@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
 import 'package:http/http.dart' as http;
 import '../api/api_client.dart';
 import '../models/stream_progress_event.dart';
 import '../models/stream_source.dart';
+import 'settings_service.dart';
 import 'stream_priority.dart';
 import 'stream_ranker.dart';
 
@@ -94,6 +94,139 @@ class SourceOrchestrator {
   final Map<String, String> scriptRegistry;
   final http.Client _httpClient;
 
+  static final Map<String, String> _globalScriptRegistry = {};
+
+  static void clearMemoryCache() {
+    _globalScriptRegistry.clear();
+  }
+
+  static Future<Map<String, dynamic>> applyOverridesToConfig(
+    Map<String, dynamic> rawConfig,
+  ) async {
+    final overrides = await AppSettingsService.instance.getSourceOverrides();
+    if (overrides.isEmpty) return rawConfig;
+
+    final config = json.decode(json.encode(rawConfig)) as Map<String, dynamic>;
+
+    void patchList(String key) {
+      if (config[key] is List) {
+        final list = (config[key] as List).cast<Map<String, dynamic>>();
+        for (final item in list) {
+          final id = item['id']?.toString();
+          if (id != null && overrides.containsKey(id)) {
+            final ov = overrides[id];
+            if (ov is Map) {
+              if (ov.containsKey('enabled')) item['enabled'] = ov['enabled'];
+              if (ov.containsKey('custom_url')) {
+                final customUrl = ov['custom_url']?.toString();
+                if (customUrl != null && customUrl.isNotEmpty) {
+                  if (item.containsKey('script_url')) item['script_url'] = customUrl;
+                  if (item.containsKey('manifest_url')) item['manifest_url'] = customUrl;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    patchList('stremio_addons');
+    patchList('js_extractors');
+    return config;
+  }
+
+  static Future<({bool success, int sourceCount, String message})> syncRemoteRepo({
+    http.Client? httpClient,
+  }) async {
+    final client = httpClient ?? ApiClient.instance.httpClient;
+    final repoUrl = await AppSettingsService.instance.getScraperRepoUrl();
+    try {
+      final futures = await Future.wait([
+        client.get(Uri.parse('$repoUrl/sources.json')).timeout(const Duration(seconds: 6)),
+        client.get(Uri.parse('$repoUrl/router.js')).timeout(const Duration(seconds: 6)),
+      ]);
+      final sourcesRes = futures[0];
+      final routerRes = futures[1];
+
+      if (sourcesRes.statusCode != 200 || sourcesRes.body.trim().isEmpty) {
+        return (
+          success: false,
+          sourceCount: 0,
+          message: 'Failed to fetch sources.json (HTTP ${sourcesRes.statusCode})'
+        );
+      }
+      final decoded = json.decode(sourcesRes.body) as Map<String, dynamic>?;
+      if (decoded == null || decoded.isEmpty) {
+        return (success: false, sourceCount: 0, message: 'Invalid sources.json response format');
+      }
+
+      await AppSettingsService.instance.cacheSourcesJson(sourcesRes.body);
+
+      if (routerRes.statusCode == 200 && routerRes.body.trim().isNotEmpty) {
+        await AppSettingsService.instance.cacheRouterJs(routerRes.body);
+      }
+
+      final addons = (decoded['stremio_addons'] as List?)?.length ?? 0;
+      final extractors = (decoded['js_extractors'] as List?)?.length ?? 0;
+      final total = addons + extractors;
+
+      final now = DateTime.now();
+      final timeStr =
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} (${now.day}/${now.month})';
+      await AppSettingsService.instance.setLastRepoSyncTime(timeStr);
+      clearMemoryCache();
+
+      return (
+        success: true,
+        sourceCount: total,
+        message: 'Synced $total extensions ($extractors scrapers, $addons addons) successfully.',
+      );
+    } catch (e) {
+      return (success: false, sourceCount: 0, message: 'Sync error: $e');
+    }
+  }
+
+  static Future<SourceOrchestrator> createRemoteOrchestrator({
+    http.Client? httpClient,
+  }) async {
+    final client = httpClient ?? ApiClient.instance.httpClient;
+    final repoUrl = await AppSettingsService.instance.getScraperRepoUrl();
+
+    Map<String, dynamic>? config = await AppSettingsService.instance.getCachedSourcesJson();
+    String? routerCode = await AppSettingsService.instance.getCachedRouterJs();
+
+    try {
+      final futures = await Future.wait([
+        client.get(Uri.parse('$repoUrl/sources.json')).timeout(const Duration(seconds: 4)),
+        client.get(Uri.parse('$repoUrl/router.js')).timeout(const Duration(seconds: 4)),
+      ]);
+      final sourcesRes = futures[0];
+      final routerRes = futures[1];
+
+      if (sourcesRes.statusCode == 200 && sourcesRes.body.trim().isNotEmpty) {
+        final decoded = json.decode(sourcesRes.body) as Map<String, dynamic>?;
+        if (decoded != null && decoded.isNotEmpty) {
+          config = decoded;
+          await AppSettingsService.instance.cacheSourcesJson(sourcesRes.body);
+        }
+      }
+
+      if (routerRes.statusCode == 200 && routerRes.body.trim().isNotEmpty) {
+        routerCode = routerRes.body;
+        await AppSettingsService.instance.cacheRouterJs(routerRes.body);
+      }
+    } catch (_) {}
+
+    final patchedConfig = await applyOverridesToConfig(config ?? defaultSourcesConfig);
+
+    return SourceOrchestrator(
+      config: patchedConfig,
+      routerCode: routerCode,
+      scriptRegistry: _globalScriptRegistry,
+      httpClient: client,
+    );
+  }
+
   SourceOrchestrator({
     Map<String, dynamic>? config,
     String? routerCode,
@@ -101,7 +234,7 @@ class SourceOrchestrator {
     http.Client? httpClient,
   })  : config = config ?? defaultSourcesConfig,
         routerCode = routerCode ?? defaultRouterCode,
-        scriptRegistry = scriptRegistry ?? {},
+        scriptRegistry = scriptRegistry ?? _globalScriptRegistry,
         _httpClient = httpClient ?? ApiClient.instance.httpClient;
 
   static const String defaultRouterCode = r'''
@@ -529,6 +662,11 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
       final data = json.decode(res.body) as Map<String, dynamic>?;
       final rawStreams = data?['streams'] as List? ?? [];
 
+      final prefAudio = await AppSettingsService.instance.getPreferredAudioLanguage();
+      final prefQuality = await AppSettingsService.instance.getPreferredQuality();
+      final prefSize = await AppSettingsService.instance.getFileSizePreference();
+      final prioAudio = await AppSettingsService.instance.getPrioritizePreferredAudio();
+
       final out = <StreamSource>[];
       for (final raw in rawStreams) {
         if (raw is Map<String, dynamic>) {
@@ -537,6 +675,10 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
             provider: id,
             defaultLanguage: target.defaultLanguage,
             originalLanguage: target.originalLanguage,
+            preferredAudioLanguage: prefAudio,
+            preferredQuality: prefQuality.name,
+            fileSizeTarget: prefSize.name,
+            prioritizeAudio: prioAudio,
           );
           if (s != null) out.add(s);
         }
@@ -559,14 +701,28 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
     var code = scriptRegistry[scriptUrl] ?? scriptRegistry[extractor['id']];
     if (code == null || code.trim().isEmpty) {
       final filename = scriptUrl.isNotEmpty ? scriptUrl : '${extractor['id']}.js';
-      try {
-        code = await rootBundle.loadString('assets/sources/$filename');
-      } catch (_) {
+
+      // 1. Persistent SharedPreferences cache
+      final cached = await AppSettingsService.instance.getCachedScript(filename);
+      if (cached != null && cached.trim().isNotEmpty) {
+        code = cached;
+      }
+
+      // 2. Remote GitHub repository fetch
+      if (code == null || code.trim().isEmpty) {
+        final repoUrl = await AppSettingsService.instance.getScraperRepoUrl();
         try {
-          final f = io.File('sources/$filename');
-          if (f.existsSync()) code = await f.readAsString();
+          final res = await _httpClient.get(
+            Uri.parse('$repoUrl/$filename'),
+            headers: {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'},
+          ).timeout(const Duration(seconds: 4));
+          if (res.statusCode == 200 && res.body.trim().isNotEmpty) {
+            code = res.body;
+            await AppSettingsService.instance.cacheScript(filename, res.body);
+          }
         } catch (_) {}
       }
+
       if (code != null && code.isNotEmpty) {
         scriptRegistry[scriptUrl] = code;
         scriptRegistry[extractor['id']] = code;
@@ -660,6 +816,11 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
       }
       print('[$extractorId] Parsed ${items.length} stream candidate(s)');
 
+      final prefAudio = await AppSettingsService.instance.getPreferredAudioLanguage();
+      final prefQuality = await AppSettingsService.instance.getPreferredQuality();
+      final prefSize = await AppSettingsService.instance.getFileSizePreference();
+      final prioAudio = await AppSettingsService.instance.getPrioritizePreferredAudio();
+
       for (final item in items) {
         if (item is Map) {
           final map = Map<String, dynamic>.from(item);
@@ -672,11 +833,20 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
             (map['headers'] as Map).forEach((k, v) => headers[k.toString()] = v.toString());
           }
 
+          final languages = (map['languages'] is List)
+              ? (map['languages'] as List).map((l) => l.toString()).toList()
+              : <String>[];
+
           final priority = StreamPriorityCalculator.calculatePriority(
             provider: extractor['id'] ?? 'js',
             quality: quality,
+            languages: languages.isNotEmpty ? languages : null,
             defaultLanguage: target.defaultLanguage,
             originalLanguage: target.originalLanguage,
+            preferredAudioLanguage: prefAudio,
+            preferredQuality: prefQuality.name,
+            fileSizeTarget: prefSize.name,
+            prioritizeAudio: prioAudio,
           );
 
           out.add(StreamSource(
@@ -685,6 +855,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
             provider: extractor['id'] ?? 'js',
             headers: headers,
             priority: priority,
+            languages: languages,
           ));
         }
       }
