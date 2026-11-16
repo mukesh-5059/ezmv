@@ -68,3 +68,21 @@ class StreamProgressEvent {
     );
   }
 }
+
+class ProbingStageEvent {
+  final int stage; // 1 = Health Gate, 2 = Speed Probing
+  final int current;
+  final int total;
+  final int healthy;
+  final int qualified;
+  final String message;
+
+  const ProbingStageEvent({
+    required this.stage,
+    required this.current,
+    required this.total,
+    this.healthy = 0,
+    this.qualified = 0,
+    required this.message,
+  });
+}

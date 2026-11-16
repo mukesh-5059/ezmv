@@ -507,7 +507,6 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
     MediaScrapeTarget target,
   ) async {
     final manifestUrl = addon['manifest_url'] as String? ?? '';
-    final name = addon['name'] as String? ?? 'Stremio';
     final id = addon['id'] as String? ?? 'addon';
     if (manifestUrl.isEmpty) return [];
 
@@ -704,6 +703,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
     required int batchNumber,
     void Function(String message)? onProgress,
     void Function(String provider, StreamProgressStatus status, int count)? onProviderStatus,
+    void Function(ProbingStageEvent event)? onStageProgress,
   }) async {
     final plans = planBatches(target);
     final totalBatches = plans.isEmpty ? 1 : plans.length;
@@ -778,6 +778,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
         batchSize: 2,
         client: _httpClient,
         onProgress: (msg, probed, qual) => onProgress?.call(msg),
+        onStageProgress: onStageProgress,
       );
 
       final finalStreams = [
@@ -809,12 +810,14 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
     required MediaScrapeTarget target,
     void Function(String message)? onProgress,
     void Function(String provider, StreamProgressStatus status, int count)? onProviderStatus,
+    void Function(ProbingStageEvent event)? onStageProgress,
   }) async {
     final batch1 = await scrapeBatch(
       target: target,
       batchNumber: 1,
       onProgress: onProgress,
       onProviderStatus: onProviderStatus,
+      onStageProgress: onStageProgress,
     );
 
     if (batch1.streams.isNotEmpty) {

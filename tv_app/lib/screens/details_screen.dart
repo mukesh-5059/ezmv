@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import '../widgets/cast_carousel.dart';
+import '../widgets/player_dialogs.dart';
 import '../widgets/stream_selector.dart';
 import '../widgets/tv_focus_button.dart';
 import '../widgets/tv_shortcuts.dart';
@@ -196,18 +197,35 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
   void _openManualSources() async {
     final genreList = (_details?.genres ?? widget.initialMovie?.genres ?? []).map((g) => g.name).toList();
-    final selected = await StreamSelector.showModal(
+    if (_streams.isEmpty) {
+      await StreamSelector.showModal(
+        context: context,
+        title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
+        streams: _streams,
+        imdbId: widget.imdbId,
+        mediaType: widget.mediaType,
+        genres: genreList,
+        originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
+        runtimeMinutes: _details?.runtime,
+        autoPlay: false,
+        onStreamsLoaded: (streams) {
+          if (mounted) setState(() => _streams = streams);
+        },
+      );
+      if (!mounted || _streams.isEmpty) return;
+    }
+
+    final selected = await SourcesPickerDialog.show(
       context: context,
-      title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
       streams: _streams,
-      imdbId: widget.imdbId,
+      currentStreamUrl: '',
       mediaType: widget.mediaType,
+      imdbId: widget.imdbId,
+      title: _details?.title ?? widget.initialMovie?.title ?? 'Playback',
       genres: genreList,
       originalLanguage: _details?.originalLanguage ?? widget.initialMovie?.originalLanguage,
-      runtimeMinutes: _details?.runtime,
-      autoPlay: false,
-      onStreamsLoaded: (streams) {
-        if (mounted) setState(() => _streams = streams);
+      onStreamsDiscovered: (newStreams) {
+        if (mounted) setState(() => _streams = newStreams);
       },
     );
 

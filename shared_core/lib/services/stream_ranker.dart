@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import '../models/stream_progress_event.dart';
 import '../models/stream_source.dart';
 
 class StreamMetrics {
@@ -294,6 +295,7 @@ class StreamRanker {
     Duration perStreamTimeout = const Duration(milliseconds: 1500),
     http.Client? client,
     void Function(String message, int probedCount, int qualifiedCount)? onProgress,
+    void Function(ProbingStageEvent event)? onStageProgress,
   }) async {
     if (candidates.isEmpty) {
       throw ArgumentError('candidates list cannot be empty');
@@ -302,7 +304,15 @@ class StreamRanker {
     // Sort candidates by speed if known, then quality tier
     final sortedCandidates = List<StreamSource>.from(candidates)..sort(compareBySpeed);
 
-    onProgress?.call('Filtering valid streams...', 0, 0);
+    final totalCandidates = sortedCandidates.length;
+    onProgress?.call('Stage 1/2: Health Gate (16 parallel)...', 0, 0);
+    onStageProgress?.call(ProbingStageEvent(
+      stage: 1,
+      current: 0,
+      total: totalCandidates,
+      healthy: 0,
+      message: 'Checking stream availability across providers...',
+    ));
 
     // Stage 1: High-concurrency Health Gate (16 parallel, 900ms)
     final healthResults = <StreamSource>[];
@@ -312,6 +322,16 @@ class StreamRanker {
       final chunk = sortedCandidates.sublist(i, end);
       final results = await Future.wait(chunk.map((s) => checkStreamHealth(s, client: client)));
       healthResults.addAll(results);
+      final healthyCount = healthResults.where((s) => !s.isFailed).length;
+      final msg = 'Stage 1/2: Health check ($end/$totalCandidates streams, $healthyCount healthy)...';
+      onProgress?.call(msg, end, 0);
+      onStageProgress?.call(ProbingStageEvent(
+        stage: 1,
+        current: end,
+        total: totalCandidates,
+        healthy: healthyCount,
+        message: msg,
+      ));
     }
 
     final healthy = healthResults.where((s) => !s.isFailed).toList();
@@ -324,8 +344,18 @@ class StreamRanker {
 
     // Stage 2: Sliding Pool (concurrency 3) on healthy candidates
     final poolCandidates = List<StreamSource>.from(healthy.isNotEmpty ? healthy : sortedCandidates);
+    final totalToProbe = poolCandidates.length < maxProbes ? poolCandidates.length : maxProbes;
     const poolConcurrency = 3;
     final activeProbes = <Future<void>>{};
+
+    onStageProgress?.call(ProbingStageEvent(
+      stage: 2,
+      current: 0,
+      total: totalToProbe,
+      healthy: healthy.length,
+      qualified: 0,
+      message: 'Measuring stream throughput and headroom...',
+    ));
 
     for (final stream in poolCandidates) {
       if (qualified.length >= targetQualified) break;
@@ -334,7 +364,7 @@ class StreamRanker {
       probeTask = () async {
         if (qualified.length >= targetQualified) return;
         final summary = '${stream.provider.toUpperCase()} ${stream.quality}';
-        onProgress?.call('Probing $summary (${probedCount + 1}/${poolCandidates.length})...', probedCount + 1, qualified.length);
+        onProgress?.call('Stage 2/2: Probing speed ($summary, ${probedCount + 1}/$totalToProbe)...', probedCount + 1, qualified.length);
 
         final metrics = await probeStream(
           stream,
@@ -361,10 +391,23 @@ class StreamRanker {
           bytesTransferred: 0,
         );
 
-        if (metrics != null && metrics.isQualified && !qualified.any((q) => q.url == stream.url)) {
+        final isQual = metrics != null && metrics.isQualified;
+        if (isQual && !qualified.any((q) => q.url == stream.url)) {
           qualified.add(enriched);
-          onProgress?.call('Qualified: ${stream.provider} ${stream.quality} (${headroom.toStringAsFixed(1)}x)', probedCount, qualified.length);
         }
+
+        final msg = isQual
+            ? 'Stage 2/2: Qualified ${stream.provider.toUpperCase()} ${stream.quality} (${headroom.toStringAsFixed(1)}x)'
+            : 'Stage 2/2: Probing speed ($probedCount/$totalToProbe) - $summary';
+        onProgress?.call(msg, probedCount, qualified.length);
+        onStageProgress?.call(ProbingStageEvent(
+          stage: 2,
+          current: probedCount,
+          total: totalToProbe,
+          healthy: healthy.length,
+          qualified: qualified.length,
+          message: msg,
+        ));
       }();
 
       activeProbes.add(probeTask);
