@@ -171,6 +171,8 @@ class SourcesPickerDialog extends StatefulWidget {
   final String? originalLanguage;
   final String? defaultLanguage;
   final ValueChanged<List<StreamSource>>? onStreamsDiscovered;
+  final bool autoSwitchEnabled;
+  final ValueChanged<bool>? onAutoSwitchChanged;
 
   const SourcesPickerDialog({
     super.key,
@@ -186,6 +188,8 @@ class SourcesPickerDialog extends StatefulWidget {
     this.originalLanguage,
     this.defaultLanguage,
     this.onStreamsDiscovered,
+    this.autoSwitchEnabled = true,
+    this.onAutoSwitchChanged,
   });
 
   static Future<StreamSource?> show({
@@ -202,6 +206,8 @@ class SourcesPickerDialog extends StatefulWidget {
     String? originalLanguage,
     String? defaultLanguage,
     ValueChanged<List<StreamSource>>? onStreamsDiscovered,
+    bool autoSwitchEnabled = true,
+    ValueChanged<bool>? onAutoSwitchChanged,
   }) {
     return showSidePanelDialog<StreamSource>(
       context: context,
@@ -220,6 +226,8 @@ class SourcesPickerDialog extends StatefulWidget {
         originalLanguage: originalLanguage,
         defaultLanguage: defaultLanguage,
         onStreamsDiscovered: onStreamsDiscovered,
+        autoSwitchEnabled: autoSwitchEnabled,
+        onAutoSwitchChanged: onAutoSwitchChanged,
       ),
     );
   }
@@ -230,18 +238,35 @@ class SourcesPickerDialog extends StatefulWidget {
 
 class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
   late List<StreamSource> _availableStreams;
+  int _selectedTab = 0;
   bool _isLoading = false;
   bool _isScrapingMore = false;
+  late bool _autoSwitchEnabled;
   int _currentBatch = 1;
   int _totalBatches = 1;
   String _sseMessage = 'Connecting to scrapers...';
   late final SourceOrchestrator _orchestrator;
   late final MediaScrapeTarget _target;
 
+  final FocusNode _autoSwitchFocusNode = FocusNode();
+  final FocusNode _streamsTabFocusNode = FocusNode();
+  final FocusNode _failedTabFocusNode = FocusNode();
+  final FocusNode _firstStreamFocusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _autoSwitchFocusNode.dispose();
+    _streamsTabFocusNode.dispose();
+    _failedTabFocusNode.dispose();
+    _firstStreamFocusNode.dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
     _availableStreams = List.of(widget.streams);
+    _autoSwitchEnabled = widget.autoSwitchEnabled;
     _target = MediaScrapeTarget(
       imdbId: widget.imdbId,
       title: widget.title ?? widget.imdbId,
@@ -324,6 +349,11 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final activeStreams = _availableStreams.where((s) => !s.isFailed).toList()
+      ..sort(StreamRanker.compareBySpeed);
+    final failedStreams = _availableStreams.where((s) => s.isFailed).toList();
+    final displayedStreams = _selectedTab == 0 ? activeStreams : failedStreams;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -352,7 +382,43 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
             ),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
+        // Auto-switch toggle
+        _AutoSwitchRow(
+          enabled: _autoSwitchEnabled,
+          focusNode: _autoSwitchFocusNode,
+          onDown: () => (_selectedTab == 0 ? _streamsTabFocusNode : _failedTabFocusNode).requestFocus(),
+          onChanged: (val) {
+            setState(() => _autoSwitchEnabled = val);
+            widget.onAutoSwitchChanged?.call(val);
+          },
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            _TabButton(
+              focusNode: _streamsTabFocusNode,
+              label: 'Streams (${activeStreams.length})',
+              isSelected: _selectedTab == 0,
+              onTap: () => setState(() => _selectedTab = 0),
+              onRight: () => _failedTabFocusNode.requestFocus(),
+              onUp: () => _autoSwitchFocusNode.requestFocus(),
+              onDown: () => _firstStreamFocusNode.requestFocus(),
+            ),
+            const SizedBox(width: 8),
+            _TabButton(
+              focusNode: _failedTabFocusNode,
+              label: 'Failed (${failedStreams.length})',
+              isSelected: _selectedTab == 1,
+              isError: true,
+              onTap: () => setState(() => _selectedTab = 1),
+              onLeft: () => _streamsTabFocusNode.requestFocus(),
+              onUp: () => _autoSwitchFocusNode.requestFocus(),
+              onDown: () => _firstStreamFocusNode.requestFocus(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
         const Divider(height: 1, color: Colors.white12),
         const SizedBox(height: 12),
         Expanded(
@@ -394,18 +460,18 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
                     ),
                   ),
                 )
-              : _availableStreams.isEmpty
-                  ? const Center(
+              : displayedStreams.isEmpty
+                  ? Center(
                       child: Text(
-                        'No streams found',
-                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                        _selectedTab == 0 ? 'No active streams found' : 'No failed streams',
+                        style: const TextStyle(color: Colors.white70, fontSize: 14),
                       ),
                     )
                   : ListView.separated(
-                      itemCount: _availableStreams.length + ((_currentBatch < _totalBatches || _isScrapingMore) ? 1 : 0),
+                      itemCount: displayedStreams.length + ((_selectedTab == 0 && (_currentBatch < _totalBatches || _isScrapingMore)) ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (ctx, idx) {
-                        if (idx == _availableStreams.length) {
+                        if (idx == displayedStreams.length) {
                           return _ScrapeMoreTile(
                             currentBatch: _currentBatch,
                             totalBatches: _totalBatches,
@@ -414,15 +480,18 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
                             isLast: true,
                           );
                         }
-                        final s = _availableStreams[idx];
+                        final s = displayedStreams[idx];
                         final isSelected = s.url == widget.currentStreamUrl;
-                        final hasScrapeMore = (_currentBatch < _totalBatches || _isScrapingMore);
+                        final hasScrapeMore = _selectedTab == 0 && (_currentBatch < _totalBatches || _isScrapingMore);
+                        final isFirst = idx == 0;
                         return _SourceItemTile(
                           stream: s,
                           isSelected: isSelected,
-                          autofocus: isSelected || (idx == 0 && widget.currentStreamUrl.isEmpty),
-                          isFirst: idx == 0,
-                          isLast: !hasScrapeMore && idx == _availableStreams.length - 1,
+                          autofocus: isSelected || (isFirst && widget.currentStreamUrl.isEmpty),
+                          focusNode: isFirst ? _firstStreamFocusNode : null,
+                          isFirst: isFirst,
+                          isLast: !hasScrapeMore && idx == displayedStreams.length - 1,
+                          onUp: isFirst ? () => (_selectedTab == 0 ? _streamsTabFocusNode : _failedTabFocusNode).requestFocus() : null,
                           onSelected: () => Navigator.of(context).pop(s),
                         );
                       },
@@ -433,20 +502,219 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
   }
 }
 
+class _AutoSwitchRow extends StatefulWidget {
+  final bool enabled;
+  final FocusNode focusNode;
+  final ValueChanged<bool> onChanged;
+  final VoidCallback onDown;
+
+  const _AutoSwitchRow({
+    required this.enabled,
+    required this.focusNode,
+    required this.onChanged,
+    required this.onDown,
+  });
+
+  @override
+  State<_AutoSwitchRow> createState() => _AutoSwitchRowState();
+}
+
+class _AutoSwitchRowState extends State<_AutoSwitchRow> {
+  bool _isFocused = false;
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isHighlighted = _isFocused || _isHovered;
+    return Focus(
+      focusNode: widget.focusNode,
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
+            widget.onChanged(!widget.enabled);
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            widget.onDown();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTap: () => widget.onChanged(!widget.enabled),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: isHighlighted ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isHighlighted ? Colors.white : Colors.white12,
+                width: isHighlighted ? 2.0 : 1.0,
+              ),
+              boxShadow: isHighlighted ? TVTheme.focusShadows : [],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.autorenew_rounded, size: 18, color: Colors.white70),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Auto-switch on error',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                Switch(
+                  value: widget.enabled,
+                  activeThumbColor: TVTheme.primary,
+                  onChanged: widget.onChanged,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TabButton extends StatefulWidget {
+  final FocusNode? focusNode;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final bool isError;
+  final VoidCallback? onDown;
+  final VoidCallback? onUp;
+  final VoidCallback? onLeft;
+  final VoidCallback? onRight;
+
+  const _TabButton({
+    this.focusNode,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    this.isError = false,
+    this.onDown,
+    this.onUp,
+    this.onLeft,
+    this.onRight,
+  });
+
+  @override
+  State<_TabButton> createState() => _TabButtonState();
+}
+
+class _TabButtonState extends State<_TabButton> {
+  bool _isFocused = false;
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.isSelected;
+    final isHighlighted = _isFocused || _isHovered;
+
+    return Focus(
+      focusNode: widget.focusNode,
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onDown != null) {
+            widget.onDown!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp && widget.onUp != null) {
+            widget.onUp!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft && widget.onLeft != null) {
+            widget.onLeft!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight && widget.onRight != null) {
+            widget.onRight!();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: active
+                  ? (widget.isError ? Colors.red.withValues(alpha: 0.25) : TVTheme.primary.withValues(alpha: 0.25))
+                  : isHighlighted
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isHighlighted
+                    ? Colors.white
+                    : active
+                        ? (widget.isError ? Colors.redAccent : TVTheme.primary)
+                        : Colors.transparent,
+                width: isHighlighted ? 2.0 : 1.5,
+              ),
+              boxShadow: isHighlighted ? TVTheme.focusShadows : [],
+            ),
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: active || isHighlighted ? FontWeight.bold : FontWeight.w500,
+                color: isHighlighted
+                    ? Colors.white
+                    : active
+                        ? (widget.isError ? Colors.redAccent : TVTheme.primary)
+                        : Colors.white70,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SourceItemTile extends StatefulWidget {
+  final FocusNode? focusNode;
   final StreamSource stream;
   final bool isSelected;
   final bool autofocus;
   final bool isFirst;
   final bool isLast;
+  final VoidCallback? onUp;
   final VoidCallback onSelected;
 
   const _SourceItemTile({
+    this.focusNode,
     required this.stream,
     required this.isSelected,
     required this.autofocus,
     this.isFirst = false,
     this.isLast = false,
+    this.onUp,
     required this.onSelected,
   });
 
@@ -463,6 +731,7 @@ class _SourceItemTileState extends State<_SourceItemTile> {
     final langs = s.languages.isNotEmpty ? s.languages.join(', ') : 'Default';
 
     return Focus(
+      focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       onFocusChange: (f) {
         setState(() => _isFocused = f);
@@ -486,6 +755,9 @@ class _SourceItemTileState extends State<_SourceItemTile> {
             return KeyEventResult.handled;
           }
           if (widget.isFirst && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            if (widget.onUp != null) {
+              widget.onUp!();
+            }
             return KeyEventResult.handled;
           }
           if (widget.isLast && event.logicalKey == LogicalKeyboardKey.arrowDown) {
@@ -524,18 +796,37 @@ class _SourceItemTileState extends State<_SourceItemTile> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                      color: TVTheme.primary,
+                      color: s.isFailed ? Colors.redAccent : TVTheme.primary,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       s.quality.isNotEmpty ? s.quality : 'HD',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 11,
-                        color: Colors.black,
+                        color: s.isFailed ? Colors.white : Colors.black,
                       ),
                     ),
                   ),
+                  if (s.isFailed && s.failureReason != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.redAccent, width: 1),
+                      ),
+                      child: Text(
+                        s.failureReason!,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          color: Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (s.headroomRatio != null) ...[
                     const SizedBox(width: 8),
                     Container(

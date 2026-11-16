@@ -10,6 +10,8 @@ class StreamSource {
   final List<String> languages;
   final Map<String, String>? headers;
   final double? headroomRatio;
+  final bool isFailed;
+  final String? failureReason;
 
   const StreamSource({
     required this.url,
@@ -23,6 +25,8 @@ class StreamSource {
     this.languages = const [],
     this.headers,
     this.headroomRatio,
+    this.isFailed = false,
+    this.failureReason,
   });
 
   StreamSource copyWith({
@@ -37,6 +41,8 @@ class StreamSource {
     List<String>? languages,
     Map<String, String>? headers,
     double? headroomRatio,
+    bool? isFailed,
+    String? failureReason,
   }) {
     return StreamSource(
       url: url ?? this.url,
@@ -50,6 +56,8 @@ class StreamSource {
       languages: languages ?? this.languages,
       headers: headers ?? this.headers,
       headroomRatio: headroomRatio ?? this.headroomRatio,
+      isFailed: isFailed ?? this.isFailed,
+      failureReason: failureReason ?? this.failureReason,
     );
   }
 
@@ -73,6 +81,9 @@ class StreamSource {
       host: json['host'] as String?,
       languages: rawLanguages.map((l) => l.toString()).toList(),
       headers: parsedHeaders,
+      headroomRatio: (json['headroom_ratio'] as num?)?.toDouble(),
+      isFailed: json['is_failed'] as bool? ?? false,
+      failureReason: json['failure_reason'] as String?,
     );
   }
 
@@ -87,5 +98,8 @@ class StreamSource {
     'host': host,
     'languages': languages,
     'headers': headers,
+    'headroom_ratio': headroomRatio,
+    'is_failed': isFailed,
+    'failure_reason': failureReason,
   };
 }

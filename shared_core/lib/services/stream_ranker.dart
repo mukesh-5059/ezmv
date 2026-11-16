@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/stream_source.dart';
 
@@ -9,6 +10,7 @@ class StreamMetrics {
   final double headroomRatio;
   final bool isQualified;
   final int bytesTransferred;
+  final String? explicitError;
 
   const StreamMetrics({
     required this.ttfbMs,
@@ -17,6 +19,7 @@ class StreamMetrics {
     required this.headroomRatio,
     required this.isQualified,
     required this.bytesTransferred,
+    this.explicitError,
   });
 }
 
@@ -24,6 +27,7 @@ class RankedStreamResult {
   final StreamSource topStream;
   final List<StreamSource> fallbackStreams;
   final List<StreamSource> unprobedStreams;
+  final List<StreamSource> failedStreams;
   final Map<String, StreamMetrics> metrics;
   final bool hasQualifiedStreams;
 
@@ -31,6 +35,7 @@ class RankedStreamResult {
     required this.topStream,
     this.fallbackStreams = const [],
     this.unprobedStreams = const [],
+    this.failedStreams = const [],
     this.metrics = const {},
     this.hasQualifiedStreams = true,
   });
@@ -69,6 +74,53 @@ class StreamRanker {
     return 0.50;
   }
 
+  static Future<StreamSource> checkStreamHealth(
+    StreamSource stream, {
+    http.Client? client,
+    Duration timeout = const Duration(milliseconds: 900),
+  }) async {
+    final httpClient = client ?? http.Client();
+    final shouldClose = client == null;
+    try {
+      final uri = Uri.tryParse(stream.url);
+      if (uri == null) return stream.copyWith(isFailed: true, failureReason: 'Invalid URL');
+
+      final headers = Map<String, String>.from(stream.headers ?? {});
+      if (!headers.containsKey('User-Agent')) {
+        headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+      }
+      final isManifest = stream.url.contains('.m3u8') || stream.url.contains('.mpd');
+      if (!isManifest) headers['Range'] = 'bytes=0-1024';
+
+      final request = http.Request('GET', uri)..headers.addAll(headers);
+      final streamedResponse = await httpClient.send(request).timeout(timeout);
+      final status = streamedResponse.statusCode;
+      final contentType = (streamedResponse.headers['content-type'] ?? '').toLowerCase();
+      unawaited(streamedResponse.stream.drain().catchError((_) {}));
+
+      if (status >= 400 && status != 416) {
+        return stream.copyWith(isFailed: true, failureReason: 'HTTP $status');
+      }
+      if (contentType.contains('text/html')) {
+        return stream.copyWith(isFailed: true, failureReason: 'HTML Challenge');
+      }
+      return stream;
+    } on TimeoutException {
+      // Do not count timeout as failed stream
+      return stream;
+    } on http.ClientException {
+      return stream.copyWith(isFailed: true, failureReason: 'Connection Dropped');
+    } on SocketException {
+      return stream.copyWith(isFailed: true, failureReason: 'Connection Refused');
+    } on HandshakeException {
+      return stream.copyWith(isFailed: true, failureReason: 'SSL Error');
+    } catch (_) {
+      return stream;
+    } finally {
+      if (shouldClose) httpClient.close();
+    }
+  }
+
   static Future<StreamMetrics?> probeStream(
     StreamSource stream, {
     int? runtimeMinutes,
@@ -99,13 +151,29 @@ class StreamRanker {
 
       final contentType = (streamedResponse.headers['content-type'] ?? '').toLowerCase();
       if (contentType.contains('text/html')) {
-        unawaited(streamedResponse.stream.drain());
-        return null;
+        unawaited(streamedResponse.stream.drain().catchError((_) {}));
+        return const StreamMetrics(
+          ttfbMs: 9999,
+          throughputMbPerSec: 0.0,
+          estimatedBitrateMbPerSec: 0.0,
+          headroomRatio: 0.0,
+          isQualified: false,
+          bytesTransferred: 0,
+          explicitError: 'HTML Challenge',
+        );
       }
 
       if (streamedResponse.statusCode >= 400 && streamedResponse.statusCode != 403 && streamedResponse.statusCode != 416) {
-        unawaited(streamedResponse.stream.drain());
-        return null;
+        unawaited(streamedResponse.stream.drain().catchError((_) {}));
+        return StreamMetrics(
+          ttfbMs: 9999,
+          throughputMbPerSec: 0.0,
+          estimatedBitrateMbPerSec: 0.0,
+          headroomRatio: 0.0,
+          isQualified: false,
+          bytesTransferred: 0,
+          explicitError: 'HTTP ${streamedResponse.statusCode}',
+        );
       }
 
       final targetBytes = isManifest ? 16384 : 65536;
@@ -163,6 +231,26 @@ class StreamRanker {
         isQualified: isQualified,
         bytesTransferred: bytes.length,
       );
+    } on http.ClientException {
+      return const StreamMetrics(
+        ttfbMs: 9999,
+        throughputMbPerSec: 0.0,
+        estimatedBitrateMbPerSec: 0.0,
+        headroomRatio: 0.0,
+        isQualified: false,
+        bytesTransferred: 0,
+        explicitError: 'Connection Dropped',
+      );
+    } on SocketException {
+      return const StreamMetrics(
+        ttfbMs: 9999,
+        throughputMbPerSec: 0.0,
+        estimatedBitrateMbPerSec: 0.0,
+        headroomRatio: 0.0,
+        isQualified: false,
+        bytesTransferred: 0,
+        explicitError: 'Connection Refused',
+      );
     } catch (_) {
       return null;
     } finally {
@@ -176,6 +264,24 @@ class StreamRanker {
     if (q.contains('1080')) return 3;
     if (q.contains('720')) return 2;
     if (q.contains('480')) return 1;
+    return 0;
+  }
+
+  static int compareBySpeed(StreamSource a, StreamSource b) {
+    final aSpeed = a.headroomRatio;
+    final bSpeed = b.headroomRatio;
+
+    if (aSpeed != null && bSpeed != null) {
+      if (aSpeed != bSpeed) return bSpeed.compareTo(aSpeed);
+    } else if (aSpeed != null && bSpeed == null) {
+      return aSpeed > 0.0 ? -1 : 1;
+    } else if (aSpeed == null && bSpeed != null) {
+      return bSpeed > 0.0 ? 1 : -1;
+    }
+
+    final qCmp = _qualityRank(b.quality).compareTo(_qualityRank(a.quality));
+    if (qCmp != 0) return qCmp;
+
     return 0;
   }
 
@@ -193,47 +299,55 @@ class StreamRanker {
       throw ArgumentError('candidates list cannot be empty');
     }
 
-    // Sort candidates by priority (ascending: 1 = top priority) and quality tier
-    final sortedCandidates = List<StreamSource>.from(candidates)..sort((a, b) {
-      if (a.priority != null && b.priority != null && a.priority != b.priority) {
-        return a.priority!.compareTo(b.priority!);
-      }
-      if (a.priority != null && b.priority == null) return -1;
-      if (a.priority == null && b.priority != null) return 1;
-      return _qualityRank(b.quality).compareTo(_qualityRank(a.quality));
-    });
+    // Sort candidates by speed if known, then quality tier
+    final sortedCandidates = List<StreamSource>.from(candidates)..sort(compareBySpeed);
+
+    onProgress?.call('Filtering valid streams...', 0, 0);
+
+    // Stage 1: High-concurrency Health Gate (16 parallel, 900ms)
+    final healthResults = <StreamSource>[];
+    const healthConcurrency = 16;
+    for (int i = 0; i < sortedCandidates.length; i += healthConcurrency) {
+      final end = (i + healthConcurrency < sortedCandidates.length) ? i + healthConcurrency : sortedCandidates.length;
+      final chunk = sortedCandidates.sublist(i, end);
+      final results = await Future.wait(chunk.map((s) => checkStreamHealth(s, client: client)));
+      healthResults.addAll(results);
+    }
+
+    final healthy = healthResults.where((s) => !s.isFailed).toList();
+    final failed = healthResults.where((s) => s.isFailed).toList();
 
     final qualified = <StreamSource>[];
     final metricsMap = <String, StreamMetrics>{};
-    final unprobed = List<StreamSource>.from(sortedCandidates);
     final probedList = <StreamSource>[];
     int probedCount = 0;
 
-    // Parallel batch probing
-    while (unprobed.isNotEmpty && probedCount < maxProbes && qualified.length < targetQualified) {
-      final currentBatch = <StreamSource>[];
-      final remainingNeeded = targetQualified - qualified.length;
-      final effectiveBatchSize = remainingNeeded < batchSize ? remainingNeeded : batchSize;
+    // Stage 2: Sliding Pool (concurrency 3) on healthy candidates
+    final poolCandidates = List<StreamSource>.from(healthy.isNotEmpty ? healthy : sortedCandidates);
+    const poolConcurrency = 3;
+    final activeProbes = <Future<void>>{};
 
-      while (unprobed.isNotEmpty && currentBatch.length < effectiveBatchSize && (probedCount + currentBatch.length) < maxProbes) {
-        currentBatch.add(unprobed.removeAt(0));
-      }
+    for (final stream in poolCandidates) {
+      if (qualified.length >= targetQualified) break;
 
-      final summary = currentBatch.map((s) => '${s.provider.toUpperCase()} ${s.quality}').join(', ');
-      onProgress?.call('Probing $summary (${probedCount + currentBatch.length}/$maxProbes)...', probedCount + currentBatch.length, qualified.length);
+      late Future<void> probeTask;
+      probeTask = () async {
+        if (qualified.length >= targetQualified) return;
+        final summary = '${stream.provider.toUpperCase()} ${stream.quality}';
+        onProgress?.call('Probing $summary (${probedCount + 1}/${poolCandidates.length})...', probedCount + 1, qualified.length);
 
-      final probeFutures = currentBatch.map((s) => probeStream(
-        s,
-        runtimeMinutes: runtimeMinutes,
-        client: client,
-        timeout: perStreamTimeout,
-      )).toList();
-
-      final results = await Future.wait(probeFutures);
-      for (int i = 0; i < currentBatch.length; i++) {
-        final stream = currentBatch[i];
-        final metrics = results[i];
+        final metrics = await probeStream(
+          stream,
+          runtimeMinutes: runtimeMinutes,
+          client: client,
+          timeout: perStreamTimeout,
+        );
         probedCount++;
+
+        if (metrics?.explicitError != null) {
+          failed.add(stream.copyWith(isFailed: true, failureReason: metrics!.explicitError));
+          return;
+        }
 
         final headroom = metrics?.headroomRatio ?? 0.0;
         final enriched = stream.copyWith(headroomRatio: headroom);
@@ -247,138 +361,58 @@ class StreamRanker {
           bytesTransferred: 0,
         );
 
-        if (metrics != null && metrics.isQualified) {
+        if (metrics != null && metrics.isQualified && !qualified.any((q) => q.url == stream.url)) {
           qualified.add(enriched);
           onProgress?.call('Qualified: ${stream.provider} ${stream.quality} (${headroom.toStringAsFixed(1)}x)', probedCount, qualified.length);
         }
-      }
+      }();
 
-      if (qualified.length >= targetQualified) break;
-    }
+      activeProbes.add(probeTask);
+      probeTask.whenComplete(() => activeProbes.remove(probeTask));
 
-    final primaryQualified = List<StreamSource>.from(qualified);
-
-    // Dynamic threshold relaxation: If standard headroom (1.4x / 2.0x) yielded fewer than targetQualified,
-    // probe all remaining unprobed streams ("go till end") and relax headroom threshold to 1.1x then 1.0x.
-    if (qualified.length < targetQualified && unprobed.isNotEmpty) {
-      onProgress?.call('Probing all remaining sources to find stable playback streams...', probedCount, qualified.length);
-
-      while (unprobed.isNotEmpty) {
-        final currentBatch = <StreamSource>[];
-        while (unprobed.isNotEmpty && currentBatch.length < batchSize) {
-          currentBatch.add(unprobed.removeAt(0));
-        }
-
-        final summary = currentBatch.map((s) => '${s.provider.toUpperCase()} ${s.quality}').join(', ');
-        onProgress?.call('Probing $summary (${probedCount + currentBatch.length}/${sortedCandidates.length})...', probedCount + currentBatch.length, qualified.length);
-
-        final probeFutures = currentBatch.map((s) => probeStream(
-          s,
-          runtimeMinutes: runtimeMinutes,
-          client: client,
-          timeout: perStreamTimeout,
-        )).toList();
-
-        final results = await Future.wait(probeFutures);
-        for (int i = 0; i < currentBatch.length; i++) {
-          final stream = currentBatch[i];
-          final metrics = results[i];
-          probedCount++;
-
-          final headroom = metrics?.headroomRatio ?? 0.0;
-          final enriched = stream.copyWith(headroomRatio: headroom);
-          probedList.add(enriched);
-          metricsMap[stream.url] = metrics ?? const StreamMetrics(
-            ttfbMs: 9999,
-            throughputMbPerSec: 0.0,
-            estimatedBitrateMbPerSec: 0.0,
-            headroomRatio: 0.0,
-            isQualified: false,
-            bytesTransferred: 0,
-          );
-
-          if (metrics != null && metrics.isQualified && !qualified.any((q) => q.url == stream.url)) {
-            qualified.add(enriched);
-            onProgress?.call('Qualified: ${stream.provider} ${stream.quality} (${headroom.toStringAsFixed(1)}x)', probedCount, qualified.length);
-          }
-        }
+      if (activeProbes.length >= poolConcurrency) {
+        await Future.any(activeProbes);
       }
     }
 
-    // If still fewer than targetQualified, relax headroom bar to 1.1x, then 1.0x from all probed streams
-    if (qualified.length < targetQualified) {
-      for (final threshold in [1.1, 1.0]) {
-        for (final stream in probedList) {
-          final m = metricsMap[stream.url];
-          if (m != null && m.headroomRatio >= threshold && m.ttfbMs <= 2500) {
-            if (!qualified.any((s) => s.url == stream.url)) {
-              qualified.add(stream);
-              if (qualified.length >= targetQualified) break;
-            }
-          }
-        }
-        if (qualified.length >= targetQualified) break;
-      }
+    if (activeProbes.isNotEmpty && qualified.length < targetQualified) {
+      await Future.wait(activeProbes);
     }
 
-    List<StreamSource> getRemainingStreams(StreamSource top, List<StreamSource> fallbacks) {
-      final selectedUrls = {top.url, ...fallbacks.map((f) => f.url)};
-      return sortedCandidates
-          .where((s) => !selectedUrls.contains(s.url))
-          .map((s) {
-            final m = metricsMap[s.url];
-            return m != null ? s.copyWith(headroomRatio: m.headroomRatio) : s;
-          })
-          .toList();
-    }
+    // 1. Probed streams with measured speed > 0, sorted strictly descending by speed
+    final speedRankedProbed = probedList
+        .where((s) => !failed.any((f) => f.url == s.url) && (s.headroomRatio ?? 0.0) > 0.0)
+        .toList()
+      ..sort(compareBySpeed);
 
-    if (qualified.isNotEmpty) {
-      final top = qualified.first;
-      final fallbacks = List<StreamSource>.from(qualified.sublist(1));
-      if (fallbacks.length < 2) {
-        for (final s in sortedCandidates) {
-          if (s.url != top.url && !fallbacks.any((f) => f.url == s.url)) {
-            final m = metricsMap[s.url];
-            fallbacks.add(m != null ? s.copyWith(headroomRatio: m.headroomRatio) : s);
-            if (fallbacks.length >= 2) break;
-          }
-        }
-      }
-      return RankedStreamResult(
-        topStream: top,
-        fallbackStreams: fallbacks,
-        unprobedStreams: getRemainingStreams(top, fallbacks),
-        metrics: metricsMap,
-        hasQualifiedStreams: primaryQualified.isNotEmpty,
-      );
-    }
+    // 2. Unprobed healthy streams, sorted by quality
+    final probedUrls = probedList.map((s) => s.url).toSet();
+    final failedUrls = failed.map((f) => f.url).toSet();
+    final unprobed = (healthy.isNotEmpty ? healthy : sortedCandidates)
+        .where((s) => !probedUrls.contains(s.url) && !failedUrls.contains(s.url))
+        .toList()
+      ..sort(compareBySpeed);
 
-    // Graceful degradation when no stream met even 1.0x: pick highest calculated headroom
-    if (metricsMap.isNotEmpty) {
-      final sortedByHeadroom = probedList.where((s) => metricsMap.containsKey(s.url)).toList()
-        ..sort((a, b) => (metricsMap[b.url]?.headroomRatio ?? 0).compareTo(metricsMap[a.url]?.headroomRatio ?? 0));
-      if (sortedByHeadroom.isNotEmpty) {
-        final best = sortedByHeadroom.first;
-        final fallbacks = sortedByHeadroom.skip(1).take(2).toList();
-        return RankedStreamResult(
-          topStream: best,
-          fallbackStreams: fallbacks,
-          unprobedStreams: getRemainingStreams(best, fallbacks),
-          metrics: metricsMap,
-          hasQualifiedStreams: false,
-        );
-      }
-    }
+    // 3. Stalled streams (probed but 0.0x throughput)
+    final stalled = probedList
+        .where((s) => !failed.any((f) => f.url == s.url) && (s.headroomRatio ?? 0.0) <= 0.0)
+        .toList()
+      ..sort(compareBySpeed);
 
-    // Default fallback to first candidate if network probe was blocked or errored
-    final defaultTop = sortedCandidates.first;
-    final defaultFallbacks = sortedCandidates.skip(1).take(2).toList();
+    final allActive = [...speedRankedProbed, ...unprobed, ...stalled];
+    final defaultCandidates = healthy.isNotEmpty ? healthy : sortedCandidates;
+    final top = allActive.isNotEmpty ? allActive.first : defaultCandidates.first;
+    final remainingActive = allActive.where((s) => s.url != top.url).toList();
+    final fallbacks = remainingActive.take(2).toList();
+    final unprobedRemaining = remainingActive.skip(fallbacks.length).toList();
+
     return RankedStreamResult(
-      topStream: defaultTop,
-      fallbackStreams: defaultFallbacks,
-      unprobedStreams: getRemainingStreams(defaultTop, defaultFallbacks),
+      topStream: top,
+      fallbackStreams: fallbacks,
+      unprobedStreams: unprobedRemaining,
+      failedStreams: failed,
       metrics: metricsMap,
-      hasQualifiedStreams: false,
+      hasQualifiedStreams: speedRankedProbed.isNotEmpty,
     );
   }
 

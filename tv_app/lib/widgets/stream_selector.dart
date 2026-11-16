@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import 'tv_shortcuts.dart';
@@ -239,6 +240,25 @@ class _StreamItemButtonState extends State<_StreamItemButton> {
                       fontSize: 13,
                     ),
                   ),
+                  if (widget.stream.isFailed && widget.stream.failureReason != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.redAccent, width: 1),
+                      ),
+                      child: Text(
+                        widget.stream.failureReason!,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          color: Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -288,12 +308,14 @@ class _StreamSelectorDialog extends StatefulWidget {
 
 class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
   late List<StreamSource> _streams;
+  int _selectedTab = 0;
   late bool _isLoading;
-  bool _isRanking = false;
   String _statusMessage = 'Connecting to scrapers...';
   StreamSubscription<StreamProgressEvent>? _sseSubscription;
   final Map<String, ({StreamProgressStatus status, int count})> _providerStatuses = {};
   final FocusNode _firstItemFocus = FocusNode();
+  final FocusNode _streamsTabFocus = FocusNode();
+  final FocusNode _failedTabFocus = FocusNode();
   final FocusNode _retryFocus = FocusNode();
   final FocusNode _cancelFocus = FocusNode();
 
@@ -343,7 +365,6 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
       if (allStreams.isEmpty) {
         _streams = [];
         _isLoading = false;
-        _isRanking = false;
         widget.onStreamsLoaded?.call([]);
         setState(() {
           _statusMessage = 'No streams found for this title.';
@@ -356,7 +377,6 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
 
       _streams = allStreams;
       _isLoading = false;
-      _isRanking = false;
       widget.onStreamsLoaded?.call(allStreams);
 
       if (widget.autoPlay && mounted) {
@@ -375,7 +395,6 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
       });
     } catch (err) {
       if (!mounted) return;
-      _isRanking = false;
       StreamRanker.checkInternetReachability().then((isOnline) {
         if (!mounted) return;
         final displayErr = !isOnline
@@ -401,13 +420,42 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
   void dispose() {
     _sseSubscription?.cancel();
     _firstItemFocus.dispose();
+    _streamsTabFocus.dispose();
+    _failedTabFocus.dispose();
     _retryFocus.dispose();
     _cancelFocus.dispose();
     super.dispose();
   }
 
+  Widget _buildTab({
+    FocusNode? focusNode,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    bool isError = false,
+    VoidCallback? onDown,
+    VoidCallback? onLeft,
+    VoidCallback? onRight,
+  }) {
+    return _SelectorTabButton(
+      focusNode: focusNode,
+      label: label,
+      isSelected: isSelected,
+      onTap: onTap,
+      isError: isError,
+      onDown: onDown,
+      onLeft: onLeft,
+      onRight: onRight,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final activeStreams = _streams.where((s) => !s.isFailed).toList()
+      ..sort(StreamRanker.compareBySpeed);
+    final failedStreams = _streams.where((s) => s.isFailed).toList();
+    final displayedStreams = _selectedTab == 0 ? activeStreams : failedStreams;
+
     return Dialog(
       backgroundColor: TVTheme.surface,
       shape: RoundedRectangleBorder(borderRadius: TVTheme.borderRadiusMd),
@@ -485,23 +533,41 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
                   }).toList(),
                 ),
             ] else ...[
-              const Text(
-                'Select preferred quality, audio language, or source provider:',
-                style: TextStyle(fontSize: 13, color: TVTheme.textSecondary),
+              Row(
+                children: [
+                  _buildTab(
+                    focusNode: _streamsTabFocus,
+                    label: 'Streams (${activeStreams.length})',
+                    isSelected: _selectedTab == 0,
+                    onTap: () => setState(() => _selectedTab = 0),
+                    onRight: () => _failedTabFocus.requestFocus(),
+                    onDown: () => _firstItemFocus.requestFocus(),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildTab(
+                    focusNode: _failedTabFocus,
+                    label: 'Failed (${failedStreams.length})',
+                    isSelected: _selectedTab == 1,
+                    isError: true,
+                    onTap: () => setState(() => _selectedTab = 1),
+                    onLeft: () => _streamsTabFocus.requestFocus(),
+                    onDown: () => _firstItemFocus.requestFocus(),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Expanded(
-                child: _streams.isEmpty
+                child: displayedStreams.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text(
-                              'No playable streams found.',
-                              style: TextStyle(color: TVTheme.textMuted, fontSize: 14),
+                            Text(
+                              _selectedTab == 0 ? 'No playable streams found.' : 'No failed streams.',
+                              style: const TextStyle(color: TVTheme.textMuted, fontSize: 14),
                             ),
                             const SizedBox(height: 12),
-                            if (widget.imdbId != null && widget.imdbId!.isNotEmpty)
+                            if (widget.imdbId != null && widget.imdbId!.isNotEmpty && _selectedTab == 0)
                               ElevatedButton.icon(
                                 focusNode: _retryFocus,
                                 style: ElevatedButton.styleFrom(
@@ -516,13 +582,14 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
                         ),
                       )
                     : ListView.builder(
-                        itemCount: _streams.length,
+                        itemCount: displayedStreams.length,
                         itemBuilder: (ctx, idx) {
-                          final s = _streams[idx];
+                          final s = displayedStreams[idx];
                           return _DialogStreamRow(
                             stream: s,
                             autofocus: idx == 0,
                             focusNode: idx == 0 ? _firstItemFocus : null,
+                            onUp: idx == 0 ? () => (_selectedTab == 0 ? _streamsTabFocus : _failedTabFocus).requestFocus() : null,
                             onSelect: () => Navigator.of(context).pop(s),
                           );
                         },
@@ -545,16 +612,121 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
   }
 }
 
+class _SelectorTabButton extends StatefulWidget {
+  final FocusNode? focusNode;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final bool isError;
+  final VoidCallback? onDown;
+  final VoidCallback? onLeft;
+  final VoidCallback? onRight;
+
+  const _SelectorTabButton({
+    this.focusNode,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    this.isError = false,
+    this.onDown,
+    this.onLeft,
+    this.onRight,
+  });
+
+  @override
+  State<_SelectorTabButton> createState() => _SelectorTabButtonState();
+}
+
+class _SelectorTabButtonState extends State<_SelectorTabButton> {
+  bool _isFocused = false;
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.isSelected;
+    final isHighlighted = _isFocused || _isHovered;
+
+    return Focus(
+      focusNode: widget.focusNode,
+      onFocusChange: (f) => setState(() => _isFocused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown && widget.onDown != null) {
+            widget.onDown!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft && widget.onLeft != null) {
+            widget.onLeft!();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight && widget.onRight != null) {
+            widget.onRight!();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: active
+                  ? (widget.isError ? Colors.red.withValues(alpha: 0.25) : TVTheme.primary.withValues(alpha: 0.25))
+                  : isHighlighted
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isHighlighted
+                    ? Colors.white
+                    : active
+                        ? (widget.isError ? Colors.redAccent : TVTheme.primary)
+                        : Colors.transparent,
+                width: isHighlighted ? 2.0 : 1.5,
+              ),
+              boxShadow: isHighlighted ? TVTheme.focusShadows : [],
+            ),
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: active || isHighlighted ? FontWeight.bold : FontWeight.w500,
+                color: isHighlighted
+                    ? Colors.white
+                    : active
+                        ? (widget.isError ? Colors.redAccent : TVTheme.primary)
+                        : Colors.white70,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _DialogStreamRow extends StatefulWidget {
   final StreamSource stream;
   final bool autofocus;
   final FocusNode? focusNode;
+  final VoidCallback? onUp;
   final VoidCallback onSelect;
 
   const _DialogStreamRow({
     required this.stream,
     required this.autofocus,
     this.focusNode,
+    this.onUp,
     required this.onSelect,
   });
 
@@ -574,7 +746,19 @@ class _DialogStreamRowState extends State<_DialogStreamRow> {
       autofocus: widget.autofocus,
       focusNode: widget.focusNode,
       onFocusChange: (f) => setState(() => _isFocused = f),
-      onKeyEvent: (node, event) => TvShortcuts.handleKeyEvent(event, onActivate: widget.onSelect),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (TvShortcuts.isActivateKey(event.logicalKey)) {
+            widget.onSelect();
+            return KeyEventResult.handled;
+          }
+          if (widget.onUp != null && event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            widget.onUp!();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
       child: GestureDetector(
         onTap: widget.onSelect,
         child: Container(
@@ -593,14 +777,37 @@ class _DialogStreamRowState extends State<_DialogStreamRow> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: TVTheme.primary,
+                  color: s.isFailed ? Colors.redAccent : TVTheme.primary,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   s.quality,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: s.isFailed ? Colors.white : Colors.black,
+                  ),
                 ),
               ),
+              if (s.isFailed && s.failureReason != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.redAccent, width: 1),
+                  ),
+                  child: Text(
+                    s.failureReason!,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                      color: Colors.redAccent,
+                    ),
+                  ),
+                ),
+              ],
               if (s.headroomRatio != null) ...[
                 const SizedBox(width: 8),
                 Container(

@@ -133,6 +133,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isExiting = false;
   bool _showOsd = false;
   bool _isPlaying = true;
+  bool _autoSwitchEnabled = true;
   bool _isBuffering = false;
 
   int? _currentSeason;
@@ -627,6 +628,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       episode: _currentEpisode,
       genres: widget.genres,
       originalLanguage: widget.originalLanguage,
+      autoSwitchEnabled: _autoSwitchEnabled,
+      onAutoSwitchChanged: (val) {
+        if (mounted) setState(() => _autoSwitchEnabled = val);
+      },
       onStreamsDiscovered: (streams) {
         if (mounted) {
           setState(() => _availableStreams = streams);
@@ -634,8 +639,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       },
     );
 
-    if (selected != null && mounted && selected.url != _currentStreamUrl) {
-      _switchStream(selected, preservePosition: true);
+    if (selected != null && mounted) {
+      setState(() => _autoSwitchEnabled = false);
+      if (selected.url != _currentStreamUrl) {
+        _switchStream(selected, preservePosition: true);
+      }
     }
     if (mounted) {
       _mainFocusNode.requestFocus();
@@ -677,10 +685,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _cancelPlaybackWatchdog();
     _failedStreamUrls.add(_currentStreamUrl);
 
+    final isTimeout = err.toLowerCase().contains('timeout') ||
+        err.toLowerCase().contains('12 seconds') ||
+        err.toLowerCase().contains('stalled');
+
+    final currentIdx = _availableStreams.indexWhere((s) => s.url == _currentStreamUrl);
+    if (currentIdx != -1 && !isTimeout) {
+      String badge = 'Error';
+      if (err.contains('403')) {
+        badge = 'HTTP 403';
+      } else if (err.contains('404')) {
+        badge = 'HTTP 404';
+      } else if (err.contains('503')) {
+        badge = 'HTTP 503';
+      } else if (err.toLowerCase().contains('codec') || err.toLowerCase().contains('decode')) {
+        badge = 'Decode Error';
+      } else if (err.toLowerCase().contains('network') || err.toLowerCase().contains('connection')) {
+        badge = 'Network Error';
+      }
+
+      _availableStreams[currentIdx] = _availableStreams[currentIdx].copyWith(
+        isFailed: true,
+        failureReason: badge,
+      );
+    }
+
     // Auto-stream fallback: Find next stream that has not failed
+    if (!_autoSwitchEnabled) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Playback failed. Auto-switch is disabled.';
+        });
+      }
+      return;
+    }
+
     StreamSource? fallbackStream;
     for (final s in _availableStreams) {
-      if (!_failedStreamUrls.contains(s.url) && s.url != _currentStreamUrl) {
+      if (!_failedStreamUrls.contains(s.url) && !s.isFailed && s.url != _currentStreamUrl) {
         fallbackStream = s;
         break;
       }
@@ -741,7 +783,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           final idx = updated.indexWhere((s) => s.url == stream.url);
           if (idx != -1) {
             updated[idx] = stream.copyWith(headroomRatio: headroom);
-            _availableStreams = updated;
+            final active = updated.where((s) => !s.isFailed).toList()..sort(StreamRanker.compareBySpeed);
+            final failed = updated.where((s) => s.isFailed).toList();
+            _availableStreams = [...active, ...failed];
           }
         });
       }

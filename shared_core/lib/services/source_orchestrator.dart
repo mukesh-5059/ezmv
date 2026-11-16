@@ -765,13 +765,8 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
       );
     }
 
-    // Sort all candidates by priority
-    allCandidates.sort((a, b) {
-      if (a.priority != null && b.priority != null && a.priority != b.priority) {
-        return a.priority!.compareTo(b.priority!);
-      }
-      return 0;
-    });
+    // Sort all candidates by speed if known, then quality tier
+    allCandidates.sort(StreamRanker.compareBySpeed);
 
     onProgress?.call('Ranking streams (${allCandidates.length} found)...');
 
@@ -789,6 +784,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
         ranked.topStream,
         ...ranked.fallbackStreams,
         ...ranked.unprobedStreams,
+        ...ranked.failedStreams,
       ];
 
       return BatchScrapeResult(
