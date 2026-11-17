@@ -378,6 +378,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _categoryFocusNodes[_categories.length - 1].requestFocus();
                   return KeyEventResult.handled;
                 }
+                if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+                    event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                  return KeyEventResult.handled;
+                }
               }
               return KeyEventResult.ignored;
             },
@@ -423,6 +427,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
                 if (event.logicalKey == LogicalKeyboardKey.arrowDown && index == _categories.length - 1) {
                   _backButtonFocus.requestFocus();
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowUp && index == 0) {
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
                   return KeyEventResult.handled;
                 }
               }
@@ -521,7 +531,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 debugPrint('[TV-NAV][Settings] D-pad Left from [Setting: $title] -> back to Category nav');
                 return KeyEventResult.handled;
               }
-              if (event is KeyDownEvent && (TvShortcuts.isActivateKey(event.logicalKey) || event.logicalKey == LogicalKeyboardKey.arrowRight)) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                if (event is KeyDownEvent) {
+                  final idx = options.indexOf(currentValue);
+                  final next = options[(idx + 1) % options.length];
+                  debugPrint('[TV-SETTINGS] Cycled [$title]: $currentValue -> $next');
+                  onChanged(next);
+                }
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
                 final idx = options.indexOf(currentValue);
                 final next = options[(idx + 1) % options.length];
                 debugPrint('[TV-SETTINGS] Cycled [$title]: $currentValue -> $next');
@@ -619,7 +638,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 debugPrint('[TV-NAV][Settings] D-pad Left from [Toggle: $title] -> back to Category nav');
                 return KeyEventResult.handled;
               }
-              if (event is KeyDownEvent && (TvShortcuts.isActivateKey(event.logicalKey) || event.logicalKey == LogicalKeyboardKey.arrowRight)) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                if (event is KeyDownEvent) {
+                  debugPrint('[TV-SETTINGS] Toggled [$title]: $value -> ${!value}');
+                  onChanged(!value);
+                }
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
                 debugPrint('[TV-SETTINGS] Toggled [$title]: $value -> ${!value}');
                 onChanged(!value);
                 return KeyEventResult.handled;
@@ -731,8 +757,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 upFocusNode.requestFocus();
                 return KeyEventResult.handled;
               }
-              if (event.logicalKey == LogicalKeyboardKey.arrowRight && rightFocusNode != null) {
-                rightFocusNode.requestFocus();
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                if (rightFocusNode != null) {
+                  rightFocusNode.requestFocus();
+                }
                 return KeyEventResult.handled;
               }
               if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
@@ -867,6 +895,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required VoidCallback onAction,
     bool isDestructive = false,
     FocusNode? focusNode,
+    FocusNode? downFocusNode,
+    FocusNode? upFocusNode,
   }) {
     return Builder(
       builder: (ctx) {
@@ -885,6 +915,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 debugPrint('[TV-NAV][Settings] D-pad Left from [Action: $title] -> back to Category nav');
                 return KeyEventResult.handled;
               }
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                if (downFocusNode != null) {
+                  downFocusNode.requestFocus();
+                }
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                if (upFocusNode != null) {
+                  upFocusNode.requestFocus();
+                }
+                return KeyEventResult.handled;
+              }
               if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
                 debugPrint('[TV-SETTINGS] Action triggered: [$title]');
                 onAction();
@@ -896,50 +941,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Builder(
             builder: (innerCtx) {
               final isFocused = Focus.of(innerCtx).hasFocus;
-              return Container(
-                margin: const EdgeInsets.only(bottom: 14),
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isFocused ? (isDestructive ? Colors.redAccent : TVTheme.primary) : Colors.white12,
-                    width: isFocused ? 2 : 1,
+              return GestureDetector(
+                onTap: onAction,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isFocused ? (isDestructive ? Colors.redAccent : TVTheme.primary) : Colors.white12,
+                      width: isFocused ? 2 : 1,
+                    ),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            subtitle,
-                            style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
-                          ),
-                        ],
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              subtitle,
+                              style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    ElevatedButton.icon(
-                      focusNode: FocusNode(canRequestFocus: false),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isFocused
-                            ? (isDestructive ? Colors.red.shade900 : TVTheme.primary)
-                            : Colors.white12,
-                        foregroundColor: Colors.white,
+                      Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        decoration: BoxDecoration(
+                          color: isFocused
+                              ? (isDestructive ? Colors.red.shade900 : TVTheme.primary)
+                              : Colors.white12,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(icon, size: 16, color: Colors.white),
+                            const SizedBox(width: 8),
+                            Text(
+                              buttonLabel,
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ],
+                        ),
                       ),
-                      onPressed: onAction,
-                      icon: Icon(icon, size: 16),
-                      label: Text(buttonLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               );
             },
@@ -992,9 +1046,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
                 return KeyEventResult.handled;
               }
-              if (event.logicalKey == LogicalKeyboardKey.arrowRight && rightFocusNode != null) {
-                debugPrint('[TV-NAV][Settings] D-pad Right from [Button: $displayLabel] -> next button');
-                rightFocusNode.requestFocus();
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                if (rightFocusNode != null) {
+                  debugPrint('[TV-NAV][Settings] D-pad Right from [Button: $displayLabel] -> next button');
+                  rightFocusNode.requestFocus();
+                }
                 return KeyEventResult.handled;
               }
               if (event.logicalKey == LogicalKeyboardKey.arrowDown && downFocusNode != null) {
@@ -1086,6 +1142,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
                 debugPrint('[TV-NAV][Settings] D-pad Left from [Source: $name] -> back to Category nav');
                 _categoryFocusNodes[_selectedCategory].requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
+                  _installedSources.isNotEmpty &&
+                  id == _installedSources.last['id']?.toString()) {
                 return KeyEventResult.handled;
               }
               if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
@@ -1402,6 +1466,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             _buildActionTile(
               focusNode: _clearHistoryFocusNode,
+              downFocusNode: _clearCacheFocusNode,
               title: 'Clear Continue Watching',
               subtitle: 'Resets all active playback progress and resume points.',
               buttonLabel: 'Clear History',
@@ -1415,6 +1480,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             _buildActionTile(
               focusNode: _clearCacheFocusNode,
+              upFocusNode: _clearHistoryFocusNode,
+              downFocusNode: _resetAllFocusNode,
               title: 'Clear Scraper Scripts Cache',
               subtitle: 'Removes local cache of JS extractors and forces fresh remote pull.',
               buttonLabel: 'Purge Cache',
@@ -1428,6 +1495,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             _buildActionTile(
               focusNode: _resetAllFocusNode,
+              upFocusNode: _clearCacheFocusNode,
               title: 'Reset Settings to Default',
               subtitle: 'Restores all audio, quality, endpoint, repo, and source preferences.',
               buttonLabel: 'Reset All',
