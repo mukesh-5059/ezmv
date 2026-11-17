@@ -227,6 +227,8 @@ class StreamPriorityCalculator {
         if (qLow.contains('1080') || qLow.contains('fhd')) score -= 25;
       } else if (pqLow.contains('720') || pqLow.contains('hd')) {
         if (qLow.contains('720') || qLow.contains('hd')) score -= 20;
+      } else if (pqLow.contains('480') || pqLow.contains('sd')) {
+        if (qLow.contains('480') || qLow.contains('sd')) score -= 20;
       }
     } else {
       if (quality == '1080p') {
@@ -263,7 +265,6 @@ class StreamPriorityCalculator {
     }
 
     final quality = parseQuality(fullText);
-    if (quality == '4K UHD') return null;
 
     final languages = parseLanguages(fullText, defaultLanguage: defaultLanguage ?? originalLanguage);
     final rawSize = raw['behaviorHints']?['videoSize'];

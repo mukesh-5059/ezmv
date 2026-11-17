@@ -457,47 +457,43 @@ class ApiClient {
             if (imdbId != null && imdbId.startsWith('tt')) imdbIds.add(imdbId);
           }
 
-          if (imdbIds.isEmpty) {
-            return _searchBackend(cleanQuery, page: page, type: type, genre: genre, year: year, minRating: minRating);
-          }
+          if (imdbIds.isNotEmpty) {
+            var movies = await resolveMovies(imdbIds, mediaType: type, minRating: minRating);
+            if (type != null && type.isNotEmpty && type != 'all') {
+              movies = movies.where((m) => m.mediaType == type).toList();
+            }
+            if (genre != null && genre.isNotEmpty) {
+              final targetGenre = genre.toLowerCase();
+              movies = movies.where((m) => m.genres.any((g) => g.slug.toLowerCase() == targetGenre)).toList();
+            }
+            if (minRating != null && minRating > 0) {
+              movies = movies.where((m) => m.ratingScore >= minRating).toList();
+            }
+            if (year != null) {
+              movies = movies.where((m) {
+                final y = int.tryParse(m.year);
+                if (y == null) return false;
+                if (year == 2020) return y >= 2020 && y <= 2029;
+                if (year == 2010) return y >= 2010 && y <= 2019;
+                if (year == 2000) return y >= 2000 && y <= 2009;
+                if (year == 1990) return y >= 1990 && y <= 1999;
+                if (year == 1980) return y < 1990;
+                return y == year;
+              }).toList();
+            }
 
-          var movies = await resolveMovies(imdbIds, mediaType: type, minRating: minRating);
-          if (type != null && type.isNotEmpty && type != 'all') {
-            movies = movies.where((m) => m.mediaType == type).toList();
+            if (movies.isNotEmpty || page > 1) {
+              final hasMore = pageHeader < totalPages;
+              return PaginatedResponse<MovieSummary>(
+                items: movies,
+                page: pageHeader,
+                totalPages: totalPages,
+                totalItems: totalItems,
+                hasMore: hasMore,
+                nextPage: hasMore ? pageHeader + 1 : null,
+              );
+            }
           }
-          if (genre != null && genre.isNotEmpty) {
-            final targetGenre = genre.toLowerCase();
-            movies = movies.where((m) => m.genres.any((g) => g.slug.toLowerCase() == targetGenre)).toList();
-          }
-          if (minRating != null && minRating > 0) {
-            movies = movies.where((m) => m.ratingScore >= minRating).toList();
-          }
-          if (year != null) {
-            movies = movies.where((m) {
-              final y = int.tryParse(m.year);
-              if (y == null) return false;
-              if (year == 2020) return y >= 2020 && y <= 2029;
-              if (year == 2010) return y >= 2010 && y <= 2019;
-              if (year == 2000) return y >= 2000 && y <= 2009;
-              if (year == 1990) return y >= 1990 && y <= 1999;
-              if (year == 1980) return y < 1990;
-              return y == year;
-            }).toList();
-          }
-
-          if (movies.isEmpty && page == 1) {
-            return _searchBackend(cleanQuery, page: page, type: type, genre: genre, year: year, minRating: minRating);
-          }
-
-          final hasMore = pageHeader < totalPages;
-          return PaginatedResponse<MovieSummary>(
-            items: movies,
-            page: pageHeader,
-            totalPages: totalPages,
-            totalItems: totalItems,
-            hasMore: hasMore,
-            nextPage: hasMore ? pageHeader + 1 : null,
-          );
         }
       } catch (_) {}
     }

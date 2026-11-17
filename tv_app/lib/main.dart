@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_core/shared_core.dart';
 import 'screens/actor_screen.dart';
@@ -13,6 +14,10 @@ import 'widgets/tv_shortcuts.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
   initTvMemory();
   MediaKit.ensureInitialized();
   final savedUrl = await StorageService.instance.getApiBaseUrl();

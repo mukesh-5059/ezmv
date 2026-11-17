@@ -193,6 +193,7 @@ class _PlayerHudState extends State<PlayerHud> {
         break;
       case HudAction.subtitleChanged:
         content = Container(
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.75),
@@ -204,12 +205,16 @@ class _PlayerHudState extends State<PlayerHud> {
             children: [
               const Icon(Icons.subtitles, color: Colors.white, size: 24),
               const SizedBox(width: 10),
-              Text(
-                widget.controller.message ?? '',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  widget.controller.message ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -218,6 +223,7 @@ class _PlayerHudState extends State<PlayerHud> {
         break;
       case HudAction.info:
         content = Container(
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.75),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.85),
@@ -229,12 +235,16 @@ class _PlayerHudState extends State<PlayerHud> {
             children: [
               const Icon(Icons.play_circle_outline_rounded, color: Colors.white, size: 26),
               const SizedBox(width: 12),
-              Text(
-                widget.controller.message ?? '',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  widget.controller.message ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],

@@ -273,12 +273,23 @@ class StreamRanker {
     final bSpeed = b.headroomRatio;
 
     if (aSpeed != null && bSpeed != null) {
+      final aQual = aSpeed >= 1.4;
+      final bQual = bSpeed >= 1.4;
+      if (aQual && bQual) {
+        final pCmp = (a.priority ?? 100).compareTo(b.priority ?? 100);
+        if (pCmp != 0) return pCmp;
+        return bSpeed.compareTo(aSpeed);
+      }
+      if (aQual != bQual) return aQual ? -1 : 1;
       if (aSpeed != bSpeed) return bSpeed.compareTo(aSpeed);
     } else if (aSpeed != null && bSpeed == null) {
       return aSpeed > 0.0 ? -1 : 1;
     } else if (aSpeed == null && bSpeed != null) {
       return bSpeed > 0.0 ? 1 : -1;
     }
+
+    final pCmp = (a.priority ?? 100).compareTo(b.priority ?? 100);
+    if (pCmp != 0) return pCmp;
 
     final qCmp = _qualityRank(b.quality).compareTo(_qualityRank(a.quality));
     if (qCmp != 0) return qCmp;

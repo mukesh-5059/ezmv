@@ -706,6 +706,16 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
               ? (map['languages'] as List).map((l) => l.toString()).toList()
               : <String>[];
 
+          int? sizeBytes;
+          if (map['sizeBytes'] is num) {
+            sizeBytes = (map['sizeBytes'] as num).toInt();
+          } else if (map['size'] is num) {
+            sizeBytes = (map['size'] as num).toInt();
+          } else {
+            final rawSizeStr = map['size']?.toString() ?? map['title']?.toString() ?? map['name']?.toString();
+            sizeBytes = StreamRanker.parseSizeBytes(rawSizeStr);
+          }
+
           final priority = StreamPriorityCalculator.calculatePriority(
             provider: extractor['id'] ?? 'js',
             quality: quality,
@@ -716,6 +726,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
             preferredQuality: prefQuality.name,
             fileSizeTarget: prefSize.name,
             prioritizeAudio: prioAudio,
+            sizeBytes: sizeBytes,
           );
 
           out.add(StreamSource(
@@ -725,6 +736,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
             headers: headers,
             priority: priority,
             languages: languages,
+            sizeBytes: sizeBytes,
           ));
         }
       }

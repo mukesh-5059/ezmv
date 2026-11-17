@@ -351,12 +351,62 @@ class _PlayerScreenState extends State<PlayerScreen> {
         episode: widget.episode,
       );
       if (!mounted) return;
+
+      final prefSub = await AppSettingsService.instance.getPreferredSubtitleLanguage();
+      final prefClean = prefSub.toLowerCase();
+
+      final matchingTracks = <SubtitleTrackInfo>[];
+      final remainingTracks = <SubtitleTrackInfo>[];
+      for (final track in tracks) {
+        if (_matchesSubLang(track, prefClean)) {
+          matchingTracks.add(track);
+        } else {
+          remainingTracks.add(track);
+        }
+      }
+      final sortedTracks = [...matchingTracks, ...remainingTracks];
+
       setState(() {
-        _subtitles = tracks;
+        _subtitles = sortedTracks;
         _isLoadingSubtitles = false;
       });
+      _autoSelectSubtitle(sortedTracks, prefClean: prefClean);
     } catch (_) {
       if (mounted) setState(() => _isLoadingSubtitles = false);
+    }
+  }
+
+  bool _matchesSubLang(SubtitleTrackInfo track, String targetLang) {
+    if (targetLang.isEmpty || targetLang == 'off' || targetLang == 'none') return false;
+    final lang = track.language.toLowerCase();
+    final label = track.label.toLowerCase();
+    return lang == targetLang ||
+        (targetLang.length >= 2 && lang.startsWith(targetLang.substring(0, 2))) ||
+        label.contains(targetLang);
+  }
+
+  void _autoSelectSubtitle(List<SubtitleTrackInfo> tracks, {required String prefClean}) async {
+    if (_selectedSubtitle != null || tracks.isEmpty) return;
+    if (prefClean.isEmpty || prefClean == 'off' || prefClean == 'none') return;
+
+    for (final track in tracks) {
+      if (_matchesSubLang(track, prefClean)) {
+        if (!mounted || _selectedSubtitle != null) return;
+        setState(() {
+          _selectedSubtitle = track;
+        });
+        try {
+          await _player.setSubtitleTrack(
+            SubtitleTrack.uri(
+              track.url,
+              title: track.label,
+              language: track.language,
+            ),
+          );
+          _hudController.triggerSubtitle('Subtitles: ${track.label}');
+        } catch (_) {}
+        break;
+      }
     }
   }
 
@@ -958,7 +1008,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
