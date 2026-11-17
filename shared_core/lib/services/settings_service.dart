@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../api/api_client.dart';
 import '../storage/storage_service.dart';
 
 enum StreamQualityPreference {
@@ -296,5 +297,8 @@ class AppSettingsService {
     await prefs.remove(_prefFileSizeKey);
     await prefs.remove(_prefPrioritizeAudioKey);
     await prefs.remove(_customScraperRepoKey);
+    await prefs.remove(_prefSourceOverridesKey);
+    await StorageService.instance.resetApiBaseUrl();
+    ApiClient.instance = ApiClient();
   }
 }

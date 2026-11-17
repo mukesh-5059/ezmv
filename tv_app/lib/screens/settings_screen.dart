@@ -30,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final FocusNode _firstSettingFocus = FocusNode();
   final FocusNode _serverInputFocusNode = FocusNode();
   final FocusNode _saveServerButtonFocus = FocusNode();
+  final FocusNode _resetServerButtonFocus = FocusNode();
   final FocusNode _repoInputFocusNode = FocusNode();
   final FocusNode _syncRepoButtonFocus = FocusNode();
   final FocusNode _saveRepoButtonFocus = FocusNode();
@@ -202,6 +203,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     _firstSettingFocus.dispose();
     _saveServerButtonFocus.dispose();
+    _resetServerButtonFocus.dispose();
     _backButtonFocus.dispose();
     _navScopeNode.dispose();
     _contentScopeNode.dispose();
@@ -291,6 +293,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       debugPrint('[TV-SETTINGS][Server] Base URL updated to: $input');
       _showFeedback('Server URL saved: $input');
     }
+  }
+
+  Future<void> _resetServerEndpoint() async {
+    await StorageService.instance.resetApiBaseUrl();
+    ApiClient.instance = ApiClient();
+    _ipController.text = ApiClient.defaultBaseUrl;
+    debugPrint('[TV-SETTINGS][Server] Base URL reset to default: ${ApiClient.defaultBaseUrl}');
+    _showFeedback('Server URL reset to default.');
   }
 
   Widget _buildCategoryNav() {
@@ -733,26 +743,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildMiniActionButton({
     required FocusNode focusNode,
     required IconData icon,
-    required String label,
+    String? label,
+    String? tooltip,
     required VoidCallback onPressed,
     bool isPrimary = false,
+    bool escapeToCategoryOnLeft = false,
+    FocusNode? leftFocusNode,
+    FocusNode? rightFocusNode,
+    FocusNode? downFocusNode,
+    FocusNode? upFocusNode,
   }) {
+    final displayLabel = label ?? tooltip ?? 'Action';
     return Focus(
       focusNode: focusNode,
       onFocusChange: (f) {
-        if (f) _logFocusTransition('Button: $label');
+        if (f) _logFocusTransition('Button: $displayLabel');
       },
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $label] -> back to Category nav');
-          _categoryFocusNodes[_selectedCategory].requestFocus();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            if (leftFocusNode != null) {
+              debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $displayLabel] -> previous button');
+              leftFocusNode.requestFocus();
+              return KeyEventResult.handled;
+            } else if (escapeToCategoryOnLeft) {
+              debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $displayLabel] -> back to Category nav');
+              _categoryFocusNodes[_selectedCategory].requestFocus();
+              return KeyEventResult.handled;
+            }
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight && rightFocusNode != null) {
+            debugPrint('[TV-NAV][Settings] D-pad Right from [Button: $displayLabel] -> next button');
+            rightFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown && downFocusNode != null) {
+            debugPrint('[TV-NAV][Settings] D-pad Down from [Button: $displayLabel] -> below');
+            downFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp && upFocusNode != null) {
+            debugPrint('[TV-NAV][Settings] D-pad Up from [Button: $displayLabel] -> above');
+            upFocusNode.requestFocus();
+            return KeyEventResult.handled;
+          }
         }
         return KeyEventResult.ignored;
       },
       child: Builder(
         builder: (ctx) {
           final isFocused = Focus.of(ctx).hasFocus;
+          if (label == null || label.isEmpty) {
+            return Tooltip(
+              message: tooltip ?? displayLabel,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isFocused
+                      ? TVTheme.primary
+                      : (isPrimary ? TVTheme.primary.withValues(alpha: 0.8) : TVTheme.surfaceElevated),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.all(10),
+                  minimumSize: const Size(40, 40),
+                  side: BorderSide(
+                    color: isFocused ? Colors.white : Colors.transparent,
+                    width: isFocused ? 2 : 1,
+                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                ),
+                onPressed: onPressed,
+                child: Icon(icon, size: 18),
+              ),
+            );
+          }
           return ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: isFocused
@@ -793,6 +855,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
             debugPrint('[TV-NAV][Settings] D-pad Left from [Source: $name] -> back to Category nav');
             _categoryFocusNodes[_selectedCategory].requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
+              _installedSources.isNotEmpty &&
+              id == _installedSources.first['id']?.toString()) {
+            debugPrint('[TV-NAV][Settings] D-pad Up from first source -> Reset Overrides button');
+            _resetOverridesButtonFocus.requestFocus();
             return KeyEventResult.handled;
           }
           if (TvShortcuts.isActivateKey(event.logicalKey)) {
@@ -1058,6 +1127,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         icon: _isSyncingRepo ? Icons.hourglass_top : Icons.sync,
                         label: _isSyncingRepo ? 'Syncing...' : 'Sync & Update Now',
                         isPrimary: true,
+                        escapeToCategoryOnLeft: true,
+                        rightFocusNode: _saveRepoButtonFocus,
+                        upFocusNode: _repoInputFocusNode,
+                        downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
                         onPressed: _syncExtensions,
                       ),
                       _buildMiniActionButton(
@@ -1065,13 +1138,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         icon: Icons.save,
                         label: 'Save Repo URL',
                         isPrimary: false,
+                        leftFocusNode: _syncRepoButtonFocus,
+                        rightFocusNode: _resetRepoButtonFocus,
+                        upFocusNode: _repoInputFocusNode,
+                        downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
                         onPressed: _saveRepoUrl,
                       ),
                       _buildMiniActionButton(
                         focusNode: _resetRepoButtonFocus,
                         icon: Icons.restore,
-                        label: 'Reset to Default',
+                        label: 'Reset Repo',
                         isPrimary: false,
+                        leftFocusNode: _saveRepoButtonFocus,
+                        upFocusNode: _repoInputFocusNode,
+                        downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
                         onPressed: _resetRepoUrl,
                       ),
                     ],
@@ -1101,7 +1181,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildMiniActionButton(
                     focusNode: _resetOverridesButtonFocus,
                     icon: Icons.restart_alt,
-                    label: 'Reset Overrides',
+                    tooltip: 'Reset Overrides',
+                    escapeToCategoryOnLeft: true,
+                    upFocusNode: _resetRepoButtonFocus,
+                    downFocusNode: _installedSources.isNotEmpty
+                        ? _getSourceFocusNode(_installedSources.first['id']?.toString() ?? '')
+                        : null,
                     isPrimary: false,
                     onPressed: _resetAllOverrides,
                   ),
@@ -1145,7 +1230,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             _buildActionTile(
               title: 'Reset Settings to Default',
-              subtitle: 'Restores all audio, quality, and stream ranking preferences.',
+              subtitle: 'Restores all audio, quality, endpoint, repo, and source preferences.',
               buttonLabel: 'Reset All',
               icon: Icons.restore,
               isDestructive: true,
@@ -1210,32 +1295,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Focus(
-                      focusNode: _saveServerButtonFocus,
-                      onFocusChange: (f) {
-                        if (f) _logFocusTransition('Button: Save Server URL');
-                      },
-                      onKeyEvent: (node, event) {
-                        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                          debugPrint('[TV-NAV][Settings] D-pad Left from [Button: Save Server URL] -> back to Category nav');
-                          _categoryFocusNodes[_selectedCategory].requestFocus();
-                          return KeyEventResult.handled;
-                        }
-                        return KeyEventResult.ignored;
-                      },
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: TVTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      _buildMiniActionButton(
+                        focusNode: _saveServerButtonFocus,
+                        icon: Icons.save,
+                        label: 'Save Server URL',
+                        isPrimary: true,
+                        escapeToCategoryOnLeft: true,
+                        rightFocusNode: _resetServerButtonFocus,
+                        upFocusNode: _serverInputFocusNode,
                         onPressed: _saveServerEndpoint,
-                        icon: const Icon(Icons.save, size: 16),
-                        label: const Text('Save Server URL', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      _buildMiniActionButton(
+                        focusNode: _resetServerButtonFocus,
+                        icon: Icons.restore,
+                        label: 'Reset to Default',
+                        leftFocusNode: _saveServerButtonFocus,
+                        upFocusNode: _serverInputFocusNode,
+                        onPressed: _resetServerEndpoint,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1323,17 +1405,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           node: _contentScopeNode,
                           child: FocusTraversalGroup(
                             policy: WidgetOrderTraversalPolicy(),
-                            child: Focus(
-                              onKeyEvent: (node, event) {
-                                if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                                  debugPrint('[TV-NAV][Settings] D-pad Left from content panel -> back to Category nav');
-                                  _categoryFocusNodes[_selectedCategory].requestFocus();
-                                  return KeyEventResult.handled;
-                                }
-                                return KeyEventResult.ignored;
-                              },
-                              child: _buildSettingsContent(),
-                            ),
+                            child: _buildSettingsContent(),
                           ),
                         ),
                       ),

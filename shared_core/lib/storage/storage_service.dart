@@ -256,4 +256,9 @@ class StorageService {
     final prefs = await _instance;
     await prefs.setString(_apiBaseUrlKey, url);
   }
+
+  Future<void> resetApiBaseUrl() async {
+    final prefs = await _instance;
+    await prefs.remove(_apiBaseUrlKey);
+  }
 }

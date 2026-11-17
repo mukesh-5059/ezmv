@@ -239,57 +239,13 @@ class SourceOrchestrator {
 
   static const String defaultRouterCode = r'''
 function routeMedia(media, config) {
-  var genres = (media && media.genres) || [];
-  var lang = (media && media.originalLanguage || '').toLowerCase();
-  var mediaType = (media && media.mediaType || 'movie').toLowerCase();
-
-  var isAnime = genres.some(function(g) {
-    var s = String(g).toLowerCase();
-    return s === 'anime' || s === 'animation';
-  }) && (lang === 'ja' || genres.some(function(g) { return String(g).toLowerCase() === 'anime'; }) || !lang);
-
-  function matches(source) {
-    if (!source || source.enabled === false) return false;
-    var m = source.match || {};
-    if (m.media_types && m.media_types.length) {
-      if (m.media_types.indexOf(mediaType) === -1) return false;
-    }
-    if (m.genres && m.genres.length) {
-      var genreMatch = m.genres.some(function(mg) {
-        if (mg === 'anime' && isAnime) return true;
-        return genres.some(function(g) { return String(g).toLowerCase() === mg.toLowerCase(); });
-      });
-      if (!genreMatch) return false;
-    }
-    if (m.original_languages && m.original_languages.length) {
-      if (!isAnime && (!lang || m.original_languages.indexOf(lang) === -1)) return false;
-    }
-    return true;
-  }
-
-  var addons = (config.stremio_addons || []).filter(matches);
-  var extractors = (config.js_extractors || []).filter(matches);
-
-  var batchMap = {};
-  function addSource(s, type) {
-    var b = s.batch || s.priority || 1;
-    if (!batchMap[b]) {
-      batchMap[b] = { batchNumber: b, stremio_addons: [], js_extractors: [] };
-    }
-    if (type === 'addon') batchMap[b].stremio_addons.push(s);
-    else batchMap[b].js_extractors.push(s);
-  }
-
-  addons.forEach(function(s) { addSource(s, 'addon'); });
-  extractors.forEach(function(s) { addSource(s, 'extractor'); });
-
-  var batchNums = Object.keys(batchMap).map(Number).sort(function(a, b) { return a - b; });
-  return batchNums.map(function(num) {
-    var b = batchMap[num];
-    b.stremio_addons.sort(function(a, b) { return (a.priority || 10) - (b.priority || 10); });
-    b.js_extractors.sort(function(a, b) { return (a.priority || 10) - (b.priority || 10); });
-    return b;
-  });
+  var addons = (config && config.stremio_addons) || [];
+  var extractors = (config && config.js_extractors) || [];
+  return [{
+    batchNumber: 1,
+    stremio_addons: addons.filter(function(s) { return s && s.enabled !== false; }),
+    js_extractors: extractors.filter(function(s) { return s && s.enabled !== false; })
+  }];
 }
 ''';
 
@@ -437,95 +393,8 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
 
   static const Map<String, dynamic> defaultSourcesConfig = {
     'version': 1,
-    'stremio_addons': [
-      {
-        'id': 'hdhub_addon',
-        'name': 'HDHub (Addon)',
-        'manifest_url':
-            'https://hdhub.thevolecitor.qzz.io/eyJ0b3Jib3giOiJ1bnNldCIsInF1YWxpdGllcyI6IjEwODBwLDcyMHAsNDgwcCIsInNvcnQiOiJkZXNjIiwiY2F0YWxvZ3MiOiIifQ/manifest.json',
-        'enabled': true,
-        'batch': 1,
-        'priority': 1,
-        'match': <String, dynamic>{},
-      },
-      {
-        'id': 'penguplay',
-        'name': 'PenguPlay (Addon)',
-        'manifest_url':
-            'https://pengu.uk/%7B%22auth_token%22%3A%22p30MBIC3MSN4Dbh5ZGDeVyGUzMoFFJUBEL4FNv36DWY%22%7D/manifest.json',
-        'enabled': true,
-        'batch': 2,
-        'priority': 1,
-        'match': <String, dynamic>{},
-      },
-      {
-        'id': 'plaviohd',
-        'name': 'PlavioHD (Addon)',
-        'manifest_url':
-            'https://hd.plavio.site/c/eyJwcm92aWRlcnMiOlsiSERIdWI0dSIsIkNpbmV6byIsIlZlZ2Ftb3ZpZXMiLCJNb3ZpZXNIdW50IiwiNEtIREh1YiIsIk9uZVRvdWNoVFYiLCJWaWRyb2NrIiwiU3BhY2VEb20iLCJXYXkyTW92aWVzIiwiRmxpeE5lc3QiLCJIREh1YiIsIk1vdmllczR1IiwiQ05DVmVyc2UiLCJNb3ZpZUJveCIsIkRlZXBGbGl4Il0sInFzZXQiOlsiMTA4MHAiLCI3MjBwIiwiNDgwcCIsIjM2MHAiLCJIRFRTIiwiQ0FNIiwiSERSaXAiXSwiY3R5cGVzIjpbIm1vdmllIiwid2Vic2VyaWVzIiwidHYiLCJhbmltZSJdLCJsYW5nUGljayI6WyJIaW5kaSIsIkVuZ2xpc2giLCJQdW5qYWJpIiwiQmVuZ2FsaSIsIlRhbWlsIiwiVGVsdWd1IiwiTWFsYXlhbGFtIiwiS2FubmFkYSIsIk1hcmF0aGkiLCJEdWFsIEF1ZGlvIiwiTXVsdGkgQXVkaW8iLCJBcmFiaWMiLCJTcGFuaXNoIiwiRnJlbmNoIiwiR2VybWFuIiwiSXRhbGlhbiIsIlBvcnR1Z3Vlc2UiLCJSdXNzaWFuIiwiSmFwYW5lc2UiLCJJbmRvbmVzaWFuIiwiRHV0Y2giLCJIdW5nYXJpYW4iXSwic29ydE5ldyI6InNpemVRdWFsaXR5IiwiaW5jSGRyIjp0cnVlLCJpbmNIZXZjIjp0cnVlLCJpbmNEdWFsIjp0cnVlLCJpbmNNdWx0aSI6dHJ1ZX0/manifest.json',
-        'enabled': true,
-        'batch': 3,
-        'priority': 1,
-        'match': <String, dynamic>{},
-      },
-      {
-        'id': 'notorrent',
-        'name': 'NoTorrent (Addon)',
-        'manifest_url': 'https://addon.notorrent2.workers.dev/manifest.json',
-        'enabled': true,
-        'batch': 4,
-        'priority': 1,
-        'match': <String, dynamic>{},
-      },
-    ],
-    'js_extractors': [
-      {
-        'id': 'hianime',
-        'name': 'HiAnime (Scraper)',
-        'script_url': 'hianime.js',
-        'interface': 'ezmv',
-        'enabled': true,
-        'batch': 1,
-        'priority': 1,
-        'match': {
-          'genres': ['anime', 'animation'],
-          'original_languages': ['ja'],
-        },
-      },
-      {
-        'id': 'gogo',
-        'name': 'AniGoGo (Scraper)',
-        'script_url': 'gogo.js',
-        'interface': 'ezmv',
-        'enabled': true,
-        'batch': 1,
-        'priority': 2,
-        'match': {
-          'genres': ['anime', 'animation'],
-          'original_languages': ['ja'],
-        },
-      },
-      {
-        'id': 'hdhub_scraper',
-        'name': 'HDHub4u (Scraper)',
-        'script_url': 'hdhub.js',
-        'interface': 'ezmv',
-        'enabled': true,
-        'batch': 1,
-        'priority': 2,
-        'match': <String, dynamic>{},
-      },
-      {
-        'id': '4khdhub',
-        'name': '4K HDHub (Scraper)',
-        'script_url': '4khdhub.js',
-        'interface': 'ezmv',
-        'enabled': true,
-        'batch': 1,
-        'priority': 3,
-        'match': <String, dynamic>{},
-      },
-    ],
+    'stremio_addons': [],
+    'js_extractors': [],
   };
 
   List<BatchPlan> planBatches(MediaScrapeTarget target) {
@@ -982,20 +851,39 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
     void Function(String message)? onProgress,
     void Function(String provider, StreamProgressStatus status, int count)? onProviderStatus,
     void Function(ProbingStageEvent event)? onStageProgress,
+    void Function(String reason)? onBackendFallback,
   }) async {
-    final batch1 = await scrapeBatch(
-      target: target,
-      batchNumber: 1,
-      onProgress: onProgress,
-      onProviderStatus: onProviderStatus,
-      onStageProgress: onStageProgress,
-    );
+    final plans = planBatches(target);
+    final totalBatches = plans.isEmpty ? 1 : plans.length;
+    final List<StreamSource> allCollectedStreams = [];
 
-    if (batch1.streams.isNotEmpty) {
-      return batch1.streams;
+    for (int b = 1; b <= totalBatches; b++) {
+      onProgress?.call('Running batch $b of $totalBatches...');
+      final batchResult = await scrapeBatch(
+        target: target,
+        batchNumber: b,
+        onProgress: onProgress,
+        onProviderStatus: onProviderStatus,
+        onStageProgress: onStageProgress,
+      );
+
+      if (batchResult.streams.isNotEmpty) {
+        allCollectedStreams.addAll(batchResult.streams);
+        if (batchResult.hasQualifiedStreams) {
+          return allCollectedStreams;
+        }
+      }
     }
 
-    onProgress?.call('Connecting to backend fallback scrapers...');
+    if (allCollectedStreams.isNotEmpty) {
+      return allCollectedStreams;
+    }
+
+    final reason = totalBatches <= 1
+        ? 'No streams found in batch'
+        : 'No streams found across all $totalBatches batches';
+    onBackendFallback?.call(reason);
+    onProgress?.call('$reason. Falling back to backend scrapers...');
     try {
       final completer = Completer<List<StreamSource>>();
       final stream = ApiClient.instance.getStreamsProgressive(
@@ -1047,9 +935,9 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
         return fallbackStreams;
       }
     } catch (err) {
-      if (batch1.streams.isEmpty) rethrow;
+      if (allCollectedStreams.isEmpty) rethrow;
     }
 
-    return batch1.streams;
+    return allCollectedStreams;
   }
 }

@@ -86,6 +86,8 @@ class _StreamSelectorDialog extends StatefulWidget {
 
 class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
   bool _isLoading = true;
+  bool _isBackendFallback = false;
+  String? _backendFallbackReason;
   String _statusMessage = 'Connecting to scrapers...';
   int _stage = 0; // 0: Scraping, 1: Health Gate, 2: Speed Probing
   int _stage1Current = 0;
@@ -108,6 +110,8 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
   void _startFetching({bool isRetry = false}) async {
     setState(() {
       _isLoading = true;
+      _isBackendFallback = false;
+      _backendFallbackReason = null;
       _fatalError = null;
       _stage = 0;
       _stage1Current = 0;
@@ -158,6 +162,13 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
           if (!mounted) return;
           setState(() {
             _providerStatuses[provider] = (status: status, count: count);
+          });
+        },
+        onBackendFallback: (reason) {
+          if (!mounted) return;
+          setState(() {
+            _isBackendFallback = true;
+            _backendFallbackReason = reason;
           });
         },
       );
@@ -377,6 +388,48 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
                 ),
               ],
             ),
+            if (_isBackendFallback) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: TVTheme.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: TVTheme.primary.withValues(alpha: 0.6), width: 1.5),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_sync, size: 20, color: TVTheme.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'FALLING BACK TO BACKEND SERVER',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                              color: TVTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _backendFallbackReason != null
+                                ? '$_backendFallbackReason. Querying server-side scrapers...'
+                                : 'No client streams found. Querying server-side scrapers...',
+                            style: const TextStyle(fontSize: 12, color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             if (_fatalError != null) ...[
               Text(

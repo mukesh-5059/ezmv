@@ -154,24 +154,15 @@ class StreamPriorityCalculator {
     bool prioritizeAudio = true,
   }) {
     int score = 100;
-    final pLow = provider.toLowerCase();
-    if (pLow.contains('hdhub')) {
-      score -= 70;
-    } else if (pLow.contains('plaviohd')) {
-      score -= 20;
-    } else if (pLow.contains('penguplay')) {
-      score -= 10;
-    }
 
     if (host != null && host.isNotEmpty) {
       final hLow = host.toLowerCase();
       if (hLow.contains('pixeldrain') ||
           hLow.contains('googleusercontent') ||
           hLow.contains('hubcloud') ||
-          (hLow.contains('workers.dev') && !hLow.contains('notorrent'))) {
+          hLow.contains('workers.dev')) {
         score -= 15;
-      } else if (hLow.contains('notorrent') ||
-          hLow.contains('vidvault') ||
+      } else if (hLow.contains('vidvault') ||
           hLow.contains('streamtape') ||
           hLow.contains('dood')) {
         score += 20;

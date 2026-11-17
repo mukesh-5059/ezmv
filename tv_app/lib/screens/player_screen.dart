@@ -887,6 +887,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         onProgress: (msg) {
           if (mounted) _hudController.triggerInfo(msg);
         },
+        onBackendFallback: (reason) {
+          if (mounted) _hudController.triggerInfo('Falling back to backend server ($reason)...');
+        },
       );
       if (!mounted) return;
       if (streams.isNotEmpty) {
