@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
 import '../widgets/tv_focus_button.dart';
+import '../widgets/tv_keyboard_dialog.dart';
 import '../widgets/tv_shortcuts.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -13,7 +14,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  int _selectedCategory = 0; // 0: Audio & Subs, 1: Stream Ranking, 2: Cache & Storage, 3: Server Endpoint
+  int _selectedCategory = 0;
 
   String _preferredAudio = 'Tamil';
   String _preferredSubtitle = 'English';
@@ -27,18 +28,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _categories.length,
     (_) => FocusNode(),
   );
-  final FocusNode _firstSettingFocus = FocusNode();
-  final FocusNode _serverInputFocusNode = FocusNode();
-  final FocusNode _saveServerButtonFocus = FocusNode();
-  final FocusNode _resetServerButtonFocus = FocusNode();
-  final FocusNode _repoInputFocusNode = FocusNode();
+
+  final FocusNode _audioFocusNode = FocusNode();
+  final FocusNode _subFocusNode = FocusNode();
+
+  final FocusNode _qualityFocusNode = FocusNode();
+  final FocusNode _fileSizeFocusNode = FocusNode();
+  final FocusNode _prioAudioFocusNode = FocusNode();
+
+  final FocusNode _repoUrlTileFocus = FocusNode();
   final FocusNode _syncRepoButtonFocus = FocusNode();
-  final FocusNode _saveRepoButtonFocus = FocusNode();
   final FocusNode _resetRepoButtonFocus = FocusNode();
   final FocusNode _resetOverridesButtonFocus = FocusNode();
+  final Map<String, FocusNode> _sourceFocusNodes = {};
+
+  final FocusNode _clearHistoryFocusNode = FocusNode();
+  final FocusNode _clearCacheFocusNode = FocusNode();
+  final FocusNode _resetAllFocusNode = FocusNode();
+
+  final FocusNode _serverEndpointTileFocus = FocusNode();
+  final FocusNode _resetServerButtonFocus = FocusNode();
+
   final FocusNode _backButtonFocus = FocusNode();
 
-  final Map<String, FocusNode> _sourceFocusNodes = {};
   String? _lastRepoSyncTime;
   List<Map<String, dynamic>> _installedSources = [];
   bool _isSyncingRepo = false;
@@ -57,6 +69,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_lastFocusedTarget == toTarget) return;
     debugPrint('[TV-NAV][Settings] Focus: from [$_lastFocusedTarget] -> to [$toTarget]');
     _lastFocusedTarget = toTarget;
+  }
+
+  void _ensureItemVisible(BuildContext ctx) {
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.5,
+      duration: TVTheme.focusDuration,
+      curve: TVTheme.focusCurve,
+    );
   }
 
   FocusNode _getSourceFocusNode(String id) {
@@ -78,75 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     debugPrint('[TV-NAV][Settings] Screen mounted, initializing settings');
-    _serverInputFocusNode.addListener(_onServerInputFocus);
-    _serverInputFocusNode.onKeyEvent = _handleServerInputKeyEvent;
-    _repoInputFocusNode.addListener(_onRepoInputFocus);
-    _repoInputFocusNode.onKeyEvent = _handleRepoInputKeyEvent;
     _loadSettings();
-  }
-
-  void _onServerInputFocus() {
-    if (_serverInputFocusNode.hasFocus) {
-      _logFocusTransition('Input: Backend API Base URL');
-    }
-  }
-
-  void _onRepoInputFocus() {
-    if (_repoInputFocusNode.hasFocus) {
-      _logFocusTransition('Input: Scraper Repository URL');
-    }
-  }
-
-  KeyEventResult _handleRepoInputKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.escape ||
-          event.logicalKey == LogicalKeyboardKey.goBack) {
-        debugPrint('[TV-NAV][Settings] Back/Escape key in Repo URL field -> returning to Category nav');
-        node.unfocus();
-        _categoryFocusNodes[_selectedCategory].requestFocus();
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        debugPrint('[TV-NAV][Settings] D-pad Down from [Input: Scraper Repo URL] -> Sync button');
-        _syncRepoButtonFocus.requestFocus();
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        if (_repoController.selection.baseOffset <= 0) {
-          debugPrint('[TV-NAV][Settings] D-pad Left from [Input: Scraper Repo URL] -> back to Category nav');
-          node.unfocus();
-          _categoryFocusNodes[_selectedCategory].requestFocus();
-          return KeyEventResult.handled;
-        }
-      }
-    }
-    return KeyEventResult.ignored;
-  }
-
-  KeyEventResult _handleServerInputKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.escape ||
-          event.logicalKey == LogicalKeyboardKey.goBack) {
-        debugPrint('[TV-NAV][Settings] Back/Escape key in TextField -> returning to Category nav');
-        node.unfocus();
-        _categoryFocusNodes[_selectedCategory].requestFocus();
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        debugPrint('[TV-NAV][Settings] D-pad Down from [Input: Backend API Base URL] -> Save button');
-        _saveServerButtonFocus.requestFocus();
-        return KeyEventResult.handled;
-      }
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        if (_ipController.selection.baseOffset <= 0) {
-          debugPrint('[TV-NAV][Settings] D-pad Left from [Input: Backend API Base URL] -> back to Category nav');
-          node.unfocus();
-          _categoryFocusNodes[_selectedCategory].requestFocus();
-          return KeyEventResult.handled;
-        }
-      }
-    }
-    return KeyEventResult.ignored;
   }
 
   Future<void> _loadSettings() async {
@@ -185,29 +138,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     debugPrint('[TV-NAV][Settings] Disposing SettingsScreen');
-    _serverInputFocusNode.removeListener(_onServerInputFocus);
-    _serverInputFocusNode.dispose();
-    _repoInputFocusNode.removeListener(_onRepoInputFocus);
-    _repoInputFocusNode.dispose();
     _ipController.dispose();
     _repoController.dispose();
+    _audioFocusNode.dispose();
+    _subFocusNode.dispose();
+    _qualityFocusNode.dispose();
+    _fileSizeFocusNode.dispose();
+    _prioAudioFocusNode.dispose();
+    _repoUrlTileFocus.dispose();
     _syncRepoButtonFocus.dispose();
-    _saveRepoButtonFocus.dispose();
     _resetRepoButtonFocus.dispose();
     _resetOverridesButtonFocus.dispose();
+    _clearHistoryFocusNode.dispose();
+    _clearCacheFocusNode.dispose();
+    _resetAllFocusNode.dispose();
+    _serverEndpointTileFocus.dispose();
+    _resetServerButtonFocus.dispose();
     for (final node in _sourceFocusNodes.values) {
       node.dispose();
     }
     for (final node in _categoryFocusNodes) {
       node.dispose();
     }
-    _firstSettingFocus.dispose();
-    _saveServerButtonFocus.dispose();
-    _resetServerButtonFocus.dispose();
     _backButtonFocus.dispose();
     _navScopeNode.dispose();
     _contentScopeNode.dispose();
     super.dispose();
+  }
+
+  void _focusFirstContentItem(int categoryIndex) {
+    FocusNode target;
+    switch (categoryIndex) {
+      case 0:
+        target = _audioFocusNode;
+        break;
+      case 1:
+        target = _qualityFocusNode;
+        break;
+      case 2:
+        target = _repoUrlTileFocus;
+        break;
+      case 3:
+        target = _clearHistoryFocusNode;
+        break;
+      case 4:
+      default:
+        target = _serverEndpointTileFocus;
+        break;
+    }
+    _contentScopeNode.requestFocus();
+    target.requestFocus();
+  }
+
+  void _enterCurrentCategory() {
+    _focusFirstContentItem(_selectedCategory);
   }
 
   Future<void> _saveRepoUrl() async {
@@ -221,7 +205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _resetRepoUrl() async {
     await AppSettingsService.instance.resetScraperRepoUrl();
-    _repoController.text = AppSettingsService.defaultRepoUrl;
+    setState(() => _repoController.text = AppSettingsService.defaultRepoUrl);
     debugPrint('[TV-SETTINGS][Repo] Repo URL reset to default');
     _showFeedback('Repository URL reset to default.');
   }
@@ -229,38 +213,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _syncExtensions() async {
     if (_isSyncingRepo) return;
     setState(() => _isSyncingRepo = true);
-    debugPrint('[TV-SETTINGS][Sync] Syncing extensions from ${_repoController.text}');
-    _showFeedback('Fetching scraper extensions and router manifest...');
-    final result = await SourceOrchestrator.syncRemoteRepo();
-    final sources = await AppSettingsService.instance.getInstalledSources(
-      fallbackConfig: SourceOrchestrator.defaultSourcesConfig,
-    );
-    final lastSync = await AppSettingsService.instance.getLastRepoSyncTime();
-    if (mounted) {
-      setState(() {
-        _isSyncingRepo = false;
-        _installedSources = sources;
-        _lastRepoSyncTime = lastSync;
-      });
-      _showFeedback(result.message);
+    _showFeedback('Syncing extensions manifest...');
+
+    try {
+      debugPrint('[TV-SETTINGS][Sync] Syncing extensions from ${_repoController.text}');
+      final result = await SourceOrchestrator.syncRemoteRepo();
+      if (!mounted) return;
+
+      if (result.success) {
+        final lastSync = await AppSettingsService.instance.getLastRepoSyncTime();
+        final sources = await AppSettingsService.instance.getInstalledSources(
+          fallbackConfig: SourceOrchestrator.defaultSourcesConfig,
+        );
+        setState(() {
+          _lastRepoSyncTime = lastSync;
+          _installedSources = sources;
+          _isSyncingRepo = false;
+        });
+        _showFeedback('Sync completed! ${_installedSources.length} sources updated.');
+      } else {
+        setState(() => _isSyncingRepo = false);
+        _showFeedback('Sync failed: ${result.message}');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSyncingRepo = false);
+      _showFeedback('Error syncing: $e');
     }
   }
 
   Future<void> _toggleSource(String id, bool currentVal, String name) async {
-    final nextVal = !currentVal;
-    debugPrint('[TV-SETTINGS][Source] Toggling $name ($id): $currentVal -> $nextVal');
-    await AppSettingsService.instance.setSourceEnabled(id, nextVal);
-    final sources = await AppSettingsService.instance.getInstalledSources(
-      fallbackConfig: SourceOrchestrator.defaultSourcesConfig,
-    );
-    if (mounted) {
-      setState(() => _installedSources = sources);
-      _showFeedback('$name: ${nextVal ? "ENABLED" : "DISABLED"}');
-    }
+    final newVal = !currentVal;
+    debugPrint('[TV-SETTINGS][Sources] Toggling source $id ($name): $currentVal -> $newVal');
+    await AppSettingsService.instance.setSourceEnabled(id, newVal);
+
+    setState(() {
+      final idx = _installedSources.indexWhere((s) => s['id'] == id);
+      if (idx != -1) {
+        _installedSources[idx]['enabled'] = newVal;
+      }
+    });
+
+    _showFeedback('${newVal ? "Enabled" : "Disabled"} $name');
   }
 
   Future<void> _resetAllOverrides() async {
-    debugPrint('[TV-SETTINGS][Source] Resetting all source overrides');
+    debugPrint('[TV-SETTINGS][Sources] Resetting all source overrides');
     await AppSettingsService.instance.resetSourceOverrides();
     final sources = await AppSettingsService.instance.getInstalledSources(
       fallbackConfig: SourceOrchestrator.defaultSourcesConfig,
@@ -298,7 +296,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _resetServerEndpoint() async {
     await StorageService.instance.resetApiBaseUrl();
     ApiClient.instance = ApiClient();
-    _ipController.text = ApiClient.defaultBaseUrl;
+    setState(() => _ipController.text = ApiClient.defaultBaseUrl);
     debugPrint('[TV-SETTINGS][Server] Base URL reset to default: ${ApiClient.defaultBaseUrl}');
     _showFeedback('Server URL reset to default.');
   }
@@ -331,11 +329,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text(
                     'Settings',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                   Text(
-                    'EzMV TV Preferences',
-                    style: TextStyle(fontSize: 11, color: TVTheme.textMuted),
+                    'Preferences & System',
+                    style: TextStyle(fontSize: 11, color: TVTheme.textSecondary),
                   ),
                 ],
               ),
@@ -365,16 +368,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (f) _logFocusTransition('Button: Exit Settings');
             },
             onKeyEvent: (node, event) {
-              if (event is KeyDownEvent) {
+              if (event is KeyDownEvent || event is KeyRepeatEvent) {
                 if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
                   debugPrint('[TV-NAV][Settings] D-pad Right from [Button: Exit Settings] -> moving to setting options');
-                  if (_selectedCategory == 2) {
-                    _repoInputFocusNode.requestFocus();
-                  } else if (_selectedCategory == 4) {
-                    _serverInputFocusNode.requestFocus();
-                  } else {
-                    _firstSettingFocus.requestFocus();
-                  }
+                  _enterCurrentCategory();
                   return KeyEventResult.handled;
                 }
                 if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
@@ -402,85 +399,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final isSelected = _selectedCategory == index;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Focus(
-        focusNode: focusNode,
-        onFocusChange: (f) {
-          if (f) {
-            _logFocusTransition('Category: ${category.title}');
-            setState(() => _selectedCategory = index);
-          }
-        },
-        onKeyEvent: (node, event) {
-          if (event is KeyDownEvent) {
-            if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-              debugPrint('[TV-NAV][Settings] D-pad Right from [Category: ${category.title}] -> moving to setting options');
-              if (index == 2) {
-                _repoInputFocusNode.requestFocus();
-              } else if (index == 4) {
-                _serverInputFocusNode.requestFocus();
-              } else {
-                _firstSettingFocus.requestFocus();
+      child: Builder(
+        builder: (ctx) {
+          return Focus(
+            focusNode: focusNode,
+            onFocusChange: (f) {
+              if (f) {
+                _logFocusTransition('Category: ${category.title}');
+                _ensureItemVisible(ctx);
               }
-              return KeyEventResult.handled;
-            }
-          }
-          return KeyEventResult.ignored;
-        },
-        child: Builder(
-          builder: (ctx) {
-            final isFocused = Focus.of(ctx).hasFocus;
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: isFocused
-                    ? TVTheme.primary
-                    : isSelected
-                        ? TVTheme.surfaceElevated
-                        : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isFocused ? Colors.white : (isSelected ? TVTheme.primary.withValues(alpha: 0.5) : Colors.transparent),
-                  width: isFocused ? 2 : 1,
+            },
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent || event is KeyRepeatEvent) {
+                if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
+                  debugPrint('[TV-NAV][Settings] Select category: ${category.title}');
+                  setState(() => _selectedCategory = index);
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                  debugPrint('[TV-NAV][Settings] D-pad Right on category [${category.title}] -> entering currently open content');
+                  _enterCurrentCategory();
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowDown && index == _categories.length - 1) {
+                  _backButtonFocus.requestFocus();
+                  return KeyEventResult.handled;
+                }
+              }
+              return KeyEventResult.ignored;
+            },
+            child: GestureDetector(
+              onTap: () {
+                setState(() => _selectedCategory = index);
+              },
+              child: Builder(
+                builder: (innerCtx) {
+                  final isFocused = Focus.of(innerCtx).hasFocus;
+                  return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isFocused
+                      ? TVTheme.primary
+                      : isSelected
+                          ? TVTheme.surfaceElevated
+                          : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isFocused
+                        ? Colors.white
+                        : (isSelected ? TVTheme.primary.withValues(alpha: 0.5) : Colors.transparent),
+                    width: isFocused ? 2 : 1,
+                  ),
                 ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    category.icon,
-                    size: 20,
-                    color: isFocused ? Colors.white : (isSelected ? TVTheme.primary : TVTheme.textMuted),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          category.title,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: isFocused || isSelected ? FontWeight.bold : FontWeight.w600,
-                            color: isFocused || isSelected ? Colors.white : TVTheme.textSecondary,
-                          ),
-                        ),
-                        Text(
-                          category.subtitle,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: isFocused ? Colors.white70 : TVTheme.textMuted,
-                          ),
-                        ),
-                      ],
+                child: Row(
+                  children: [
+                    Icon(
+                      category.icon,
+                      size: 20,
+                      color: isFocused
+                          ? Colors.white
+                          : (isSelected ? TVTheme.primary : TVTheme.textSecondary),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            category.title,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isFocused || isSelected ? Colors.white : TVTheme.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            category.subtitle,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isFocused ? Colors.white70 : TVTheme.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
-      ),
-    );
-  }
+      );
+    },
+  ),
+);
+}
 
   Widget _buildCycleOptionTile({
     required String title,
@@ -490,89 +504,94 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<String> onChanged,
     FocusNode? focusNode,
   }) {
-    return Focus(
-      focusNode: focusNode,
-      onFocusChange: (f) {
-        if (f) _logFocusTransition('Setting: $title ($currentValue)');
-      },
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            _categoryFocusNodes[_selectedCategory].requestFocus();
-            debugPrint('[TV-NAV][Settings] D-pad Left from [Setting: $title] -> back to Category nav');
-            return KeyEventResult.handled;
-          }
-          if (TvShortcuts.isActivateKey(event.logicalKey) || event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            final idx = options.indexOf(currentValue);
-            final next = options[(idx + 1) % options.length];
-            debugPrint('[TV-SETTINGS] Cycled [$title]: $currentValue -> $next');
-            onChanged(next);
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (ctx) {
-          final isFocused = Focus.of(ctx).hasFocus;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isFocused ? TVTheme.primary : Colors.white12,
-                width: isFocused ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        subtitle,
-                        style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                  decoration: BoxDecoration(
+    return Builder(
+      builder: (ctx) {
+        return Focus(
+          focusNode: focusNode,
+          onFocusChange: (f) {
+            if (f) {
+              _logFocusTransition('Setting: $title ($currentValue)');
+              _ensureItemVisible(ctx);
+            }
+          },
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent || event is KeyRepeatEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                _categoryFocusNodes[_selectedCategory].requestFocus();
+                debugPrint('[TV-NAV][Settings] D-pad Left from [Setting: $title] -> back to Category nav');
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && (TvShortcuts.isActivateKey(event.logicalKey) || event.logicalKey == LogicalKeyboardKey.arrowRight)) {
+                final idx = options.indexOf(currentValue);
+                final next = options[(idx + 1) % options.length];
+                debugPrint('[TV-SETTINGS] Cycled [$title]: $currentValue -> $next');
+                onChanged(next);
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (innerCtx) {
+              final isFocused = Focus.of(innerCtx).hasFocus;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
                     color: isFocused ? TVTheme.primary : Colors.white12,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: isFocused ? Colors.white30 : Colors.white12,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.chevron_left, size: 16, color: Colors.white70),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Text(
-                          currentValue,
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                      ),
-                      const Icon(Icons.chevron_right, size: 16, color: Colors.white70),
-                    ],
+                    width: isFocused ? 2 : 1,
                   ),
                 ),
-              ],
-            ),
-          );
-        },
-      ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: isFocused ? TVTheme.primary : Colors.white12,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            currentValue,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.white70),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -583,78 +602,260 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required ValueChanged<bool> onChanged,
     FocusNode? focusNode,
   }) {
-    return Focus(
-      focusNode: focusNode,
-      onFocusChange: (f) {
-        if (f) _logFocusTransition('Toggle: $title (${value ? "ON" : "OFF"})');
+    return Builder(
+      builder: (ctx) {
+        return Focus(
+          focusNode: focusNode,
+          onFocusChange: (f) {
+            if (f) {
+              _logFocusTransition('Toggle: $title (${value ? "ON" : "OFF"})');
+              _ensureItemVisible(ctx);
+            }
+          },
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent || event is KeyRepeatEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                _categoryFocusNodes[_selectedCategory].requestFocus();
+                debugPrint('[TV-NAV][Settings] D-pad Left from [Toggle: $title] -> back to Category nav');
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && (TvShortcuts.isActivateKey(event.logicalKey) || event.logicalKey == LogicalKeyboardKey.arrowRight)) {
+                debugPrint('[TV-SETTINGS] Toggled [$title]: $value -> ${!value}');
+                onChanged(!value);
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (innerCtx) {
+              final isFocused = Focus.of(innerCtx).hasFocus;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isFocused ? TVTheme.primary : Colors.white12,
+                    width: isFocused ? 2 : 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: value ? (isFocused ? TVTheme.primary : Colors.green.shade800) : Colors.white12,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            value ? Icons.check : Icons.close,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            value ? 'ON' : 'OFF',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
       },
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            _categoryFocusNodes[_selectedCategory].requestFocus();
-            debugPrint('[TV-NAV][Settings] D-pad Left from [Toggle: $title] -> back to Category nav');
-            return KeyEventResult.handled;
-          }
-          if (TvShortcuts.isActivateKey(event.logicalKey) || event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            debugPrint('[TV-SETTINGS] Toggled [$title]: $value -> ${!value}');
-            onChanged(!value);
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (ctx) {
-          final isFocused = Focus.of(ctx).hasFocus;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isFocused ? TVTheme.primary : Colors.white12,
-                width: isFocused ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
+    );
+  }
+
+  Widget _buildTextInputTile({
+    required String title,
+    required String subtitle,
+    required String value,
+    required FocusNode focusNode,
+    required VoidCallback onEdit,
+    String? badge,
+    FocusNode? downFocusNode,
+    FocusNode? upFocusNode,
+    FocusNode? rightFocusNode,
+  }) {
+    return Builder(
+      builder: (ctx) {
+        return Focus(
+          focusNode: focusNode,
+          onFocusChange: (f) {
+            if (f) {
+              _logFocusTransition('InputTile: $title');
+              _ensureItemVisible(ctx);
+            }
+          },
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent || event is KeyRepeatEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                _categoryFocusNodes[_selectedCategory].requestFocus();
+                debugPrint('[TV-NAV][Settings] D-pad Left from [InputTile: $title] -> back to Category nav');
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowDown && downFocusNode != null) {
+                downFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp && upFocusNode != null) {
+                upFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight && rightFocusNode != null) {
+                rightFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
+                onEdit();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (innerCtx) {
+              final isFocused = Focus.of(innerCtx).hasFocus;
+              return GestureDetector(
+                onTap: onEdit,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isFocused ? TVTheme.primary : Colors.white12,
+                      width: isFocused ? 2 : 1,
+                    ),
+                    boxShadow: isFocused ? TVTheme.focusShadows : null,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (badge != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: TVTheme.surfaceElevated,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.white24),
+                                  ),
+                                  child: Text(
+                                    badge,
+                                    style: const TextStyle(fontSize: 11, color: TVTheme.textSecondary),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: isFocused ? TVTheme.primary : Colors.white12,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.edit,
+                                      size: 14,
+                                      color: isFocused ? Colors.white : TVTheme.textSecondary,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Edit',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: isFocused ? Colors.white : TVTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 5),
+                      const SizedBox(height: 6),
                       Text(
                         subtitle,
                         style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
                       ),
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isFocused ? TVTheme.primary.withValues(alpha: 0.6) : Colors.white10,
+                          ),
+                        ),
+                        child: Text(
+                          value.isNotEmpty ? value : 'Not configured',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            color: value.isNotEmpty ? Colors.white : TVTheme.textMuted,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: value ? TVTheme.primary : Colors.white12,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    value ? 'ON' : 'OFF',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: value ? Colors.white : TVTheme.textMuted,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -667,76 +868,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
     bool isDestructive = false,
     FocusNode? focusNode,
   }) {
-    return Focus(
-      focusNode: focusNode,
-      onFocusChange: (f) {
-        if (f) _logFocusTransition('Action: $title [$buttonLabel]');
-      },
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            _categoryFocusNodes[_selectedCategory].requestFocus();
-            debugPrint('[TV-NAV][Settings] D-pad Left from [Action: $title] -> back to Category nav');
-            return KeyEventResult.handled;
-          }
-          if (TvShortcuts.isActivateKey(event.logicalKey)) {
-            debugPrint('[TV-SETTINGS] Action triggered: [$title]');
-            onAction();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (ctx) {
-          final isFocused = Focus.of(ctx).hasFocus;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isFocused ? (isDestructive ? Colors.redAccent : TVTheme.primary) : Colors.white12,
-                width: isFocused ? 2 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        subtitle,
-                        style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
-                      ),
-                    ],
+    return Builder(
+      builder: (ctx) {
+        return Focus(
+          focusNode: focusNode,
+          onFocusChange: (f) {
+            if (f) {
+              _logFocusTransition('Action: $title [$buttonLabel]');
+              _ensureItemVisible(ctx);
+            }
+          },
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent || event is KeyRepeatEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                _categoryFocusNodes[_selectedCategory].requestFocus();
+                debugPrint('[TV-NAV][Settings] D-pad Left from [Action: $title] -> back to Category nav');
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
+                debugPrint('[TV-SETTINGS] Action triggered: [$title]');
+                onAction();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (innerCtx) {
+              final isFocused = Focus.of(innerCtx).hasFocus;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isFocused ? (isDestructive ? Colors.redAccent : TVTheme.primary) : Colors.white12,
+                    width: isFocused ? 2 : 1,
                   ),
                 ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isFocused
-                        ? (isDestructive ? Colors.red.shade900 : TVTheme.primary)
-                        : Colors.white12,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                  ),
-                  onPressed: onAction,
-                  icon: Icon(icon, size: 16),
-                  label: Text(buttonLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(fontSize: 12, color: TVTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      focusNode: FocusNode(canRequestFocus: false),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isFocused
+                            ? (isDestructive ? Colors.red.shade900 : TVTheme.primary)
+                            : Colors.white12,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      ),
+                      onPressed: onAction,
+                      icon: Icon(icon, size: 16),
+                      label: Text(buttonLabel, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -754,86 +963,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
     FocusNode? upFocusNode,
   }) {
     final displayLabel = label ?? tooltip ?? 'Action';
-    return Focus(
-      focusNode: focusNode,
-      onFocusChange: (f) {
-        if (f) _logFocusTransition('Button: $displayLabel');
-      },
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            if (leftFocusNode != null) {
-              debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $displayLabel] -> previous button');
-              leftFocusNode.requestFocus();
-              return KeyEventResult.handled;
-            } else if (escapeToCategoryOnLeft) {
-              debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $displayLabel] -> back to Category nav');
-              _categoryFocusNodes[_selectedCategory].requestFocus();
-              return KeyEventResult.handled;
+    return Builder(
+      builder: (ctx) {
+        return Focus(
+          focusNode: focusNode,
+          onFocusChange: (f) {
+            if (f) {
+              _logFocusTransition('Button: $displayLabel');
+              _ensureItemVisible(ctx);
             }
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowRight && rightFocusNode != null) {
-            debugPrint('[TV-NAV][Settings] D-pad Right from [Button: $displayLabel] -> next button');
-            rightFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown && downFocusNode != null) {
-            debugPrint('[TV-NAV][Settings] D-pad Down from [Button: $displayLabel] -> below');
-            downFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp && upFocusNode != null) {
-            debugPrint('[TV-NAV][Settings] D-pad Up from [Button: $displayLabel] -> above');
-            upFocusNode.requestFocus();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (ctx) {
-          final isFocused = Focus.of(ctx).hasFocus;
-          if (label == null || label.isEmpty) {
-            return Tooltip(
-              message: tooltip ?? displayLabel,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isFocused
-                      ? TVTheme.primary
-                      : (isPrimary ? TVTheme.primary.withValues(alpha: 0.8) : TVTheme.surfaceElevated),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.all(10),
-                  minimumSize: const Size(40, 40),
-                  side: BorderSide(
-                    color: isFocused ? Colors.white : Colors.transparent,
-                    width: isFocused ? 2 : 1,
+          },
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent || event is KeyRepeatEvent) {
+              if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
+                debugPrint('[TV-SETTINGS][Action] Activating button: $displayLabel');
+                onPressed();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                if (leftFocusNode != null) {
+                  debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $displayLabel] -> previous button');
+                  leftFocusNode.requestFocus();
+                  return KeyEventResult.handled;
+                } else if (escapeToCategoryOnLeft) {
+                  debugPrint('[TV-NAV][Settings] D-pad Left from [Button: $displayLabel] -> back to Category nav');
+                  _categoryFocusNodes[_selectedCategory].requestFocus();
+                  return KeyEventResult.handled;
+                }
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowRight && rightFocusNode != null) {
+                debugPrint('[TV-NAV][Settings] D-pad Right from [Button: $displayLabel] -> next button');
+                rightFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowDown && downFocusNode != null) {
+                debugPrint('[TV-NAV][Settings] D-pad Down from [Button: $displayLabel] -> below');
+                downFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp && upFocusNode != null) {
+                debugPrint('[TV-NAV][Settings] D-pad Up from [Button: $displayLabel] -> above');
+                upFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (innerCtx) {
+              final isFocused = Focus.of(innerCtx).hasFocus;
+              return GestureDetector(
+                onTap: onPressed,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: EdgeInsets.symmetric(horizontal: label != null ? 14 : 10, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: isFocused
+                        ? Colors.white
+                        : (isPrimary ? TVTheme.primary : TVTheme.surfaceElevated),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: isFocused ? Colors.white : Colors.white24,
+                      width: isFocused ? 2 : 1,
+                    ),
+                    boxShadow: isFocused ? TVTheme.focusShadows : null,
                   ),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon,
+                        size: 16,
+                        color: isFocused
+                            ? Colors.black
+                            : (isPrimary ? Colors.white : Colors.white70),
+                      ),
+                      if (label != null) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: isFocused
+                                ? Colors.black
+                                : (isPrimary ? Colors.white : Colors.white70),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-                onPressed: onPressed,
-                child: Icon(icon, size: 18),
-              ),
-            );
-          }
-          return ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isFocused
-                  ? TVTheme.primary
-                  : (isPrimary ? TVTheme.primary.withValues(alpha: 0.8) : TVTheme.surfaceElevated),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              side: BorderSide(
-                color: isFocused ? Colors.white : Colors.transparent,
-                width: isFocused ? 2 : 1,
-              ),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            ),
-            onPressed: onPressed,
-            icon: Icon(icon, size: 16),
-            label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -845,131 +1071,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final scriptOrUrl = isExtractor ? (source['script_url'] ?? '') : (source['manifest_url'] ?? '');
     final node = _getSourceFocusNode(id);
 
-    return Focus(
-      focusNode: node,
-      onFocusChange: (f) {
-        if (f) _logFocusTransition('Source: $name (${isEnabled ? "ON" : "OFF"})');
-      },
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            debugPrint('[TV-NAV][Settings] D-pad Left from [Source: $name] -> back to Category nav');
-            _categoryFocusNodes[_selectedCategory].requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
-              _installedSources.isNotEmpty &&
-              id == _installedSources.first['id']?.toString()) {
-            debugPrint('[TV-NAV][Settings] D-pad Up from first source -> Reset Overrides button');
-            _resetOverridesButtonFocus.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (TvShortcuts.isActivateKey(event.logicalKey)) {
-            _toggleSource(id, isEnabled, name);
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Builder(
-        builder: (ctx) {
-          final isFocused = Focus.of(ctx).hasFocus;
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: isFocused ? TVTheme.primary : (isEnabled ? Colors.white12 : Colors.white10),
-                width: isFocused ? 2 : 1,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+    return Builder(
+      builder: (ctx) {
+        return Focus(
+          focusNode: node,
+          onFocusChange: (f) {
+            if (f) {
+              _logFocusTransition('Source: $name (${isEnabled ? "ON" : "OFF"})');
+              _ensureItemVisible(ctx);
+            }
+          },
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent || event is KeyRepeatEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                debugPrint('[TV-NAV][Settings] D-pad Left from [Source: $name] -> back to Category nav');
+                _categoryFocusNodes[_selectedCategory].requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp &&
+                  _installedSources.isNotEmpty &&
+                  id == _installedSources.first['id']?.toString()) {
+                debugPrint('[TV-NAV][Settings] D-pad Up from first source -> Reset Overrides button');
+                _resetOverridesButtonFocus.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (event is KeyDownEvent && TvShortcuts.isActivateKey(event.logicalKey)) {
+                _toggleSource(id, isEnabled, name);
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Builder(
+            builder: (innerCtx) {
+              final isFocused = Focus.of(innerCtx).hasFocus;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: isFocused ? TVTheme.surfaceElevated : TVTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isFocused ? TVTheme.primary : (isEnabled ? Colors.white12 : Colors.white10),
+                    width: isFocused ? 2 : 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      isExtractor ? Icons.javascript : Icons.hub,
-                      size: 20,
-                      color: isFocused ? TVTheme.primary : (isEnabled ? Colors.white70 : TVTheme.textMuted),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                    Row(
+                      children: [
+                        Icon(
+                          isExtractor ? Icons.javascript : Icons.hub,
+                          size: 20,
+                          color: isFocused ? TVTheme.primary : (isEnabled ? Colors.white70 : TVTheme.textMuted),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                name,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: isEnabled ? Colors.white : TVTheme.textMuted,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: isExtractor
-                                      ? Colors.orange.shade900.withValues(alpha: 0.4)
-                                      : Colors.blue.shade900.withValues(alpha: 0.4),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  isExtractor ? 'QuickJS' : 'Addon',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: isExtractor ? Colors.orangeAccent : Colors.lightBlueAccent,
+                              Row(
+                                children: [
+                                  Text(
+                                    name,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: isEnabled ? Colors.white : TVTheme.textMuted,
+                                    ),
                                   ),
-                                ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white10,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      isExtractor ? 'QuickJS' : 'Addon',
+                                      style: const TextStyle(fontSize: 10, color: TVTheme.textSecondary),
+                                    ),
+                                  ),
+                                ],
                               ),
+                              if (scriptOrUrl.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  scriptOrUrl,
+                                  style: const TextStyle(fontSize: 11, color: TVTheme.textMuted),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
                             ],
                           ),
-                          const SizedBox(height: 3),
-                          Text(
-                            'ID: $id • $scriptOrUrl',
-                            style: const TextStyle(fontSize: 11, color: TVTheme.textMuted),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: isEnabled ? TVTheme.primary : Colors.white10,
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(
-                        isEnabled ? 'ON' : 'OFF',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: isEnabled ? Colors.white : TVTheme.textMuted,
                         ),
-                      ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isEnabled ? Colors.green.shade900 : Colors.white10,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            isEnabled ? 'ON' : 'OFF',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isEnabled ? Colors.greenAccent : Colors.white38,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                if (isFocused) ...[
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Press OK to Toggle On/Off',
-                    style: TextStyle(fontSize: 11, color: Colors.white70, fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
-      ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -985,7 +1206,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildCycleOptionTile(
-              focusNode: _firstSettingFocus,
+              focusNode: _audioFocusNode,
               title: 'Preferred Audio Language',
               subtitle: 'Prioritizes audio stream tracks matching this language.',
               currentValue: _preferredAudio,
@@ -997,6 +1218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             _buildCycleOptionTile(
+              focusNode: _subFocusNode,
               title: 'Preferred Subtitle Language',
               subtitle: 'Automatically activates subtitle tracks in this language.',
               currentValue: _preferredSubtitle,
@@ -1016,7 +1238,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildCycleOptionTile(
-              focusNode: _firstSettingFocus,
+              focusNode: _qualityFocusNode,
               title: 'Target Stream Quality',
               subtitle: 'Boosts resolution tiers in the automated ranking formula.',
               currentValue: _preferredQuality.label,
@@ -1029,6 +1251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             _buildCycleOptionTile(
+              focusNode: _fileSizeFocusNode,
               title: 'File Size Target',
               subtitle: 'Prefers smaller files for quick playback or higher bitrates.',
               currentValue: _fileSizePref.label,
@@ -1041,6 +1264,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             _buildToggleTile(
+              focusNode: _prioAudioFocusNode,
               title: 'Prioritize Audio Match in Ranking',
               subtitle: 'Forces streams with your preferred audio language to top ranks.',
               value: _prioritizeAudio,
@@ -1059,105 +1283,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: TVTheme.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Scraper Repository URL',
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                      if (_lastRepoSyncTime != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: TVTheme.surfaceElevated,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          child: Text(
-                            'Last Sync: $_lastRepoSyncTime',
-                            style: const TextStyle(fontSize: 11, color: TVTheme.textSecondary),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Remote endpoint hosting sources.json manifest and QuickJS scraper extractors.',
-                    style: TextStyle(fontSize: 12, color: TVTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    focusNode: _repoInputFocusNode,
-                    controller: _repoController,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: TVTheme.surfaceElevated,
-                      hintText: AppSettingsService.defaultRepoUrl,
-                      hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Colors.white24),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: TVTheme.primary, width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 10,
-                    children: [
-                      _buildMiniActionButton(
-                        focusNode: _syncRepoButtonFocus,
-                        icon: _isSyncingRepo ? Icons.hourglass_top : Icons.sync,
-                        label: _isSyncingRepo ? 'Syncing...' : 'Sync & Update Now',
-                        isPrimary: true,
-                        escapeToCategoryOnLeft: true,
-                        rightFocusNode: _saveRepoButtonFocus,
-                        upFocusNode: _repoInputFocusNode,
-                        downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
-                        onPressed: _syncExtensions,
-                      ),
-                      _buildMiniActionButton(
-                        focusNode: _saveRepoButtonFocus,
-                        icon: Icons.save,
-                        label: 'Save Repo URL',
-                        isPrimary: false,
-                        leftFocusNode: _syncRepoButtonFocus,
-                        rightFocusNode: _resetRepoButtonFocus,
-                        upFocusNode: _repoInputFocusNode,
-                        downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
-                        onPressed: _saveRepoUrl,
-                      ),
-                      _buildMiniActionButton(
-                        focusNode: _resetRepoButtonFocus,
-                        icon: Icons.restore,
-                        label: 'Reset Repo',
-                        isPrimary: false,
-                        leftFocusNode: _saveRepoButtonFocus,
-                        upFocusNode: _repoInputFocusNode,
-                        downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
-                        onPressed: _resetRepoUrl,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+            _buildTextInputTile(
+              title: 'Scraper Repository URL',
+              subtitle: 'Remote endpoint hosting sources.json manifest and QuickJS scraper extractors.',
+              value: _repoController.text,
+              badge: _lastRepoSyncTime != null ? 'Last Sync: $_lastRepoSyncTime' : null,
+              focusNode: _repoUrlTileFocus,
+              downFocusNode: _syncRepoButtonFocus,
+              onEdit: () async {
+                final res = await TvKeyboardDialog.show(
+                  context: context,
+                  title: 'Scraper Repository URL',
+                  initialValue: _repoController.text,
+                  hintText: AppSettingsService.defaultRepoUrl,
+                  acceptLabel: 'Save',
+                  isUrl: true,
+                );
+                if (res != null) {
+                  setState(() => _repoController.text = res);
+                  await _saveRepoUrl();
+                }
+                _repoUrlTileFocus.requestFocus();
+              },
+            ),
+            Row(
+              children: [
+                _buildMiniActionButton(
+                  focusNode: _syncRepoButtonFocus,
+                  icon: _isSyncingRepo ? Icons.hourglass_top : Icons.sync,
+                  label: _isSyncingRepo ? 'Syncing...' : 'Sync & Update Now',
+                  isPrimary: true,
+                  escapeToCategoryOnLeft: true,
+                  upFocusNode: _repoUrlTileFocus,
+                  rightFocusNode: _resetRepoButtonFocus,
+                  downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
+                  onPressed: _syncExtensions,
+                ),
+                const SizedBox(width: 12),
+                _buildMiniActionButton(
+                  focusNode: _resetRepoButtonFocus,
+                  icon: Icons.restore,
+                  label: 'Reset to Default',
+                  isPrimary: false,
+                  escapeToCategoryOnLeft: false,
+                  leftFocusNode: _syncRepoButtonFocus,
+                  upFocusNode: _repoUrlTileFocus,
+                  downFocusNode: _installedSources.isNotEmpty ? _resetOverridesButtonFocus : null,
+                  onPressed: _resetRepoUrl,
+                ),
+              ],
             ),
             const SizedBox(height: 24),
             Row(
@@ -1182,7 +1356,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     focusNode: _resetOverridesButtonFocus,
                     icon: Icons.restart_alt,
                     tooltip: 'Reset Overrides',
-                    escapeToCategoryOnLeft: true,
+                    escapeToCategoryOnLeft: false,
+                    leftFocusNode: _syncRepoButtonFocus,
                     upFocusNode: _resetRepoButtonFocus,
                     downFocusNode: _installedSources.isNotEmpty
                         ? _getSourceFocusNode(_installedSources.first['id']?.toString() ?? '')
@@ -1193,8 +1368,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            for (final source in _installedSources)
-              _buildSourceCard(source),
+            if (_installedSources.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: TVTheme.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: TVTheme.textSecondary, size: 20),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'No sources loaded. Press "Sync & Update Now" to fetch scrapers from the repository.',
+                        style: TextStyle(color: TVTheme.textSecondary, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              for (final source in _installedSources)
+                _buildSourceCard(source),
           ],
         );
         break;
@@ -1204,7 +1401,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildActionTile(
-              focusNode: _firstSettingFocus,
+              focusNode: _clearHistoryFocusNode,
               title: 'Clear Continue Watching',
               subtitle: 'Resets all active playback progress and resume points.',
               buttonLabel: 'Clear History',
@@ -1217,6 +1414,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             _buildActionTile(
+              focusNode: _clearCacheFocusNode,
               title: 'Clear Scraper Scripts Cache',
               subtitle: 'Removes local cache of JS extractors and forces fresh remote pull.',
               buttonLabel: 'Purge Cache',
@@ -1229,6 +1427,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             _buildActionTile(
+              focusNode: _resetAllFocusNode,
               title: 'Reset Settings to Default',
               subtitle: 'Restores all audio, quality, endpoint, repo, and source preferences.',
               buttonLabel: 'Reset All',
@@ -1250,77 +1449,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
         content = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: TVTheme.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Backend API Base URL',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'EzMV Cloudflare Worker or local backend endpoint address.',
-                    style: TextStyle(fontSize: 12, color: TVTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    focusNode: _serverInputFocusNode,
-                    controller: _ipController,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                    onSubmitted: (_) {
-                      _saveServerEndpoint();
-                      _saveServerButtonFocus.requestFocus();
-                    },
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: TVTheme.surfaceElevated,
-                      hintText: 'https://backend-revised.mkdummy2025.workers.dev',
-                      hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Colors.white24),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: TVTheme.primary, width: 2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      _buildMiniActionButton(
-                        focusNode: _saveServerButtonFocus,
-                        icon: Icons.save,
-                        label: 'Save Server URL',
-                        isPrimary: true,
-                        escapeToCategoryOnLeft: true,
-                        rightFocusNode: _resetServerButtonFocus,
-                        upFocusNode: _serverInputFocusNode,
-                        onPressed: _saveServerEndpoint,
-                      ),
-                      const SizedBox(width: 12),
-                      _buildMiniActionButton(
-                        focusNode: _resetServerButtonFocus,
-                        icon: Icons.restore,
-                        label: 'Reset to Default',
-                        leftFocusNode: _saveServerButtonFocus,
-                        upFocusNode: _serverInputFocusNode,
-                        onPressed: _resetServerEndpoint,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+            _buildTextInputTile(
+              title: 'Backend API Base URL',
+              subtitle: 'EzMV Cloudflare Worker or local backend endpoint address.',
+              value: _ipController.text,
+              focusNode: _serverEndpointTileFocus,
+              downFocusNode: _resetServerButtonFocus,
+              onEdit: () async {
+                final res = await TvKeyboardDialog.show(
+                  context: context,
+                  title: 'Backend API Base URL',
+                  initialValue: _ipController.text,
+                  hintText: 'https://backend-revised.mkdummy2025.workers.dev',
+                  acceptLabel: 'Save',
+                  isUrl: true,
+                );
+                if (res != null) {
+                  setState(() => _ipController.text = res);
+                  await _saveServerEndpoint();
+                }
+                _serverEndpointTileFocus.requestFocus();
+              },
+            ),
+            const SizedBox(height: 12),
+            _buildMiniActionButton(
+              focusNode: _resetServerButtonFocus,
+              icon: Icons.restore,
+              label: 'Reset to Default',
+              isPrimary: false,
+              escapeToCategoryOnLeft: true,
+              upFocusNode: _serverEndpointTileFocus,
+              onPressed: _resetServerEndpoint,
             ),
           ],
         );
