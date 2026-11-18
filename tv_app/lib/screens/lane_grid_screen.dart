@@ -816,6 +816,7 @@ class _LaneGridScreenState extends State<LaneGridScreen> {
                       rating: movie.ratingScore > 0 ? movie.ratingScore : null,
                       year: movie.year.isNotEmpty ? movie.year : null,
                       isTv: movie.isTv,
+                      isCompleted: !movie.isTv && StorageService.instance.isCompletedSync(movie.imdbId),
                       width: 150,
                       height: 225,
                       showTitleBelow: false,

@@ -160,6 +160,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late String _currentProvider;
   Map<String, String>? _currentHeaders;
   List<StreamSource> _availableStreams = [];
+  Duration? _pendingResumePosition;
 
   Map<String, String> get _requestHeaders {
     return {
@@ -180,6 +181,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _currentSeason = widget.season ?? 1;
     _currentEpisode = widget.episode ?? 1;
     _seasonsList = widget.seasons ?? [];
+
+    if (widget.initialPositionSeconds > 0) {
+      _pendingResumePosition = Duration(seconds: widget.initialPositionSeconds);
+    } else if (widget.imdbId.isNotEmpty) {
+      StorageService.instance.getContinueWatchingEntry(widget.imdbId).then((entry) {
+        if (!mounted || entry == null) return;
+        if (entry.progress < 0.92 && entry.positionMs >= 10000) {
+          if (!entry.isTv || (entry.season == _currentSeason && entry.episode == _currentEpisode)) {
+            _pendingResumePosition = Duration(milliseconds: entry.positionMs);
+            if (_player.state.duration > _pendingResumePosition!) {
+              _checkAndApplyResume(_player.state.duration);
+            }
+          }
+        }
+      });
+    }
 
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -226,10 +243,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
         'stream-lavf-o',
         'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=10',
       );
-      if (widget.initialPositionSeconds > 0) {
-        p?.setProperty('start', '${widget.initialPositionSeconds}');
-      }
     } catch (_) {}
+  }
+
+  void _checkAndApplyResume(Duration dur) {
+    final target = _pendingResumePosition;
+    if (target != null && target > Duration.zero && dur > target) {
+      _pendingResumePosition = null;
+      _player.seek(target);
+      _hudController.triggerInfo(
+        'Resumed from ${_formatDuration(target.inSeconds)}',
+      );
+    }
   }
 
   void _startPlaybackWatchdog() {
@@ -255,6 +280,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (_isBuffering && !_player.state.buffering && mounted) {
             setState(() => _isBuffering = false);
           }
+          if (_pendingResumePosition != null && _player.state.duration > _pendingResumePosition!) {
+            _checkAndApplyResume(_player.state.duration);
+          }
         }
         if (_showOsd) {
           _positionNotifier.value = pos;
@@ -264,6 +292,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _subscriptions.add(
       _player.stream.duration.listen((dur) {
         _durationNotifier.value = dur;
+        _checkAndApplyResume(dur);
       }),
     );
     _subscriptions.add(
@@ -290,7 +319,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _subscriptions.add(
       _player.stream.completed.listen((completed) {
         if (completed && mounted) {
-          _saveProgress();
+          if (_player.state.duration.inMilliseconds > 30000 && widget.imdbId.isNotEmpty) {
+            final dur = _player.state.duration.inMilliseconds;
+            final entry = ContinueWatchingEntry(
+              imdbId: widget.imdbId,
+              tmdbId: widget.tmdbId,
+              title: widget.movieTitle,
+              posterPath: widget.posterPath,
+              backdropPath: widget.backdropPath,
+              mediaType: widget.mediaType,
+              season: _currentSeason,
+              episode: _currentEpisode,
+              positionMs: dur,
+              durationMs: dur,
+              updatedAt: DateTime.now(),
+              overview: widget.overview,
+              releaseDate: widget.releaseDate,
+              ratingScore: widget.ratingScore,
+              voteCount: widget.voteCount,
+              genres: widget.genres,
+              originalLanguage: widget.originalLanguage,
+            );
+            StorageService.instance.markCompleted(entry);
+          }
           _exitPlayer();
         }
       }),
@@ -315,16 +366,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         Media(
           _currentStreamUrl,
           httpHeaders: _requestHeaders,
-          start: widget.initialPositionSeconds > 0
-              ? Duration(seconds: widget.initialPositionSeconds)
-              : null,
+          start: _pendingResumePosition,
         ),
       );
 
-      if (widget.initialPositionSeconds > 0) {
-        _hudController.triggerInfo(
-          'Resumed from ${_formatDuration(widget.initialPositionSeconds)}',
-        );
+      if (_player.state.duration > Duration.zero) {
+        _checkAndApplyResume(_player.state.duration);
       }
     } catch (e) {
       if (mounted) {
@@ -422,8 +469,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         posterPath: widget.posterPath,
         backdropPath: widget.backdropPath,
         mediaType: widget.mediaType,
-        season: widget.season,
-        episode: widget.episode,
+        season: _currentSeason,
+        episode: _currentEpisode,
         positionMs: posMs,
         durationMs: durMs,
         updatedAt: DateTime.now(),
@@ -432,8 +479,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ratingScore: widget.ratingScore,
         voteCount: widget.voteCount,
         genres: widget.genres,
+        originalLanguage: widget.originalLanguage,
       );
-      StorageService.instance.saveContinueWatching(entry);
+
+      final progress = posMs / durMs;
+      if (progress >= 0.92) {
+        StorageService.instance.markCompleted(entry);
+      } else if (posMs >= 15000) {
+        StorageService.instance.saveContinueWatching(entry);
+      }
     }
   }
 
@@ -865,6 +919,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _startPlaybackWatchdog();
       // Hardware Guardrail: Stop previous pipeline cleanly before opening new stream
       await _player.stop();
+      _pendingResumePosition = pos > Duration.zero ? pos : null;
       await _player.open(
         Media(
           stream.url,
@@ -873,10 +928,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
       );
 
-      if (pos > Duration.zero) {
-        _hudController.triggerInfo('Resumed at ${_formatDuration(pos.inSeconds)}');
-      }
       _hudController.triggerInfo('Playing: ${stream.quality} (${stream.provider})');
+      if (_player.state.duration > Duration.zero) {
+        _checkAndApplyResume(_player.state.duration);
+      }
     } catch (e) {
       await _handlePlaybackFailure(e.toString());
     } finally {

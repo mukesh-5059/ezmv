@@ -228,6 +228,7 @@ class _TvMovieLaneState extends State<TvMovieLane> with AutomaticKeepAliveClient
                     title: movie.title,
                     rating: movie.ratingScore > 0 ? movie.ratingScore : null,
                     isTv: movie.isTv,
+                    isCompleted: !movie.isTv && StorageService.instance.isCompletedSync(movie.imdbId),
                     year: movie.year,
                     width: 150,
                     height: 225,

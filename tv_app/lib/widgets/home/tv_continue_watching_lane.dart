@@ -242,6 +242,7 @@ class TvContinueWatchingLaneState extends State<TvContinueWatchingLane> with Aut
                     width: 150,
                     height: 225,
                     isTv: entry.isTv,
+                    isCompleted: !entry.isTv && StorageService.instance.isCompletedSync(entry.imdbId),
                     progress: entry.progress,
                     year: subtitle,
                     showTitleBelow: true,

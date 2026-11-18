@@ -19,6 +19,7 @@ class TvFocusCard extends StatefulWidget {
   final double? rating;
   final double? progress;
   final bool isTv;
+  final bool isCompleted;
   final String? qualityBadge;
   final String? year;
   final double width;
@@ -38,6 +39,7 @@ class TvFocusCard extends StatefulWidget {
     this.rating,
     this.progress,
     this.isTv = false,
+    this.isCompleted = false,
     this.qualityBadge,
     this.year,
     this.width = 150,
@@ -298,6 +300,33 @@ class _TvFocusCardState extends State<TvFocusCard> {
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
+                        ),
+
+                      // Watched / Completed Badge (Bottom-Right)
+                      if (widget.isCompleted)
+                        Positioned(
+                          bottom: (widget.progress != null && widget.progress! > 0) ? 8 : 6,
+                          right: 6,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: TVTheme.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 1.5),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black87,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.check_rounded,
+                              size: 13,
+                              color: Colors.white,
                             ),
                           ),
                         ),

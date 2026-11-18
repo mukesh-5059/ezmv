@@ -8,6 +8,8 @@ class StorageService {
   static final StorageService instance = StorageService();
 
   static const String _continueWatchingKey = 'continue_watching_entries';
+  static const String _completedWatchingKey = 'completed_watching_entries';
+  static const String _completedSeriesKey = 'completed_series_ids';
   static const String _favoriteActorsKey = 'favorite_actor_ids';
   static const String _watchlistKey = 'user_watchlist';
   static const String _starredListsKey = 'starred_trakt_lists';
@@ -16,10 +18,140 @@ class StorageService {
 
   final SharedPreferences? _prefs;
 
+  final Set<String> _completedIds = {};
+  final Set<String> _completedEpisodes = {};
+  bool _completedCacheLoaded = false;
+
   StorageService([this._prefs]);
 
   Future<SharedPreferences> get _instance async =>
       _prefs ?? await SharedPreferences.getInstance();
+
+  // --- COMPLETED WATCHING CACHE & SYNC ACCESS ---
+
+  Future<void> ensureCompletedLoaded() async {
+    if (_completedCacheLoaded) return;
+    final prefs = await _instance;
+    final entries = await getCompletedWatching();
+    _completedIds.clear();
+    _completedEpisodes.clear();
+    for (final e in entries) {
+      if (e.imdbId.isNotEmpty) {
+        if (!e.isTv) {
+          _completedIds.add(e.imdbId);
+        }
+        if (e.isTv && e.season != null && e.episode != null) {
+          _completedEpisodes.add('${e.imdbId}:${e.season}:${e.episode}');
+        }
+      }
+    }
+    final seriesIds = prefs.getStringList(_completedSeriesKey) ?? [];
+    _completedIds.addAll(seriesIds);
+    _completedCacheLoaded = true;
+  }
+
+  bool isCompletedSync(String? imdbId) {
+    if (imdbId == null || imdbId.isEmpty) return false;
+    return _completedIds.contains(imdbId);
+  }
+
+  bool isEpisodeCompletedSync(String? imdbId, int? season, int? episode) {
+    if (imdbId == null || imdbId.isEmpty || season == null || episode == null) return false;
+    return _completedEpisodes.contains('$imdbId:$season:$episode');
+  }
+
+  Future<List<ContinueWatchingEntry>> getCompletedWatching() async {
+    final prefs = await _instance;
+    final jsonStr = prefs.getString(_completedWatchingKey);
+    if (jsonStr == null || jsonStr.isEmpty) return [];
+
+    try {
+      final decoded = json.decode(jsonStr) as List? ?? [];
+      final entries = decoded
+          .map((item) => ContinueWatchingEntry.fromJson(item as Map<String, dynamic>))
+          .toList();
+      entries.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      return entries;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> markCompleted(ContinueWatchingEntry entry) async {
+    final prefs = await _instance;
+    if (!entry.isTv) {
+      await removeContinueWatching(entry.imdbId);
+    }
+
+    final completed = await getCompletedWatching();
+    if (entry.isTv && entry.season != null && entry.episode != null) {
+      completed.removeWhere((e) =>
+          e.imdbId == entry.imdbId &&
+          e.season == entry.season &&
+          e.episode == entry.episode);
+    } else {
+      completed.removeWhere((e) => e.imdbId == entry.imdbId);
+    }
+    completed.insert(0, entry);
+
+    // Dynamic data cap: trim oldest only if JSON exceeds 5MB (~15,000 entries)
+    var jsonStr = json.encode(completed.map((e) => e.toJson()).toList());
+    while (jsonStr.length > 5 * 1024 * 1024 && completed.length > 50) {
+      completed.removeLast();
+      jsonStr = json.encode(completed.map((e) => e.toJson()).toList());
+    }
+
+    await prefs.setString(_completedWatchingKey, jsonStr);
+
+    if (entry.imdbId.isNotEmpty) {
+      if (!entry.isTv) {
+        _completedIds.add(entry.imdbId);
+      }
+      if (entry.isTv && entry.season != null && entry.episode != null) {
+        _completedEpisodes.add('${entry.imdbId}:${entry.season}:${entry.episode}');
+      }
+    }
+  }
+
+  Future<void> markSeriesCompleted(String imdbId, ContinueWatchingEntry entry) async {
+    final prefs = await _instance;
+    await removeContinueWatching(imdbId);
+    await markCompleted(entry);
+
+    if (imdbId.isNotEmpty) {
+      _completedIds.add(imdbId);
+      final seriesIds = prefs.getStringList(_completedSeriesKey) ?? [];
+      if (!seriesIds.contains(imdbId)) {
+        seriesIds.add(imdbId);
+        await prefs.setStringList(_completedSeriesKey, seriesIds);
+      }
+    }
+  }
+
+  Future<void> removeCompleted(String imdbId) async {
+    final prefs = await _instance;
+    final completed = await getCompletedWatching();
+    completed.removeWhere((e) => e.imdbId == imdbId);
+    final jsonStr = json.encode(completed.map((e) => e.toJson()).toList());
+    await prefs.setString(_completedWatchingKey, jsonStr);
+
+    final seriesIds = prefs.getStringList(_completedSeriesKey) ?? [];
+    if (seriesIds.contains(imdbId)) {
+      seriesIds.remove(imdbId);
+      await prefs.setStringList(_completedSeriesKey, seriesIds);
+    }
+
+    _completedIds.remove(imdbId);
+    _completedEpisodes.removeWhere((key) => key.startsWith('$imdbId:'));
+  }
+
+  Future<void> clearCompletedWatching() async {
+    final prefs = await _instance;
+    await prefs.remove(_completedWatchingKey);
+    await prefs.remove(_completedSeriesKey);
+    _completedIds.clear();
+    _completedEpisodes.clear();
+  }
 
   // --- CONTINUE WATCHING ---
 

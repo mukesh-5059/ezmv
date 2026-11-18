@@ -246,6 +246,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     await Navigator.pushNamed(context, '/details', arguments: movie);
     if (mounted) {
+      _continueWatchingKey.currentState?.refresh();
+      setState(() {});
       currentFocus?.requestFocus();
     }
   }

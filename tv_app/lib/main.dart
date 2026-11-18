@@ -20,6 +20,7 @@ void main() async {
   ]);
   initTvMemory();
   MediaKit.ensureInitialized();
+  await StorageService.instance.ensureCompletedLoaded();
   final savedUrl = await StorageService.instance.getApiBaseUrl();
   if (savedUrl != null && savedUrl.isNotEmpty) {
     ApiClient.instance = ApiClient(baseUrl: savedUrl);

@@ -240,10 +240,16 @@ class _DetailsScreenState extends State<DetailsScreen> {
     final backdrop = _details?.backdropPath ?? widget.initialMovie?.backdropPath;
 
     int initialPosSec = 0;
+    int? targetSeason = season;
+    int? targetEpisode = episode;
     try {
       final savedEntry = await StorageService.instance.getContinueWatchingEntry(widget.imdbId);
       if (savedEntry != null && savedEntry.progress < 0.92) {
-        if (!_isTv || (savedEntry.season == season && savedEntry.episode == episode)) {
+        if (_isTv && targetSeason == null && savedEntry.season != null && savedEntry.episode != null) {
+          targetSeason = savedEntry.season;
+          targetEpisode = savedEntry.episode;
+        }
+        if (!_isTv || (savedEntry.season == targetSeason && savedEntry.episode == targetEpisode)) {
           initialPosSec = savedEntry.positionMs ~/ 1000;
         }
       }
@@ -259,8 +265,8 @@ class _DetailsScreenState extends State<DetailsScreen> {
           imdbId: widget.imdbId,
           tmdbId: _details?.tmdbId ?? widget.initialMovie?.tmdbId,
           mediaType: widget.mediaType,
-          season: season,
-          episode: episode,
+          season: targetSeason,
+          episode: targetEpisode,
           initialPositionSeconds: initialPosSec,
           posterPath: poster,
           backdropPath: backdrop,
@@ -278,6 +284,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
       ),
     );
     _lastResumedFromPlayerAt = DateTime.now();
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _playEpisode(TvEpisode episode) async {
@@ -531,6 +540,30 @@ class _DetailsScreenState extends State<DetailsScreen> {
                                     ),
                                   ),
                                 ),
+                                if (!_isTv && StorageService.instance.isCompletedSync(widget.imdbId))
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: TVTheme.primary,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.check_rounded, size: 14, color: Colors.white),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'WATCHED',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                               ],
                             ),
                             const SizedBox(height: 10),
@@ -713,6 +746,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
               final ep = episodes[index];
               return _EpisodeCard(
                 episode: ep,
+                isCompleted: StorageService.instance.isEpisodeCompletedSync(
+                  widget.imdbId,
+                  _selectedSeasonNumber,
+                  ep.episodeNumber,
+                ),
                 onTap: () => _playEpisode(ep),
               );
             },
@@ -725,10 +763,12 @@ class _DetailsScreenState extends State<DetailsScreen> {
 
 class _EpisodeCard extends StatefulWidget {
   final TvEpisode episode;
+  final bool isCompleted;
   final VoidCallback onTap;
 
   const _EpisodeCard({
     required this.episode,
+    this.isCompleted = false,
     required this.onTap,
   });
 
@@ -813,6 +853,31 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                               color: TVTheme.surfaceElevated,
                               child: const Center(
                                 child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),
+                              ),
+                            ),
+                          if (widget.isCompleted)
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: TVTheme.primary,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 1.5),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black87,
+                                      blurRadius: 4,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.check_rounded,
+                                  size: 12,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           if (ep.isUpcoming)
