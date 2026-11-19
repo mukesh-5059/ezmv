@@ -603,23 +603,13 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
     JavascriptRuntime? runtime;
     try {
       runtime = getJavascriptRuntime(xhr: false);
-      runtime.onMessage('ezmv_log', (dynamic rawArgs) {
-        try {
-          final args = rawArgs is String ? json.decode(rawArgs) : rawArgs;
-          final level = args['level'] ?? 'INFO';
-          final msg = args['msg'] ?? '';
-          print('[$extractorId][$level] $msg');
-        } catch (_) {
-          print('[$extractorId] $rawArgs');
-        }
-      });
+      runtime.onMessage('ezmv_log', (dynamic rawArgs) {});
       runtime.onMessage('ezmv_fetch', (dynamic rawArgs) async {
         try {
           final args = rawArgs is String ? json.decode(rawArgs) : rawArgs;
           final id = args['id'];
           final url = args['url'] as String;
           final method = (args['method'] as String? ?? 'GET').toUpperCase();
-          print('[$extractorId][FETCH] $method $url');
           final headers = <String, String>{};
           if (args['headers'] is Map) {
             (args['headers'] as Map).forEach((k, v) => headers[k.toString()] = v.toString());
@@ -630,7 +620,6 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
           if (body != null) req.body = body.toString();
           final streamed = await _httpClient.send(req);
           final resp = await http.Response.fromStream(streamed);
-          print('[$extractorId][FETCH -> ${resp.statusCode}] $url (${resp.body.length} bytes)');
           final resData = json.encode({
             'status': resp.statusCode,
             'body': resp.body,
@@ -638,7 +627,6 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
           });
           runtime?.evaluate('globalThis.__ezmv_resolve($id, $resData);');
         } catch (e) {
-          print('[$extractorId][FETCH ERROR] $e');
           try {
             final args = rawArgs is String ? json.decode(rawArgs) : rawArgs;
             final id = args['id'];
@@ -649,23 +637,18 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
       runtime.evaluate(ezmvPreambleJs);
       final evalInit = runtime.evaluate(code);
       if (evalInit.isError) {
-        print('[$extractorId][EVAL SCRIPT ERROR] ${evalInit.stringResult}');
         return [];
       }
 
-      print('[$extractorId] Starting scrape for "${target.title}" (season: ${target.season}, episode: ${target.episode})...');
       final targetJson = json.encode(target.toJson());
       final evalResult = runtime.evaluate('globalThis.__ezmv_run_scrape(${json.encode(targetJson)})');
       if (evalResult.isError) {
-        print('[$extractorId][EVAL SCRAPE ERROR] ${evalResult.stringResult}');
         return [];
       }
       final resolved = await runtime.handlePromise(evalResult);
       if (resolved.isError) {
-        print('[$extractorId][PROMISE ERROR] ${resolved.stringResult}');
         return [];
       }
-      print('[$extractorId] Scrape resolved. Raw result preview: ${resolved.stringResult.length > 200 ? resolved.stringResult.substring(0, 200) + '...' : resolved.stringResult}');
 
       final out = <StreamSource>[];
       List<dynamic> items = [];
@@ -678,13 +661,10 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
           if (d2 is List) items = d2;
         }
       } catch (e) {
-        print('[$extractorId] JSON decode error: $e');
         if (resolved.rawResult is List) {
           items = resolved.rawResult as List;
         }
       }
-      print('[$extractorId] Parsed ${items.length} stream candidate(s)');
-
       final prefAudio = await AppSettingsService.instance.getPreferredAudioLanguage();
       final prefQuality = await AppSettingsService.instance.getPreferredQuality();
       final prefSize = await AppSettingsService.instance.getFileSizePreference();
@@ -717,7 +697,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
           }
 
           final priority = StreamPriorityCalculator.calculatePriority(
-            provider: extractor['id'] ?? 'js',
+            provider: extractorId,
             quality: quality,
             languages: languages.isNotEmpty ? languages : null,
             defaultLanguage: target.defaultLanguage,
@@ -732,7 +712,7 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
           out.add(StreamSource(
             url: url,
             quality: quality,
-            provider: extractor['id'] ?? 'js',
+            provider: extractorId,
             headers: headers,
             priority: priority,
             languages: languages,
@@ -740,10 +720,8 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
           ));
         }
       }
-      print('[$extractorId] Returning ${out.length} valid stream source(s)');
       return out;
-    } catch (e, stack) {
-      print('[$extractorId][EXCEPTION] $e\n$stack');
+    } catch (_) {
       return [];
     } finally {
       runtime?.dispose();
@@ -774,7 +752,6 @@ globalThis.__ezmv_run_scrape = function(targetJsonStr) {
       );
     }
 
-    print('[SourceOrchestrator] Running Batch $batchNumber/$totalBatches for "${target.title}" (stremio: ${plan.stremioAddons.map((a) => a['id']).toList()}, js: ${plan.jsExtractors.map((e) => e['id']).toList()})');
     onProgress?.call('Querying Batch $batchNumber sources...');
 
     final futures = <Future<List<StreamSource>>>[];

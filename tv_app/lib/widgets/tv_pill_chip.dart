@@ -54,15 +54,7 @@ class _TvPillChipState extends State<TvPillChip> {
         color: Colors.white,
         width: TVTheme.focusBorderWidth,
       );
-      shadows = [
-        ...TVTheme.focusShadows,
-        if (widget.isSelected)
-          BoxShadow(
-            color: TVTheme.accentGlow.withValues(alpha: 0.3),
-            blurRadius: 10,
-            spreadRadius: 1,
-          ),
-      ];
+      shadows = TVTheme.focusShadows;
     } else if (widget.isSelected) {
       backgroundColor = TVTheme.surfaceElevated;
       border = Border.all(

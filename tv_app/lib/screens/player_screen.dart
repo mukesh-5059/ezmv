@@ -208,7 +208,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Initialize media_kit Player with hardware decoding & buffering configuration
     _player = Player(
       configuration: const PlayerConfiguration(
-        bufferSize: 32 * 1024 * 1024,
+        bufferSize: 16 * 1024 * 1024,
       ),
     );
 
@@ -232,10 +232,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _configureHardwareAndBuffer() {
     try {
       final p = (_player.platform as dynamic);
-      p?.setProperty('vd-lavc-threads', '4');
+      p?.setProperty('vd-lavc-threads', '2');
 
       // Network & Buffer Stability for Android TVs
-      p?.setProperty('demuxer-readahead-secs', '30');
+      p?.setProperty('demuxer-readahead-secs', '15');
+      p?.setProperty('demuxer-max-back-bytes', '${4 * 1024 * 1024}');
       p?.setProperty('network-timeout', '25');
 
       // Reconnect & HTTP resilience
@@ -759,7 +760,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _showEpisodesDialog() async {
     _hideOsdControls();
-    if (_seasonsList.isEmpty && widget.mediaType == 'tv') {
+    if ((_currentDrawerSeason == null || _seasonsList.isEmpty) && widget.mediaType == 'tv') {
       await _loadDrawerSeasonEpisodes(_currentSeason ?? 1);
     }
     if (!mounted) return;
@@ -941,19 +942,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _loadDrawerSeasonEpisodes([int? seasonNum]) async {
     final targetSeason = seasonNum ?? _currentSeason ?? 1;
-    setState(() {
-      _currentSeason = targetSeason;
-    });
+    if (mounted) {
+      setState(() {
+        _currentSeason = targetSeason;
+      });
+    }
     try {
       int? tmdbId = widget.tmdbId;
       if ((tmdbId == null || tmdbId == 0) && widget.imdbId.isNotEmpty) {
-        final details = await ApiClient.instance.getMovieDetails('tv', widget.imdbId);
-        tmdbId = details.tmdbId;
-        if (_seasonsList.isEmpty && details.seasons.isNotEmpty) {
-          _seasonsList = details.seasons;
+        final resolved = await ApiClient.instance.resolveMovies([widget.imdbId], mediaType: 'tv');
+        if (resolved.isNotEmpty && resolved.first.tmdbId != null && resolved.first.tmdbId! > 0) {
+          tmdbId = resolved.first.tmdbId;
         }
       }
       if (tmdbId != null && tmdbId > 0) {
+        if (_seasonsList.isEmpty) {
+          final details = await ApiClient.instance.getMovieDetails('tv', tmdbId);
+          if (details.seasons.isNotEmpty && mounted) {
+            setState(() {
+              _seasonsList = details.seasons;
+            });
+          }
+        }
         final season = await ApiClient.instance.getTvSeason(tmdbId, targetSeason);
         if (mounted) {
           setState(() {

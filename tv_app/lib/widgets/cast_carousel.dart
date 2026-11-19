@@ -29,8 +29,12 @@ class CastCarousel extends StatelessWidget {
         SizedBox(
           height: 180,
           child: ListView.builder(
+            key: const PageStorageKey('details_cast_carousel'),
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
+            addAutomaticKeepAlives: false,
+            addRepaintBoundaries: true,
+            cacheExtent: 220.0,
             itemCount: cast.length,
             itemBuilder: (context, index) {
               return _CastCard(member: cast[index]);
@@ -111,23 +115,12 @@ class _CastCardState extends State<_CastCard> {
                       boxShadow: _isFocused
                           ? [
                               BoxShadow(
-                                color: TVTheme.primary.withValues(alpha: 0.25),
-                                blurRadius: 10,
-                                spreadRadius: 1,
-                              ),
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.8),
-                                blurRadius: 14,
-                                offset: const Offset(0, 6),
+                                color: TVTheme.primary.withValues(alpha: 0.45),
+                                blurRadius: 0,
+                                spreadRadius: 2,
                               ),
                             ]
-                          : [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.4),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
+                          : const [],
                     ),
                     child: ClipOval(
                       child: Container(
@@ -136,13 +129,11 @@ class _CastCardState extends State<_CastCard> {
                             ? CachedNetworkImage(
                                 imageUrl: member.profileUrl,
                                 fit: BoxFit.cover,
-                                memCacheWidth: 160,
-                                memCacheHeight: 160,
-                                maxWidthDiskCache: 200,
-                                maxHeightDiskCache: 200,
+                                memCacheWidth: 88,
+                                memCacheHeight: 88,
                                 fadeInDuration: Duration.zero,
                                 fadeOutDuration: Duration.zero,
-                                errorWidget: (_, __, ___) => const Icon(
+                                errorWidget: (context, url, error) => const Icon(
                                   Icons.person,
                                   color: Colors.white54,
                                   size: 44,

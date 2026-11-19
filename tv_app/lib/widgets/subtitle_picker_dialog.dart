@@ -352,7 +352,9 @@ class _MiniStepperButtonState extends State<_MiniStepperButton> {
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: _isFocused ? TVTheme.primary : Colors.white.withValues(alpha: 0.12),
+            color: _isFocused
+                ? TVTheme.primary.withValues(alpha: 0.25)
+                : Colors.white.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: _isFocused ? Colors.white : Colors.white24,
@@ -362,7 +364,7 @@ class _MiniStepperButtonState extends State<_MiniStepperButton> {
                 ? [
                     BoxShadow(
                       color: TVTheme.primary.withValues(alpha: 0.5),
-                      blurRadius: 10,
+                      blurRadius: 0,
                       spreadRadius: 1,
                     )
                   ]
@@ -438,7 +440,7 @@ class _SubtitleOptionTileState extends State<_SubtitleOptionTile> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             color: _isFocused
-                ? TVTheme.primary
+                ? TVTheme.primary.withValues(alpha: 0.25)
                 : widget.isSelected
                     ? TVTheme.surfaceElevated
                     : TVTheme.surface,
@@ -451,7 +453,7 @@ class _SubtitleOptionTileState extends State<_SubtitleOptionTile> {
                 ? [
                     BoxShadow(
                       color: TVTheme.primary.withValues(alpha: 0.4),
-                      blurRadius: 12,
+                      blurRadius: 0,
                       spreadRadius: 1,
                     ),
                   ]

@@ -25,7 +25,7 @@ class TvEpisode {
   String get stillUrl {
     if (stillPath == null || stillPath!.isEmpty) return '';
     if (stillPath!.startsWith('http')) return stillPath!;
-    return 'https://image.tmdb.org/t/p/w500$stillPath';
+    return 'https://image.tmdb.org/t/p/w185$stillPath';
   }
 
   String get formattedRuntime {

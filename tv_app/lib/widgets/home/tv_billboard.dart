@@ -244,7 +244,7 @@ class _TvBillboardState extends State<TvBillboard> {
             children: [
               // Backdrop Image with Smooth Cross-Fade
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 700),
+                duration: const Duration(milliseconds: 150),
                 switchInCurve: Curves.easeIn,
                 switchOutCurve: Curves.easeOut,
                 child: SizedBox(
@@ -258,10 +258,9 @@ class _TvBillboardState extends State<TvBillboard> {
                           alignment: Alignment.topCenter,
                           memCacheWidth: 1280,
                           memCacheHeight: 720,
-                          maxWidthDiskCache: 1280,
-                          errorWidget: (context, url, error) => Container(
-                            color: TVTheme.surfaceElevated,
-                          ),
+                          fadeInDuration: Duration.zero,
+                          fadeOutDuration: Duration.zero,
+                          errorWidget: (context, url, error) => Container(color: TVTheme.surfaceElevated),
                         )
                       : Container(color: TVTheme.surfaceElevated),
                 ),

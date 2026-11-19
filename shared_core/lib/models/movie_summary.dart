@@ -13,6 +13,7 @@ class MovieSummary {
   final String mediaType;
   final List<Genre> genres;
   final String? originalLanguage;
+  final int? runtime;
 
   const MovieSummary({
     required this.imdbId,
@@ -27,6 +28,7 @@ class MovieSummary {
     required this.mediaType,
     required this.genres,
     this.originalLanguage,
+    this.runtime,
   });
 
   bool get isTv => mediaType == 'tv';
@@ -37,7 +39,7 @@ class MovieSummary {
   String get posterUrl {
     if (posterPath.isEmpty) return '';
     if (posterPath.startsWith('http')) return posterPath;
-    return 'https://image.tmdb.org/t/p/w500$posterPath';
+    return 'https://image.tmdb.org/t/p/w185$posterPath';
   }
 
   String get backdropUrl {
@@ -74,6 +76,7 @@ class MovieSummary {
           .map((g) => Genre.fromJson(g as Map<String, dynamic>))
           .toList(),
       originalLanguage: json['original_language'] as String?,
+      runtime: (json['runtime'] as num?)?.toInt(),
     );
   }
 
@@ -90,6 +93,7 @@ class MovieSummary {
     'media_type': mediaType,
     'genres': genres.map((g) => g.toJson()).toList(),
     'original_language': originalLanguage,
+    if (runtime != null) 'runtime': runtime,
   };
 }
 

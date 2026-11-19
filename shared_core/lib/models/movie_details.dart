@@ -27,7 +27,6 @@ class SeasonSummary {
 }
 
 class MovieDetails extends MovieSummary {
-  final int? runtime;
   final List<CastMember> cast;
   final List<SeasonSummary> seasons;
   final String? status;
@@ -46,7 +45,7 @@ class MovieDetails extends MovieSummary {
     required super.mediaType,
     required super.genres,
     super.originalLanguage,
-    this.runtime,
+    super.runtime,
     this.cast = const [],
     this.seasons = const [],
     this.status,

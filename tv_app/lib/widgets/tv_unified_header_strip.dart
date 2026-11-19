@@ -52,9 +52,7 @@ class _TvUnifiedHeaderStripState extends State<TvUnifiedHeaderStrip> {
         ? 'Show All (${widget.count})'
         : 'Show All';
 
-    final content = AnimatedContainer(
-      duration: TVTheme.focusDuration,
-      curve: TVTheme.focusCurve,
+    final content = Container(
       margin: widget.margin,
       padding: widget.padding,
       decoration: BoxDecoration(

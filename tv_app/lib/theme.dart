@@ -34,25 +34,18 @@ class TVTheme {
   static const double focusScale = 1.08;
   static const double buttonFocusScale = 1.06;
   static const double focusBorderWidth = 3.0;
-  static const Duration focusDuration = Duration(milliseconds: 250);
+  static const Duration focusDuration = Duration(milliseconds: 110);
   static const Curve focusCurve = Curves.easeOutCubic;
 
-  // Dual-layer Focus Shadows
-  static const BoxShadow focusAmbientHalo = BoxShadow(
-    color: Color(0x26FFFFFF),
-    blurRadius: 10,
+  // OpenGL ES 2.0-friendly 0-blur focus halo (zero Gaussian blur passes on Mali-450 MP)
+  static const BoxShadow focusHalo = BoxShadow(
+    color: Color(0x33FFFFFF),
+    blurRadius: 0,
     spreadRadius: 1,
   );
 
-  static const BoxShadow focusDropShadow = BoxShadow(
-    color: Color(0xD9000000),
-    blurRadius: 16,
-    offset: Offset(0, 8),
-  );
-
   static List<BoxShadow> get focusShadows => const [
-    focusAmbientHalo,
-    focusDropShadow,
+    focusHalo,
   ];
 
   static List<BoxShadow> get restingShadows => const [];

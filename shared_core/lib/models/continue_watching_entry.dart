@@ -50,7 +50,7 @@ class ContinueWatchingEntry {
   String get posterUrl {
     if (posterPath == null || posterPath!.isEmpty) return '';
     if (posterPath!.startsWith('http')) return posterPath!;
-    return 'https://image.tmdb.org/t/p/w500$posterPath';
+    return 'https://image.tmdb.org/t/p/w185$posterPath';
   }
 
   String get backdropUrl {

@@ -1,53 +1,67 @@
-# Project Handoff — Cloudflare Backend & Catalog Architecture
+# Handoff: Xiaomi Mi TV 1GB RAM Optimization & Trakt Integration
 
-## 1. Current State & Recent Changes
-
-- **Backend Migration**: Fully migrated from Python FastAPI to Cloudflare Workers (`backend_revised`) using Hono, Cloudflare D1 (`movies-catalog`), and Cloudflare KV (`CONFIG_KV`).
-- **Dynamic KV Configuration**:
-  - `rating_rules`, `dashboards`, `dashboard:tamil`, and `sync_lanes` live in Cloudflare KV.
-  - Managed by [`ConfigService`](file:///home/mukes/dev/movies/backend_revised/src/services/config.ts) using the Cloudflare Cache API (`caches.default`, 1-hour TTL) with bundled JSON fallbacks in `backend_revised/src/config/`.
-- **Sync Pipeline**:
-  - Modularized into `backend_revised/scripts/sync/` (`client.py`, `config.py`, `lanes.py`, `rating.py`, `sql.py`).
-  - Automated via scheduled GitHub Actions workflow [`.github/workflows/sync_catalog.yml`](file:///.github/workflows/sync_catalog.yml) running daily at midnight UTC.
-- **Git History & Secrets**:
-  - Purged hardcoded Cloudflare account identifiers from git history.
-  - Secrets (`MDBLIST_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_KV_NAMESPACE_ID`) configured via environment variables and GitHub Secrets.
-- **Streaming Pipeline & Language Priority**:
-  - Updated `HDHUB_MANIFEST_URL` secret to live working instance with direct PixelDrain/HubCloud links.
-  - Implemented language-aware stream ranking in [`stream_parser.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/stream_parser.ts) and [`streams.ts`](file:///home/mukes/dev/movies/backend_revised/src/services/streams.ts).
-  - Added query parameter `original_language` (`orig_lang`) to `/api/v1/streams/:media_type/:imdb_id` with zero D1 querying overhead.
-  - Priority rule: Indian regional media (`hi`, `ta`, `te`, `ml`, `kn`, etc.) forces **Tamil** to top priority, then original language. Non-Indian media (anime `ja`, `ko`, `en`, etc.) prioritizes the title's **original language**.
-  - Tiered scraping: Tier 1 (**HDHub** & **PlavioHD**); Tier 2 fallback (**PenguPlay** & **NoTorrent** if Tier 1 yields < 15 streams). Provider evaluation concluded Kurage (missing pre-2000s anime back-catalog) and YukiStreams (direct HTTP down without Debrid) removed.
-- **Profanity & Spam Filtering**:
-  - Integrated [`ProfanityService`](file:///home/mukes/dev/movies/backend_revised/src/services/profanity.ts) using `leo-profanity` in `backend_revised`.
-  - Filters out explicit user spam lists, slugs, and profane search queries in [`ListsService`](file:///home/mukes/dev/movies/backend_revised/src/services/lists.ts) and [`TraktSearchService`](file:///home/mukes/dev/movies/backend_revised/src/services/traktsearch.ts).
-  - Whitelists legitimate cinema terms (`snatch`, `bastard`, `hell`, `damn`) and relies on TMDB's `adult: true` flag to prevent false-positive blocking of mature titles (*Deadpool*, *The Boys*).
-- **TV App Focus & RAM Optimization**:
-  - Refactored [`HomeScreen`](file:///home/mukes/dev/movies/tv_app/lib/screens/home_screen.dart) and lane widgets ([`TvMovieLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_movie_lane.dart), [`TvContinueWatchingLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_continue_watching_lane.dart), [`TvActorsLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_actors_lane.dart)).
-  - Configured [`TvUnifiedHeaderStrip`](file:///home/mukes/dev/movies/tv_app/lib/widgets/tv_unified_header_strip.dart) with self-centering `autoEnsureVisible: true`, `scrollAlignment: 0.20`, and 200ms `Curves.easeOutCubic` curve on the strip's own context, eliminating the UP/DOWN centering asymmetry and ensuring both header and cards are centered in the viewport.
-  - Implemented `AutomaticKeepAliveClientMixin` (`wantKeepAlive = true`) on [`TvMovieLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_movie_lane.dart) to preserve focus trees and scroll offsets across vertical scrolls and tab changes.
-  - Fixed D-pad title lock & viewport targeting: Stored `_lastFocusedIndex` in `PageStorage`, verified `node.parent != null` (active in focus tree), and added dynamic viewport-aware fallback `(_scrollController.offset / itemWidth).round()` to ensure Down from a header immediately focuses the visible on-screen card.
-  - Set `clipBehavior: Clip.none` on horizontal `ListView.builder` carousels across [`TvMovieLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_movie_lane.dart), [`TvContinueWatchingLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_continue_watching_lane.dart), and [`TvActorsLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_actors_lane.dart) so the 1.08x scale pop-up and top highlight border/halo are never clipped by the scroll viewport.
-  - Added 140ms repeat throttling to card navigation in [`TvMovieLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_movie_lane.dart), [`TvContinueWatchingLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_continue_watching_lane.dart), and [`TvActorsLane`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_actors_lane.dart).
-  - Debounced poster loading by 140ms in [`TvFocusCard`](file:///home/mukes/dev/movies/tv_app/lib/widgets/tv_focus_card.dart) for unfocused cards so holding D-pad right does not flood Flutter's FIFO image connection/decode queue.
-  - Replaced root `setState()` in scroll listener with `ValueNotifier<bool>` on Billboard.
-  - Refactored [`TvBillboard`](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_billboard.dart): Removed separate "Play Now" and "Details" buttons, making the entire billboard a focusable card button with animated dimming (unfocused) / brightening (focused) and D-pad Left/Right cycling through featured candidates.
-  - Purged untracked desktop `tv_app/linux/` embedder files.
+## Context & Hardware Specs
+- **Device**: Xiaomi Mi TV 4A/4C (MiTV-AXSO0 series).
+- **SoC / CPU**: Amlogic `txlx` (4× ARM Cortex-A53 @ 1.2GHz).
+- **GPU**: ARM Mali-450 MP (OpenGL ES 2.0 only, weak fill-rate, no Vulkan).
+- **RAM**: 1GB (1,014,724 kB total, ~100–250MB usable headroom).
+- **OS / Display**: Android 9.0 Pie (API 28), 1280×720 (720p @ 213 dpi).
+- **Strict User Directives**:
+  - NO git commits, NO git pushes.
+  - NO commands targeting physical Mi TV (`192.168.29.93:5555`).
+  - Zero focus amnesia across all D-pad interactions.
 
 ---
 
-## 2. Infrastructure Bindings
+## Current Status & Completed Milestones
 
-- **Live Worker URL**: `https://backend-revised.mkdummy2025.workers.dev` (Version `6e693c2e-fd5b-44bc-be5d-7552d7bd89b8`)
-- **D1 Database**: `movies-catalog` (`ce5096c4-ec8a-463d-890e-493c92d5f580`)
-- **KV Namespace**: `CONFIG_KV` (`4d8a8b30e668412596ca7b9cabfecdb4`)
-- **Worker Configuration**: [wrangler.toml](file:///home/mukes/dev/movies/backend_revised/wrangler.toml)
+### Milestone 1 (`shared_core`) — COMPLETE & VERIFIED (174/174 Tests Passed)
+- [trakt_list_summary.dart](file:///home/mukes/dev/movies/shared_core/lib/models/trakt_list_summary.dart): Full Trakt list serialization with `description`, `userName`, `slug`, `sortBy`, `sortHow`, `itemCount`, `likes`, and `copyWith`.
+- [movie_summary.dart](file:///home/mukes/dev/movies/shared_core/lib/models/movie_summary.dart) & [movie_details.dart](file:///home/mukes/dev/movies/shared_core/lib/models/movie_details.dart): Enriched with `runtime`, `originalLanguage`, and `SeasonSummary`.
+- [list_sorter.dart](file:///home/mukes/dev/movies/shared_core/lib/services/list_sorter.dart): Fast sorting engine supporting `rank`, `added`, `title`, `released`, `popularity`, `runtime`, and `votes` (asc/desc).
+- [api_client.dart](file:///home/mukes/dev/movies/shared_core/lib/api/api_client.dart): Trakt list search, popular lists, item retrieval with sorting and pagination, plus route fallbacks. Cleaned unused element warnings.
+
+### Milestone 2 (Memory & Focus Primitives) — COMPLETE ON DISK
+- [tv_memory.dart](file:///home/mukes/dev/movies/tv_app/lib/utils/tv_memory.dart): Capped global image cache at 25MB (`maxCacheSizeBytes = 25 * 1024 * 1024`, `maxCacheCount = 35`).
+- [theme.dart](file:///home/mukes/dev/movies/tv_app/lib/theme.dart): Removed Mali-450 GPU-killing Gaussian blur shadows (`blurRadius: 0`, crisp borders). Shortened `focusDuration` to 110ms (`Duration(milliseconds: 110)`) to finish before 140ms D-pad key repeat intervals.
+- [movie_summary.dart](file:///home/mukes/dev/movies/shared_core/lib/models/movie_summary.dart), [continue_watching_entry.dart](file:///home/mukes/dev/movies/shared_core/lib/models/continue_watching_entry.dart), [actor_profile.dart](file:///home/mukes/dev/movies/shared_core/lib/models/actor_profile.dart), & [tv_episode.dart](file:///home/mukes/dev/movies/shared_core/lib/models/tv_episode.dart): Switched TMDb poster and actor profile URLs to `w185` and episode still URLs to `w185`, cutting payload size and texture footprint across all card shelves.
+- [tv_focus_card.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/tv_focus_card.dart), [details_screen.dart](file:///home/mukes/dev/movies/tv_app/lib/screens/details_screen.dart), [tv_actors_lane.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_actors_lane.dart), [actor_lane.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/actor_lane.dart), & [cast_carousel.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/cast_carousel.dart): Enforced 1:1 downsampling (`memCacheWidth`/`memCacheHeight` matching exact widget bounds: 80x80, 88x88, 96x96, 222x125), zeroed fade durations, and removed `imageBuilder` / `debugPrint` GC thrash.
+- [source_orchestrator.dart](file:///home/mukes/dev/movies/shared_core/lib/services/source_orchestrator.dart), [tv_billboard.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_billboard.dart), [details_screen.dart](file:///home/mukes/dev/movies/tv_app/lib/screens/details_screen.dart), [player_screen.dart](file:///home/mukes/dev/movies/tv_app/lib/screens/player_screen.dart), & [player_dialogs.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/player_dialogs.dart): Completely purged all stream scraper and image debug logs (`[IMG:...`, `[$extractorId]...`, `[SourceOrchestrator]...`) to eliminate console I/O stalls on Android TV.
+
+### Milestone 3 (Home Screen Virtualization & Billboard) — COMPLETE ON DISK
+- [home_screen.dart](file:///home/mukes/dev/movies/tv_app/lib/screens/home_screen.dart): Converted eager `ListView(children: [...])` to `ListView.builder` with `cacheExtent: 400` and `findChildIndexCallback`, reducing widget allocations by ~73%.
+- [tv_movie_lane.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_movie_lane.dart): Set `wantKeepAlive => false` to release offscreen lane memory while preserving horizontal scroll and focused card index in `PageStorageKey`.
+- [tv_billboard.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/home/tv_billboard.dart): Shortened cross-fade from 700ms to 150ms to eliminate dual 720p texture blending stalls on Mali-450.
+- [details_screen.dart](file:///home/mukes/dev/movies/tv_app/lib/screens/details_screen.dart): Added `PageStorageKey` for seasons and episodes shelves.
+
+### Milestone 4 (Player Dialogs Normalization & Episode Selector Bugfix) — COMPLETE ON DISK
+- [player_dialogs.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/player_dialogs.dart) & [subtitle_picker_dialog.dart](file:///home/mukes/dev/movies/tv_app/lib/widgets/subtitle_picker_dialog.dart):
+  - Normalized focused item background to softened crimson with alpha (`TVTheme.primary.withValues(alpha: 0.25)`), paired with a crisp 2px white border and white typography across all player dialogs.
+  - Zeroed out all `blurRadius` values (`blurRadius: 0, spreadRadius: 1`) across all dialog tiles and panels for pure 0-blur hardware rendering on Mali-450 GPU.
+  - Removed season selector pills from `EpisodesPickerDialog`, displaying a dedicated `SEASON $X • $Y EPISODES` count header and focusing directly onto current season episodes.
+  - Added bottom prompt (`Press Back to close`) across all dialogs.
+- [api_client.dart](file:///home/mukes/dev/movies/shared_core/lib/api/api_client.dart) & [player_screen.dart](file:///home/mukes/dev/movies/tv_app/lib/screens/player_screen.dart):
+  - Fixed infinite red loading spinner in `EpisodesPickerDialog`: `api_client.dart` now transparently resolves IMDb IDs (`tt...`) via `resolveMovies` before calling numeric TMDb endpoints, preventing 400 Bad Request errors.
+  - Added `try-catch-finally` to `_EpisodesPickerDialogState._loadSeason` to ensure `_isLoadingSeason` is always cleared even on network timeouts.
+  - Preloaded seasons/episodes in `_showEpisodesDialog()` if `_currentDrawerSeason` is null.
 
 ---
 
-## 3. Active Next Steps
+## Preserved Blueprints & Prompts (Ready for Resume)
+All 3 technical audit reports and the explorer prompts are persisted in the repo under `blueprints/`:
+1. [m4_details_player_blueprint.md](file:///home/mukes/dev/movies/blueprints/m4_details_player_blueprint.md): Player buffer 16MB, 2 decode threads, episode focus restoration.
+2. [m4_search_blueprint.md](file:///home/mukes/dev/movies/blueprints/m4_search_blueprint.md): Search grid virtualization, safe focus handover between dialog and cards.
+3. [m4_actor_blueprint.md](file:///home/mukes/dev/movies/blueprints/m4_actor_blueprint.md): 160x160 avatar downsampling, zero-blur halo on actor cards.
+4. [explorer_prompts.md](file:///home/mukes/dev/movies/blueprints/explorer_prompts.md): Exact prompts used to instruct the explorer agents.
 
-1. **Unified Filterable Grid (`TvFilterableGrid`)**:
-   - Construct reusable 70/30 filterable grid widget replacing duplicated sliver and filter drawer logic across [`LaneGridScreen`](file:///home/mukes/dev/movies/tv_app/lib/screens/lane_grid_screen.dart) and [`SearchScreen`](file:///home/mukes/dev/movies/tv_app/lib/screens/search_screen.dart).
-2. **Modal Search Trigger**:
-   - Replace embedded `TextField` on TV with search dialog modal to eliminate remote caret-trapping and empty-backspace bugs.
+---
+
+## Action Plan for Tomorrow
+1. **Apply Milestone 4 Code Edits**:
+   - `tv_app/lib/screens/player_screen.dart`: reduce buffer from 32MB to 16MB, set `vd-lavc-threads` to 2.
+   - `tv_app/lib/screens/actor_screen.dart` & `tv_app/lib/widgets/actor_lane.dart`: update avatar image widgets to `CachedNetworkImage` downsampled to `160x160`.
+   - `tv_app/lib/screens/search_screen.dart`: ensure grid virtualization and focus safety guards.
+   - `tv_app/lib/widgets/cast_carousel.dart`: zero-blur focus shadows.
+2. **Execute Milestone 5 Final Verification**:
+   - Run `dart analyze` across `shared_core` and `tv_app` (ensure 0 errors).
+   - Run `flutter test` across all unit/widget tests.

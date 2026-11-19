@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
@@ -47,8 +48,13 @@ class ActorLane extends StatelessWidget {
         SizedBox(
           height: 180,
           child: ListView.builder(
+            key: PageStorageKey('actor_lane_$rowKey'),
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 18),
+            clipBehavior: Clip.none,
+            addAutomaticKeepAlives: false,
+            addRepaintBoundaries: true,
+            cacheExtent: 220.0,
             itemCount: itemCount,
             itemBuilder: (context, index) {
               final actor = actors[index];
@@ -151,24 +157,39 @@ class _ActorCardItemState extends State<_ActorCardItem> {
                       boxShadow: _isFocused
                           ? [
                               BoxShadow(
-                                color: TVTheme.primary.withValues(alpha: 0.35),
-                                blurRadius: 16,
+                                color: TVTheme.primary.withValues(alpha: 0.45),
+                                blurRadius: 0,
                                 spreadRadius: 2,
                               ),
                             ]
-                          : [],
+                          : const [],
                     ),
                     child: ClipOval(
                       child: Container(
                         color: TVTheme.surface,
                         child: actor.profileUrl.isNotEmpty
-                            ? Image.network(
-                                actor.profileUrl,
+                            ? CachedNetworkImage(
+                                imageUrl: actor.profileUrl,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Icon(
-                                  Icons.person,
-                                  color: Colors.white54,
-                                  size: 48,
+                                memCacheWidth: 96,
+                                memCacheHeight: 96,
+                                fadeInDuration: Duration.zero,
+                                fadeOutDuration: Duration.zero,
+                                placeholder: (context, url) => Container(
+                                  color: TVTheme.surface,
+                                  child: const Icon(
+                                    Icons.person,
+                                    color: Colors.white54,
+                                    size: 48,
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) => Container(
+                                  color: TVTheme.surface,
+                                  child: const Icon(
+                                    Icons.person,
+                                    color: Colors.white54,
+                                    size: 48,
+                                  ),
                                 ),
                               )
                             : const Icon(

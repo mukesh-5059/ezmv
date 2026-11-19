@@ -37,9 +37,6 @@ Future<T?> showSidePanelDialog<T>({
                   border: Border(
                     left: BorderSide(color: Color(0x33FFFFFF), width: 1.5),
                   ),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black87, blurRadius: 24, spreadRadius: 4),
-                  ],
                 ),
                 child: SafeArea(
                   child: Padding(
@@ -152,6 +149,13 @@ class AudioPickerDialog extends StatelessWidget {
                     );
                   },
                 ),
+        ),
+        const SizedBox(height: 12),
+        const Center(
+          child: Text(
+            'Press Back to close',
+            style: TextStyle(color: Colors.white38, fontSize: 12),
+          ),
         ),
       ],
     );
@@ -497,6 +501,13 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
                       },
                     ),
         ),
+        const SizedBox(height: 12),
+        const Center(
+          child: Text(
+            'Press Back to close',
+            style: TextStyle(color: Colors.white38, fontSize: 12),
+          ),
+        ),
       ],
     );
   }
@@ -550,15 +561,23 @@ class _AutoSwitchRowState extends State<_AutoSwitchRow> {
           onTap: () => widget.onChanged(!widget.enabled),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 140),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: isHighlighted ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.04),
+              color: isHighlighted ? TVTheme.surfaceElevated : TVTheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: isHighlighted ? Colors.white : Colors.white12,
                 width: isHighlighted ? 2.0 : 1.0,
               ),
-              boxShadow: isHighlighted ? TVTheme.focusShadows : [],
+              boxShadow: isHighlighted
+                  ? [
+                      BoxShadow(
+                        color: TVTheme.primary.withValues(alpha: 0.4),
+                        blurRadius: 0,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : [],
             ),
             child: Row(
               children: [
@@ -662,32 +681,40 @@ class _TabButtonState extends State<_TabButton> {
             duration: const Duration(milliseconds: 140),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
             decoration: BoxDecoration(
-              color: active
-                  ? (widget.isError ? Colors.red.withValues(alpha: 0.25) : TVTheme.primary.withValues(alpha: 0.25))
-                  : isHighlighted
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(6),
+              color: isHighlighted
+                  ? TVTheme.primary.withValues(alpha: 0.25)
+                  : active
+                      ? TVTheme.surfaceElevated
+                      : TVTheme.surface,
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: isHighlighted
                     ? Colors.white
                     : active
-                        ? (widget.isError ? Colors.redAccent : TVTheme.primary)
+                        ? (widget.isError ? Colors.redAccent.withValues(alpha: 0.7) : TVTheme.primary.withValues(alpha: 0.8))
                         : Colors.transparent,
-                width: isHighlighted ? 2.0 : 1.5,
+                width: 2.0,
               ),
-              boxShadow: isHighlighted ? TVTheme.focusShadows : [],
+              boxShadow: isHighlighted
+                  ? [
+                      BoxShadow(
+                        color: TVTheme.primary.withValues(alpha: 0.4),
+                        blurRadius: 0,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : [],
             ),
             child: Text(
               widget.label,
               style: TextStyle(
                 fontSize: 12,
-                fontWeight: active || isHighlighted ? FontWeight.bold : FontWeight.w500,
+                fontWeight: (active || isHighlighted) ? FontWeight.bold : FontWeight.normal,
                 color: isHighlighted
                     ? Colors.white
                     : active
-                        ? (widget.isError ? Colors.redAccent : TVTheme.primary)
-                        : Colors.white70,
+                        ? (widget.isError ? Colors.redAccent : Colors.white)
+                        : Colors.white60,
               ),
             ),
           ),
@@ -770,7 +797,7 @@ class _SourceItemTileState extends State<_SourceItemTile> {
         onTap: widget.onSelected,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
             color: _isFocused
                 ? TVTheme.primary.withValues(alpha: 0.25)
@@ -779,14 +806,18 @@ class _SourceItemTileState extends State<_SourceItemTile> {
                     : TVTheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _isFocused
-                  ? Colors.white
-                  : widget.isSelected
-                      ? TVTheme.primary.withValues(alpha: 0.7)
-                      : Colors.transparent,
+              color: _isFocused ? Colors.white : Colors.transparent,
               width: 2,
             ),
-            boxShadow: _isFocused ? TVTheme.focusShadows : [],
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: TVTheme.primary.withValues(alpha: 0.35),
+                      blurRadius: 0,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : [],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -801,10 +832,10 @@ class _SourceItemTileState extends State<_SourceItemTile> {
                     ),
                     child: Text(
                       s.quality.isNotEmpty ? s.quality : 'HD',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 11,
-                        color: s.isFailed ? Colors.white : Colors.black,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -862,8 +893,15 @@ class _SourceItemTileState extends State<_SourceItemTile> {
                     ),
                   ],
                   const Spacer(),
-                  if (widget.isSelected)
-                    const Icon(Icons.check_circle_rounded, color: TVTheme.primary, size: 18),
+                  Icon(
+                    widget.isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                    size: 20,
+                    color: _isFocused
+                        ? Colors.white
+                        : widget.isSelected
+                            ? TVTheme.primary
+                            : Colors.white38,
+                  ),
                 ],
               ),
               const SizedBox(height: 6),
@@ -880,7 +918,10 @@ class _SourceItemTileState extends State<_SourceItemTile> {
               const SizedBox(height: 4),
               Text(
                 '${s.provider.toUpperCase()}  •  Audio: $langs${s.formattedSize != null ? "  •  ${s.formattedSize}" : ""}',
-                style: const TextStyle(fontSize: 11, color: TVTheme.textSecondary),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: _isFocused ? Colors.white.withValues(alpha: 0.85) : TVTheme.textSecondary,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -947,17 +988,24 @@ class _ScrapeMoreTileState extends State<_ScrapeMoreTile> {
       child: GestureDetector(
         onTap: widget.isLoading ? null : widget.onScrapeMore,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: _isFocused
-                ? TVTheme.primary.withValues(alpha: 0.15)
-                : Colors.white.withValues(alpha: 0.05),
+            color: _isFocused ? TVTheme.primary.withValues(alpha: 0.25) : TVTheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _isFocused ? TVTheme.primary : Colors.white12,
-              width: _isFocused ? 2 : 1,
+              color: _isFocused ? Colors.white : Colors.transparent,
+              width: 2,
             ),
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: TVTheme.primary.withValues(alpha: 0.35),
+                      blurRadius: 0,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : [],
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -967,7 +1015,7 @@ class _ScrapeMoreTileState extends State<_ScrapeMoreTile> {
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                    color: TVTheme.primary,
+                    color: Colors.white,
                     strokeWidth: 2,
                   ),
                 ),
@@ -981,13 +1029,16 @@ class _ScrapeMoreTileState extends State<_ScrapeMoreTile> {
                   ),
                 ),
               ] else ...[
-                const Icon(Icons.add_circle_outline_rounded,
-                    color: TVTheme.primary, size: 18),
+                Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: _isFocused ? Colors.white : Colors.white70,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Scrape More (Batch ${widget.currentBatch + 1} of ${widget.totalBatches})',
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: _isFocused ? Colors.white : Colors.white70,
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1061,7 +1112,6 @@ class _EpisodesPickerDialogState extends State<EpisodesPickerDialog> {
   bool _isLoadingSeason = false;
 
   final FocusNode _firstEpisodeFocusNode = FocusNode();
-  final FocusNode _activeSeasonPillFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -1076,7 +1126,6 @@ class _EpisodesPickerDialogState extends State<EpisodesPickerDialog> {
   @override
   void dispose() {
     _firstEpisodeFocusNode.dispose();
-    _activeSeasonPillFocusNode.dispose();
     super.dispose();
   }
 
@@ -1086,36 +1135,37 @@ class _EpisodesPickerDialogState extends State<EpisodesPickerDialog> {
       _selectedSeason = seasonNum;
     });
 
-    if (widget.onSeasonChanged != null) {
-      final season = await widget.onSeasonChanged!(seasonNum);
-      if (mounted) {
-        setState(() {
-          _currentSeasonData = season;
-          _isLoadingSeason = false;
-        });
-      }
-      return;
-    }
-
     try {
+      if (widget.onSeasonChanged != null) {
+        final season = await widget.onSeasonChanged!(seasonNum);
+        if (mounted) {
+          setState(() {
+            _currentSeasonData = season;
+          });
+        }
+        return;
+      }
+
       int? tmdbId = widget.tmdbId;
       if ((tmdbId == null || tmdbId == 0) && widget.imdbId.isNotEmpty) {
-        final details = await ApiClient.instance.getMovieDetails('tv', widget.imdbId);
-        tmdbId = details.tmdbId;
+        final resolved = await ApiClient.instance.resolveMovies([widget.imdbId], mediaType: 'tv');
+        if (resolved.isNotEmpty && resolved.first.tmdbId != null && resolved.first.tmdbId! > 0) {
+          tmdbId = resolved.first.tmdbId;
+        }
       }
       if (tmdbId != null && tmdbId > 0) {
         final season = await ApiClient.instance.getTvSeason(tmdbId, seasonNum);
         if (mounted) {
           setState(() {
             _currentSeasonData = season;
-            _isLoadingSeason = false;
           });
         }
         return;
       }
-    } catch (_) {}
-
-    if (mounted) setState(() => _isLoadingSeason = false);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isLoadingSeason = false);
+    }
   }
 
   @override
@@ -1150,35 +1200,17 @@ class _EpisodesPickerDialogState extends State<EpisodesPickerDialog> {
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        if (widget.seasonsList.length > 1) ...[
-          SizedBox(
-            height: 38,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: widget.seasonsList.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (ctx, idx) {
-                final s = widget.seasonsList[idx];
-                final isSelected = s.seasonNumber == _selectedSeason;
-                return _SeasonPill(
-                  focusNode: isSelected ? _activeSeasonPillFocusNode : null,
-                  label: s.name.isNotEmpty ? s.name : 'Season ${s.seasonNumber}',
-                  isSelected: isSelected,
-                  isFirst: idx == 0,
-                  isLast: idx == widget.seasonsList.length - 1,
-                  onSelected: () {
-                    if (s.seasonNumber != _selectedSeason) {
-                      _loadSeason(s.seasonNumber);
-                    }
-                  },
-                  onDown: () => _firstEpisodeFocusNode.requestFocus(),
-                );
-              },
-            ),
+        const SizedBox(height: 8),
+        Text(
+          'SEASON $_selectedSeason  •  ${episodes.length} EPISODES',
+          style: const TextStyle(
+            color: Colors.white38,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.1,
           ),
-          const SizedBox(height: 12),
-        ],
+        ),
+        const SizedBox(height: 10),
         const Divider(height: 1, color: Colors.white12),
         const SizedBox(height: 12),
         Expanded(
@@ -1212,117 +1244,20 @@ class _EpisodesPickerDialogState extends State<EpisodesPickerDialog> {
                           isSelected: isPlayingThis,
                           isFirst: idx == 0,
                           isLast: idx == episodes.length - 1,
-                          onUp: idx == 0 && widget.seasonsList.length > 1
-                              ? () => _activeSeasonPillFocusNode.requestFocus()
-                              : null,
+                          onUp: null,
                           onSelected: () => Navigator.of(context).pop(ep),
                         );
                       },
                     ),
         ),
-      ],
-    );
-  }
-}
-
-class _SeasonPill extends StatefulWidget {
-  final FocusNode? focusNode;
-  final String label;
-  final bool isSelected;
-  final bool isFirst;
-  final bool isLast;
-  final VoidCallback onSelected;
-  final VoidCallback onDown;
-
-  const _SeasonPill({
-    this.focusNode,
-    required this.label,
-    required this.isSelected,
-    this.isFirst = false,
-    this.isLast = false,
-    required this.onSelected,
-    required this.onDown,
-  });
-
-  @override
-  State<_SeasonPill> createState() => _SeasonPillState();
-}
-
-class _SeasonPillState extends State<_SeasonPill> {
-  bool _isFocused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      focusNode: widget.focusNode,
-      onFocusChange: (f) {
-        setState(() => _isFocused = f);
-        if (f) {
-          Scrollable.ensureVisible(
-            context,
-            alignment: 0.5,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-          );
-        }
-      },
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (TvShortcuts.isActivateKey(event.logicalKey)) {
-            widget.onSelected();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            widget.onDown();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            return KeyEventResult.handled;
-          }
-          if (widget.isFirst && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            return KeyEventResult.handled;
-          }
-          if (widget.isLast && event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onSelected,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: _isFocused
-                ? TVTheme.primary
-                : widget.isSelected
-                    ? TVTheme.primary.withValues(alpha: 0.25)
-                    : Colors.white.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: _isFocused
-                  ? Colors.white
-                  : widget.isSelected
-                      ? TVTheme.primary
-                      : Colors.white24,
-              width: 1.5,
-            ),
-          ),
+        const SizedBox(height: 12),
+        const Center(
           child: Text(
-            widget.label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              color: _isFocused
-                  ? Colors.black
-                  : widget.isSelected
-                      ? TVTheme.primary
-                      : Colors.white70,
-            ),
+            'Press Back to close',
+            style: TextStyle(color: Colors.white38, fontSize: 12),
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -1408,14 +1343,18 @@ class _DialogTileState extends State<_DialogTile> {
                     : TVTheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _isFocused
-                  ? Colors.white
-                  : widget.isSelected
-                      ? TVTheme.primary.withValues(alpha: 0.7)
-                      : Colors.transparent,
+              color: _isFocused ? Colors.white : Colors.transparent,
               width: 2,
             ),
-            boxShadow: _isFocused ? TVTheme.focusShadows : [],
+            boxShadow: _isFocused
+                ? [
+                    BoxShadow(
+                      color: TVTheme.primary.withValues(alpha: 0.35),
+                      blurRadius: 0,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : [],
           ),
           child: Row(
             children: [
@@ -1432,6 +1371,7 @@ class _DialogTileState extends State<_DialogTile> {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       widget.label,
@@ -1439,7 +1379,7 @@ class _DialogTileState extends State<_DialogTile> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: Colors.white,
-                        fontWeight: widget.isSelected ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: (widget.isSelected || _isFocused) ? FontWeight.bold : FontWeight.normal,
                         fontSize: 14,
                       ),
                     ),
@@ -1449,8 +1389,8 @@ class _DialogTileState extends State<_DialogTile> {
                         widget.subtitle!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: TVTheme.textSecondary,
+                        style: TextStyle(
+                          color: _isFocused ? Colors.white.withValues(alpha: 0.85) : TVTheme.textSecondary,
                           fontSize: 12,
                         ),
                       ),

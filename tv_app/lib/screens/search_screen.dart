@@ -70,6 +70,7 @@ class _SearchScreenState extends State<SearchScreen> {
   late final FocusNode _sortPillFocusNode;
   late final FocusNode _clearFiltersFocusNode;
   late final FocusNode _resetFiltersFocusNode;
+  late final FocusNode _retryFocusNode;
 
   final Map<int, FocusNode> _historyFocusNodes = {};
   final Map<int, FocusNode> _cardFocusNodes = {};
@@ -361,10 +362,31 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void _clearCardFocusNodes() {
+    bool hadFocus = false;
     for (final node in _cardFocusNodes.values) {
+      if (node.hasFocus) hadFocus = true;
       node.dispose();
     }
     _cardFocusNodes.clear();
+    if (hadFocus && mounted) {
+      (_lastFocusedPillNode ?? _searchButtonFocusNode).requestFocus();
+    }
+  }
+
+  void _requestCardFocusSafely(int targetIndex) {
+    final node = _getCardFocusNode(targetIndex);
+    if (node.parent != null) {
+      node.requestFocus();
+    } else {
+      final targetRow = targetIndex ~/ 5;
+      final estimatedOffset = targetRow * 241.0;
+      if (_gridScrollController.hasClients) {
+        _gridScrollController.jumpTo(estimatedOffset.clamp(0.0, _gridScrollController.position.maxScrollExtent));
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _getCardFocusNode(targetIndex).requestFocus();
+      });
+    }
   }
 
   FocusNode _getCardFocusNode(int index) {
@@ -394,18 +416,34 @@ class _SearchScreenState extends State<SearchScreen> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
 
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      if (_history.isNotEmpty) {
-        final histIdx = math.min(pillIndex, _history.length - 1);
-        _getHistoryFocusNode(histIdx).requestFocus();
+      if (pillIndex >= 3) {
+        if (_history.isNotEmpty) {
+          _clearHistoryFocusNode.requestFocus();
+        } else if (_lastFocusedRow1Action == _clearSearchFocusNode &&
+            _searchController.text.trim().isNotEmpty) {
+          _clearSearchFocusNode.requestFocus();
+        } else {
+          _searchButtonFocusNode.requestFocus();
+        }
       } else {
-        _backButtonFocusNode.requestFocus();
+        if (_history.isNotEmpty) {
+          final histIdx = math.min(pillIndex, _history.length - 1);
+          _getHistoryFocusNode(histIdx).requestFocus();
+        } else {
+          _backButtonFocusNode.requestFocus();
+        }
       }
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       if (_items.isNotEmpty) {
+        if (_gridScrollController.hasClients && _gridScrollController.offset > 0) {
+          _gridScrollController.jumpTo(0);
+        }
         final cardIdx = math.min(pillIndex, _items.length - 1);
-        _getCardFocusNode(cardIdx).requestFocus();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _getCardFocusNode(cardIdx).requestFocus();
+        });
       } else if (_resetFiltersFocusNode.canRequestFocus) {
         _resetFiltersFocusNode.requestFocus();
       }
@@ -446,13 +484,13 @@ class _SearchScreenState extends State<SearchScreen> {
         _getPillNode(col).requestFocus();
         return KeyEventResult.handled;
       }
-      _getCardFocusNode(index - 5).requestFocus();
+      _requestCardFocusSafely(index - 5);
       return KeyEventResult.handled;
     }
 
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       if (index + 5 < _items.length) {
-        _getCardFocusNode(index + 5).requestFocus();
+        _requestCardFocusSafely(index + 5);
       }
       return KeyEventResult.handled;
     }
@@ -503,6 +541,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _sortPillFocusNode = FocusNode(onKeyEvent: (node, event) => _handlePillKeyEvent(event, 4));
     _clearFiltersFocusNode = FocusNode(onKeyEvent: _handleClearFiltersKeyEvent);
     _resetFiltersFocusNode = FocusNode(onKeyEvent: _handleResetFiltersKeyEvent);
+    _retryFocusNode = FocusNode();
 
     _lastFocusedRow1Action = _searchButtonFocusNode;
 
@@ -532,6 +571,7 @@ class _SearchScreenState extends State<SearchScreen> {
     _sortPillFocusNode.dispose();
     _clearFiltersFocusNode.dispose();
     _resetFiltersFocusNode.dispose();
+    _retryFocusNode.dispose();
     for (final node in _historyFocusNodes.values) {
       node.dispose();
     }
@@ -679,6 +719,11 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _isLoading = false;
         _errorMessage = e.toString();
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _retryFocusNode.canRequestFocus) {
+          _retryFocusNode.requestFocus();
+        }
       });
     }
   }
@@ -1199,6 +1244,7 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
             const SizedBox(height: 20),
             TvFocusButton(
+              focusNode: _retryFocusNode,
               label: 'Retry',
               icon: Icons.refresh_rounded,
               onPressed: () => _executeSearch(reset: true),
@@ -1247,7 +1293,7 @@ class _SearchScreenState extends State<SearchScreen> {
       child: CustomScrollView(
         key: const PageStorageKey('tv_search_grid'),
         controller: _gridScrollController,
-        cacheExtent: 240,
+        cacheExtent: 500,
         slivers: [
           SliverPadding(
             padding: const EdgeInsets.only(bottom: 24),

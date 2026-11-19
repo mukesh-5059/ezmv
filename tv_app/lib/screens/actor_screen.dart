@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_core/shared_core.dart';
 import '../theme.dart';
@@ -97,7 +98,7 @@ class _ActorScreenState extends State<ActorScreen> {
     final profileUrl = _profile?.profileUrl.isNotEmpty == true
         ? _profile!.profileUrl
         : (widget.profilePath != null && widget.profilePath!.isNotEmpty
-            ? 'https://image.tmdb.org/t/p/w500${widget.profilePath}'
+            ? 'https://image.tmdb.org/t/p/w185${widget.profilePath}'
             : '');
 
     return Scaffold(
@@ -178,17 +179,26 @@ class _ActorScreenState extends State<ActorScreen> {
             boxShadow: const [
               BoxShadow(
                 color: Colors.black54,
-                blurRadius: 16,
-                offset: Offset(0, 8),
+                blurRadius: 0,
+                spreadRadius: 1,
+                offset: Offset(0, 4),
               ),
             ],
           ),
           child: ClipOval(
             child: profileUrl.isNotEmpty
-                ? Image.network(
-                    profileUrl,
+                ? CachedNetworkImage(
+                    imageUrl: profileUrl,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
+                    memCacheWidth: 140,
+                    memCacheHeight: 140,
+                    fadeInDuration: Duration.zero,
+                    fadeOutDuration: Duration.zero,
+                    placeholder: (context, url) => Container(
+                      color: TVTheme.surfaceElevated,
+                      child: const Icon(Icons.person, size: 64, color: Colors.white54),
+                    ),
+                    errorWidget: (context, url, error) => Container(
                       color: TVTheme.surfaceElevated,
                       child: const Icon(Icons.person, size: 64, color: Colors.white54),
                     ),
@@ -267,32 +277,39 @@ class _ActorScreenState extends State<ActorScreen> {
         const SizedBox(height: 14),
         SizedBox(
           height: 285,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            clipBehavior: Clip.none,
-            itemCount: movies.length,
-            itemBuilder: (context, index) {
-              final movie = movies[index];
-              return Padding(
-                padding: const EdgeInsets.only(right: 16.0),
-                child: SizedBox(
-                  width: 140,
-                  child: TvFocusCard(
-                    focusNode: (isFirstShelf && index == 0) ? _firstCardFocusNode : null,
-                    posterUrl: movie.posterUrl,
-                    title: movie.title,
-                    rating: movie.ratingScore > 0 ? movie.ratingScore : null,
-                    year: movie.year.isNotEmpty ? movie.year : null,
-                    isTv: movie.isTv,
-                    isCompleted: !movie.isTv && StorageService.instance.isCompletedSync(movie.imdbId),
+          child: FocusTraversalGroup(
+            policy: WidgetOrderTraversalPolicy(),
+            child: ListView.builder(
+              key: PageStorageKey('actor_${widget.tmdbId}_shelf_${title.toLowerCase().replaceAll(' ', '_')}'),
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              addAutomaticKeepAlives: false,
+              addRepaintBoundaries: true,
+              cacheExtent: 280.0,
+              itemCount: movies.length,
+              itemBuilder: (context, index) {
+                final movie = movies[index];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 16.0),
+                  child: SizedBox(
                     width: 140,
-                    height: 210,
-                    showTitleBelow: true,
-                    onTap: () => _navigateToDetails(movie),
+                    child: TvFocusCard(
+                      focusNode: (isFirstShelf && index == 0) ? _firstCardFocusNode : null,
+                      posterUrl: movie.posterUrl,
+                      title: movie.title,
+                      rating: movie.ratingScore > 0 ? movie.ratingScore : null,
+                      year: movie.year.isNotEmpty ? movie.year : null,
+                      isTv: movie.isTv,
+                      isCompleted: !movie.isTv && StorageService.instance.isCompletedSync(movie.imdbId),
+                      width: 140,
+                      height: 210,
+                      showTitleBelow: true,
+                      onTap: () => _navigateToDetails(movie),
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ],

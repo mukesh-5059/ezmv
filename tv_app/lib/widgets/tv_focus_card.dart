@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../theme.dart';
@@ -58,26 +57,6 @@ class TvFocusCard extends StatefulWidget {
 
 class _TvFocusCardState extends State<TvFocusCard> {
   bool _isFocused = false;
-  bool _shouldLoadImage = false;
-  Timer? _loadTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.autofocus || widget.focusNode?.hasFocus == true) {
-      _shouldLoadImage = true;
-    } else {
-      _loadTimer = Timer(const Duration(milliseconds: 140), () {
-        if (mounted) setState(() => _shouldLoadImage = true);
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _loadTimer?.cancel();
-    super.dispose();
-  }
 
   Widget _buildFallbackCard() {
     return Container(
@@ -137,10 +116,6 @@ class _TvFocusCardState extends State<TvFocusCard> {
       autofocus: widget.autofocus,
       onFocusChange: (focused) {
         setState(() => _isFocused = focused);
-        if (focused && !_shouldLoadImage) {
-          _loadTimer?.cancel();
-          setState(() => _shouldLoadImage = true);
-        }
         if (focused) {
           final RenderObject? renderObject = context.findRenderObject();
           if (renderObject != null && renderObject.attached) {
@@ -201,16 +176,14 @@ class _TvFocusCardState extends State<TvFocusCard> {
                     fit: StackFit.expand,
                     children: [
                       // Poster Image with Strict Downsampling & Static Skeleton (zero ticker jank)
-                      if (widget.posterUrl.isNotEmpty && _shouldLoadImage)
+                      if (widget.posterUrl.isNotEmpty)
                         CachedNetworkImage(
                           imageUrl: widget.posterUrl,
                           fit: BoxFit.cover,
-                          memCacheWidth: 260,
-                          memCacheHeight: 390,
-                          maxWidthDiskCache: 260,
-                          maxHeightDiskCache: 390,
-                          fadeInDuration: const Duration(milliseconds: 120),
-                          fadeOutDuration: const Duration(milliseconds: 120),
+                          memCacheWidth: widget.width.round(),
+                          memCacheHeight: cardHeight.round(),
+                          fadeInDuration: Duration.zero,
+                          fadeOutDuration: Duration.zero,
                           placeholder: (context, url) => Container(
                             color: TVTheme.surfaceElevated,
                             child: const Center(
@@ -318,7 +291,7 @@ class _TvFocusCardState extends State<TvFocusCard> {
                               boxShadow: const [
                                 BoxShadow(
                                   color: Colors.black87,
-                                  blurRadius: 4,
+                                  blurRadius: 0,
                                   offset: Offset(0, 1),
                                 ),
                               ],

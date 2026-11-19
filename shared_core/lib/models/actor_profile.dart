@@ -16,7 +16,7 @@ class ActorSummary {
   String get profileUrl {
     if (profilePath == null || profilePath!.isEmpty) return '';
     if (profilePath!.startsWith('http')) return profilePath!;
-    return 'https://image.tmdb.org/t/p/w500$profilePath';
+    return 'https://image.tmdb.org/t/p/w185$profilePath';
   }
 
   factory ActorSummary.fromJson(Map<String, dynamic> json) => ActorSummary(
@@ -54,7 +54,7 @@ class ActorProfile {
   String get profileUrl {
     if (profilePath == null || profilePath!.isEmpty) return '';
     if (profilePath!.startsWith('http')) return profilePath!;
-    return 'https://image.tmdb.org/t/p/w500$profilePath';
+    return 'https://image.tmdb.org/t/p/w185$profilePath';
   }
 
   factory ActorProfile.fromJson(Map<String, dynamic> json) {

@@ -407,102 +407,102 @@ class _HomeScreenState extends State<HomeScreen> {
             controller: _verticalScrollController,
             padding: const EdgeInsets.only(top: 68),
             children: [
-            // 1. Hero Billboard Carousel
-            if (lanes.isNotEmpty)
-              RepaintBoundary(
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: _isScrolledDown,
-                  builder: (context, isScrolledDown, child) {
-                    return TvBillboard(
-                      lanes: lanes,
-                      items: _dashboard?.billboard,
-                      isVisible: !isScrolledDown,
-                      focusNode: _billboardFocusNode,
-                      onSelect: _navigateToDetails,
-                      onPlay: _handlePlayMovie,
-                      onNavigateUp: () {
-                        _scrollToTop();
-                        _navActiveTabFocusNode.requestFocus();
-                      },
-                      onNavigateDown: _focusFirstLaneHeader,
-                    );
-                  },
+              // 1. Hero Billboard Carousel
+              if (lanes.isNotEmpty)
+                RepaintBoundary(
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _isScrolledDown,
+                    builder: (context, isScrolledDown, child) {
+                      return TvBillboard(
+                        lanes: lanes,
+                        items: _dashboard?.billboard,
+                        isVisible: !isScrolledDown,
+                        focusNode: _billboardFocusNode,
+                        onSelect: _navigateToDetails,
+                        onPlay: _handlePlayMovie,
+                        onNavigateUp: () {
+                          _scrollToTop();
+                          _navActiveTabFocusNode.requestFocus();
+                        },
+                        onNavigateDown: _focusFirstLaneHeader,
+                      );
+                    },
+                  ),
                 ),
-              ),
 
-            // 2. Row 0: Continue Watching Lane (Dynamic)
-            RepaintBoundary(
-              child: TvContinueWatchingLane(
-                key: _continueWatchingKey,
-                headerFocusNode: _continueWatchingHeaderNode,
-                onResume: _handleResumeWatching,
-                onNavigateUpFromHeader: () {
-                  _scrollToTop();
-                  _billboardFocusNode.requestFocus();
-                },
-                onNavigateDownFromCard: () {
-                  if (lanes.isNotEmpty) {
-                    _getLaneHeaderNode(lanes.first.id).requestFocus();
-                  }
-                },
-              ),
-            ),
-
-            // 3. Content Lanes
-            ...lanes.asMap().entries.map((entry) {
-              final i = entry.key;
-              final lane = entry.value;
-              return RepaintBoundary(
-                key: ValueKey('lane_${lane.id}'),
-                child: TvMovieLane(
-                  lane: lane,
-                  headerFocusNode: _getLaneHeaderNode(lane.id),
-                  onMovieTap: _navigateToDetails,
-                  onShowAll: _navigateToLaneGrid,
+              // 2. Row 0: Continue Watching Lane (Dynamic)
+              RepaintBoundary(
+                child: TvContinueWatchingLane(
+                  key: _continueWatchingKey,
+                  headerFocusNode: _continueWatchingHeaderNode,
+                  onResume: _handleResumeWatching,
                   onNavigateUpFromHeader: () {
-                    if (i == 0) {
-                      if (_continueWatchingKey.currentState?.hasEntries == true) {
-                        _continueWatchingHeaderNode.requestFocus();
-                      } else {
-                        _scrollToTop();
-                        _billboardFocusNode.requestFocus();
-                      }
-                    } else {
-                      _getLaneHeaderNode(lanes[i - 1].id).requestFocus();
-                    }
+                    _scrollToTop();
+                    _billboardFocusNode.requestFocus();
                   },
                   onNavigateDownFromCard: () {
-                    if (i < lanes.length - 1) {
-                      _getLaneHeaderNode(lanes[i + 1].id).requestFocus();
-                    } else if (_activeDashboardId == 'tamil') {
-                      if (_actorsKey.currentState != null) {
-                        _actorsKey.currentState!.focusCard();
-                      } else {
-                        _actorsHeaderNode.requestFocus();
-                      }
+                    if (lanes.isNotEmpty) {
+                      _getLaneHeaderNode(lanes.first.id).requestFocus();
                     }
                   },
                 ),
-              );
-            }),
-
-            // 4. Tamil Actors Lane (Tamil Dashboard Only Shelf)
-            if (_activeDashboardId == 'tamil')
-              TvActorsLane(
-                key: _actorsKey,
-                headerFocusNode: _actorsHeaderNode,
-                onActorTap: _navigateToActor,
-                onNavigateUpFromHeader: () {
-                  if (lanes.isNotEmpty) {
-                    _getLaneHeaderNode(lanes.last.id).requestFocus();
-                  }
-                },
               ),
 
-            const SizedBox(height: 48),
-          ],
+              // 3. Content Lanes
+              ...lanes.asMap().entries.map((entry) {
+                final i = entry.key;
+                final lane = entry.value;
+                return RepaintBoundary(
+                  key: ValueKey('lane_${lane.id}'),
+                  child: TvMovieLane(
+                    lane: lane,
+                    headerFocusNode: _getLaneHeaderNode(lane.id),
+                    onMovieTap: _navigateToDetails,
+                    onShowAll: _navigateToLaneGrid,
+                    onNavigateUpFromHeader: () {
+                      if (i == 0) {
+                        if (_continueWatchingKey.currentState?.hasEntries == true) {
+                          _continueWatchingHeaderNode.requestFocus();
+                        } else {
+                          _scrollToTop();
+                          _billboardFocusNode.requestFocus();
+                        }
+                      } else {
+                        _getLaneHeaderNode(lanes[i - 1].id).requestFocus();
+                      }
+                    },
+                    onNavigateDownFromCard: () {
+                      if (i < lanes.length - 1) {
+                        _getLaneHeaderNode(lanes[i + 1].id).requestFocus();
+                      } else if (_activeDashboardId == 'tamil') {
+                        if (_actorsKey.currentState != null) {
+                          _actorsKey.currentState!.focusCard();
+                        } else {
+                          _actorsHeaderNode.requestFocus();
+                        }
+                      }
+                    },
+                  ),
+                );
+              }),
+
+              // 4. Tamil Actors Lane (Tamil Dashboard Only Shelf)
+              if (_activeDashboardId == 'tamil')
+                TvActorsLane(
+                  key: _actorsKey,
+                  headerFocusNode: _actorsHeaderNode,
+                  onActorTap: _navigateToActor,
+                  onNavigateUpFromHeader: () {
+                    if (lanes.isNotEmpty) {
+                      _getLaneHeaderNode(lanes.last.id).requestFocus();
+                    }
+                  },
+                ),
+
+              const SizedBox(height: 48),
+            ],
+          ),
         ),
-      ),
 
         // Pinned Top Navigation Bar with subtle scrim backdrop
         Positioned(

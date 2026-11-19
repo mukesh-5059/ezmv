@@ -397,11 +397,9 @@ class _DetailsScreenState extends State<DetailsScreen> {
                 fit: BoxFit.cover,
                 memCacheWidth: 1280,
                 memCacheHeight: 720,
-                maxWidthDiskCache: 1280,
-                maxHeightDiskCache: 720,
                 fadeInDuration: Duration.zero,
                 fadeOutDuration: Duration.zero,
-                errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                errorWidget: (context, url, error) => const SizedBox.shrink(),
               ),
             ),
 
@@ -449,13 +447,11 @@ class _DetailsScreenState extends State<DetailsScreen> {
                             child: CachedNetworkImage(
                               imageUrl: posterUrl,
                               fit: BoxFit.cover,
-                              memCacheWidth: 400,
-                              memCacheHeight: 600,
-                              maxWidthDiskCache: 400,
-                              maxHeightDiskCache: 600,
+                              memCacheWidth: 200,
+                              memCacheHeight: 300,
                               fadeInDuration: Duration.zero,
                               fadeOutDuration: Duration.zero,
-                              errorWidget: (_, __, ___) => const Center(
+                              errorWidget: (context, url, error) => const Center(
                                 child: Icon(Icons.movie, size: 54, color: Colors.white38),
                               ),
                             ),
@@ -678,6 +674,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         SizedBox(
           height: 48,
           child: ListView.builder(
+            key: PageStorageKey('details_seasons_${widget.imdbId}'),
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
             itemCount: seasons.length,
@@ -739,6 +736,7 @@ class _DetailsScreenState extends State<DetailsScreen> {
         SizedBox(
           height: 260,
           child: ListView.builder(
+            key: PageStorageKey('details_episodes_${widget.imdbId}_$_selectedSeasonNumber'),
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
             itemCount: episodes.length,
@@ -831,17 +829,17 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                             CachedNetworkImage(
                               imageUrl: stillUrl,
                               fit: BoxFit.cover,
-                              memCacheWidth: 420,
-                              memCacheHeight: 236,
-                              maxWidthDiskCache: 420,
-                              maxHeightDiskCache: 236,
+                              memCacheWidth: 222,
+                              memCacheHeight: 125,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
                               placeholder: (_, __) => Container(
                                 color: TVTheme.surfaceElevated,
                                 child: const Center(
                                   child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),
                                 ),
                               ),
-                              errorWidget: (_, __, ___) => Container(
+                              errorWidget: (context, url, error) => Container(
                                 color: TVTheme.surfaceElevated,
                                 child: const Center(
                                   child: Icon(Icons.tv, size: 36, color: TVTheme.textMuted),

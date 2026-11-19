@@ -94,15 +94,7 @@ class _TvFocusButtonState extends State<TvFocusButton> {
                 width: TVTheme.focusBorderWidth,
               ),
               boxShadow: _isFocused
-                  ? [
-                      ...TVTheme.focusShadows,
-                      if (widget.isPrimary)
-                        BoxShadow(
-                          color: TVTheme.accentGlow.withValues(alpha: 0.4),
-                          blurRadius: 14,
-                          spreadRadius: 1,
-                        ),
-                    ]
+                  ? TVTheme.focusShadows
                   : TVTheme.restingShadows,
             ),
             child: Row(

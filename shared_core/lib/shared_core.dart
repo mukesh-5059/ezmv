@@ -21,6 +21,7 @@ export 'models/continue_watching_entry.dart';
 export 'api/api_client.dart';
 
 // Services
+export 'services/list_sorter.dart';
 export 'services/stream_ranker.dart';
 export 'services/stream_priority.dart';
 export 'services/source_orchestrator.dart';

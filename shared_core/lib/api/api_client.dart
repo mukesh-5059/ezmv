@@ -65,8 +65,15 @@ class ApiClient {
     http.Client? client,
   })  : baseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl,
         traktClientId = traktClientId,
-        enableClientTrakt = enableClientTrakt ?? (client == null),
+        enableClientTrakt = enableClientTrakt ?? true,
         _client = client ?? http.Client();
+
+  Map<String, String> get _traktHeaders => {
+    'Content-Type': 'application/json',
+    'trakt-api-version': '2',
+    'trakt-api-key': traktClientId,
+    'User-Agent': 'MoviesStreamingApp/1.0',
+  };
 
   Uri _buildUri(String path, [Map<String, String>? queryParams]) {
     final cleanPath = path.startsWith('/') ? path : '/$path';
@@ -203,10 +210,21 @@ class ApiClient {
     bool refresh = false,
   }) async {
     final queryParams = refresh ? <String, String>{'refresh': 'true'} : null;
-    final data = await _get('/api/v1/movies/$mediaType/$id', queryParams);
+    dynamic targetId = id;
+    MovieSummary? resolvedSummary = initialMovie;
+    if (targetId is String && targetId.startsWith('tt')) {
+      final resolvedList = await resolveMovies([targetId], mediaType: mediaType);
+      if (resolvedList.isNotEmpty) {
+        resolvedSummary = resolvedList.first;
+        if (resolvedSummary.tmdbId != null && resolvedSummary.tmdbId! > 0) {
+          targetId = resolvedSummary.tmdbId;
+        }
+      }
+    }
+    final data = await _get('/api/v1/movies/$mediaType/$targetId', queryParams);
     return MovieDetails.fromAdditional(
       data as Map<String, dynamic>,
-      summary: initialMovie,
+      summary: resolvedSummary,
     );
   }
 
@@ -436,12 +454,7 @@ class ApiClient {
         final traktUri = Uri.parse('$traktBaseUrl/search/$endpointType').replace(queryParameters: queryParams);
         final resp = await _client.get(
           traktUri,
-          headers: {
-            'Content-Type': 'application/json',
-            'trakt-api-version': '2',
-            'trakt-api-key': traktClientId,
-            'User-Agent': 'MoviesStreamingApp/1.0',
-          },
+          headers: _traktHeaders,
         ).timeout(const Duration(seconds: 10));
 
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
@@ -531,12 +544,7 @@ class ApiClient {
         final uri = Uri.parse('$traktBaseUrl/lists/popular?page=$page&limit=100');
         final resp = await _client.get(
           uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'trakt-api-version': '2',
-            'trakt-api-key': traktClientId,
-            'User-Agent': 'MoviesStreamingApp/1.0',
-          },
+          headers: _traktHeaders,
         ).timeout(const Duration(seconds: 10));
 
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
@@ -547,12 +555,9 @@ class ApiClient {
           final rawList = json.decode(utf8.decode(resp.bodyBytes)) as List? ?? [];
           final items = <TraktListSummary>[];
           for (final item in rawList) {
-            final listObj = (item is Map<String, dynamic> ? item['list'] : null) as Map<String, dynamic>? ?? (item as Map<String, dynamic>);
-            final id = (listObj['ids']?['trakt'] as num?)?.toInt() ?? (listObj['id'] as num?)?.toInt() ?? 0;
-            final name = listObj['name'] as String? ?? '';
-            final itemCount = (listObj['item_count'] as num?)?.toInt() ?? 0;
-            final likes = (item is Map<String, dynamic> ? item['like_count'] ?? item['likes'] : null) as num? ?? (listObj['likes'] as num?) ?? 0;
-            if (id > 0 && name.isNotEmpty) items.add(TraktListSummary(id: id, name: name, itemCount: itemCount, likes: likes.toInt()));
+            if (item is! Map<String, dynamic>) continue;
+            final summary = TraktListSummary.fromJson(item);
+            if (summary.id > 0 && summary.name.isNotEmpty) items.add(summary);
           }
 
           return PaginatedResponse<TraktListSummary>(
@@ -567,11 +572,22 @@ class ApiClient {
       } catch (_) {}
     }
 
-    final data = await _get('/api/v1/lists/popular', {'page': '$page'});
-    return PaginatedResponse<TraktListSummary>.fromJson(
-      data as Map<String, dynamic>,
-      (item) => TraktListSummary.fromJson(item as Map<String, dynamic>),
-    );
+    try {
+      final data = await _get('/api/v1/lists/popular', {'page': '$page'});
+      return PaginatedResponse<TraktListSummary>.fromJson(
+        data as Map<String, dynamic>,
+        (item) => TraktListSummary.fromJson(item as Map<String, dynamic>),
+      );
+    } catch (_) {
+      return PaginatedResponse<TraktListSummary>(
+        items: [],
+        page: page,
+        totalPages: 0,
+        totalItems: 0,
+        hasMore: false,
+        nextPage: null,
+      );
+    }
   }
 
   Future<PaginatedResponse<TraktListSummary>> searchLists(String query, {int page = 1}) async {
@@ -592,12 +608,7 @@ class ApiClient {
         final uri = Uri.parse('$traktBaseUrl/search/list?query=${Uri.encodeComponent(cleanQuery)}&page=$page&limit=100');
         final resp = await _client.get(
           uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'trakt-api-version': '2',
-            'trakt-api-key': traktClientId,
-            'User-Agent': 'MoviesStreamingApp/1.0',
-          },
+          headers: _traktHeaders,
         ).timeout(const Duration(seconds: 10));
 
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
@@ -608,12 +619,9 @@ class ApiClient {
           final rawList = json.decode(utf8.decode(resp.bodyBytes)) as List? ?? [];
           final items = <TraktListSummary>[];
           for (final item in rawList) {
-            final listObj = (item is Map<String, dynamic> ? item['list'] : null) as Map<String, dynamic>? ?? (item as Map<String, dynamic>);
-            final id = (listObj['ids']?['trakt'] as num?)?.toInt() ?? (listObj['id'] as num?)?.toInt() ?? 0;
-            final name = listObj['name'] as String? ?? '';
-            final itemCount = (listObj['item_count'] as num?)?.toInt() ?? 0;
-            final likes = (item is Map<String, dynamic> ? item['like_count'] ?? item['likes'] : null) as num? ?? (listObj['likes'] as num?) ?? 0;
-            if (id > 0 && name.isNotEmpty) items.add(TraktListSummary(id: id, name: name, itemCount: itemCount, likes: likes.toInt()));
+            if (item is! Map<String, dynamic>) continue;
+            final summary = TraktListSummary.fromJson(item);
+            if (summary.id > 0 && summary.name.isNotEmpty) items.add(summary);
           }
 
           return PaginatedResponse<TraktListSummary>(
@@ -628,14 +636,25 @@ class ApiClient {
       } catch (_) {}
     }
 
-    final data = await _get('/api/v1/lists/search', {
-      'q': query,
-      'page': '$page',
-    });
-    return PaginatedResponse<TraktListSummary>.fromJson(
-      data as Map<String, dynamic>,
-      (item) => TraktListSummary.fromJson(item as Map<String, dynamic>),
-    );
+    try {
+      final data = await _get('/api/v1/lists/search', {
+        'q': cleanQuery,
+        'page': '$page',
+      });
+      return PaginatedResponse<TraktListSummary>.fromJson(
+        data as Map<String, dynamic>,
+        (item) => TraktListSummary.fromJson(item as Map<String, dynamic>),
+      );
+    } catch (_) {
+      return PaginatedResponse<TraktListSummary>(
+        items: [],
+        page: page,
+        totalPages: 0,
+        totalItems: 0,
+        hasMore: false,
+        nextPage: null,
+      );
+    }
   }
 
   Future<PaginatedResponse<MovieSummary>> getListItems(
@@ -650,15 +669,32 @@ class ApiClient {
   }) async {
     if (enableClientTrakt && traktClientId.isNotEmpty) {
       try {
-        final uri = Uri.parse('$traktBaseUrl/lists/$listId/items?page=$page&limit=100');
+        String subpath = '/items';
+        if (type == 'movie') {
+          subpath = '/items/movies';
+        } else if (type == 'tv') {
+          subpath = '/items/shows';
+        }
+
+        final queryParams = <String, String>{
+          'page': '$page',
+          'limit': '100',
+        };
+        if (sortBy != null && sortBy.isNotEmpty) {
+          queryParams['sort_by'] = sortBy;
+        }
+        if (sortOrder != null && sortOrder.isNotEmpty) {
+          queryParams['sort_how'] = sortOrder;
+        }
+
+        final queryString = queryParams.entries
+            .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+            .join('&');
+        final uri = Uri.parse('$traktBaseUrl/lists/$listId$subpath?$queryString');
+
         final resp = await _client.get(
           uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'trakt-api-version': '2',
-            'trakt-api-key': traktClientId,
-            'User-Agent': 'MoviesStreamingApp/1.0',
-          },
+          headers: _traktHeaders,
         ).timeout(const Duration(seconds: 10));
 
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
@@ -669,8 +705,10 @@ class ApiClient {
           final rawList = json.decode(utf8.decode(resp.bodyBytes)) as List? ?? [];
           final imdbIds = <String>[];
           for (final item in rawList) {
+            if (item is! Map<String, dynamic>) continue;
             final payload = item['movie'] ?? item['show'];
-            final imdbId = payload?['ids']?['imdb'] as String?;
+            if (payload is! Map<String, dynamic>) continue;
+            final imdbId = payload['ids']?['imdb'] as String?;
             if (imdbId != null && imdbId.startsWith('tt')) imdbIds.add(imdbId);
           }
 
@@ -730,10 +768,103 @@ class ApiClient {
     if (sortBy != null && sortBy.isNotEmpty) queryParams['sort_by'] = sortBy;
     if (sortOrder != null && sortOrder.isNotEmpty) queryParams['sort_order'] = sortOrder;
 
-    final data = await _get('/api/v1/lists/$listId/items', queryParams);
-    return PaginatedResponse<MovieSummary>.fromJson(
-      data as Map<String, dynamic>,
-      (item) => MovieSummary.fromJson(item as Map<String, dynamic>),
+    try {
+      final data = await _get('/api/v1/lists/$listId/items', queryParams);
+      return PaginatedResponse<MovieSummary>.fromJson(
+        data as Map<String, dynamic>,
+        (item) => MovieSummary.fromJson(item as Map<String, dynamic>),
+      );
+    } catch (_) {
+      return PaginatedResponse<MovieSummary>(
+        items: [],
+        page: page,
+        totalPages: 0,
+        totalItems: 0,
+        hasMore: false,
+        nextPage: null,
+      );
+    }
+  }
+
+  Future<List<MovieSummary>> _fetchTraktMovieList(
+    Uri uri, {
+    String? fallbackPath,
+    Map<String, String>? fallbackParams,
+  }) async {
+    if (enableClientTrakt && traktClientId.isNotEmpty) {
+      try {
+        final resp = await _client.get(
+          uri,
+          headers: _traktHeaders,
+        ).timeout(const Duration(seconds: 10));
+
+        if (resp.statusCode >= 200 && resp.statusCode < 300) {
+          final rawList = json.decode(utf8.decode(resp.bodyBytes)) as List? ?? [];
+          final imdbIds = <String>[];
+          for (final item in rawList) {
+            if (item is! Map<String, dynamic>) continue;
+            final payload = item['movie'] ?? item['show'];
+            if (payload is! Map<String, dynamic>) continue;
+            final imdbId = payload['ids']?['imdb'] as String?;
+            if (imdbId != null && imdbId.startsWith('tt')) {
+              imdbIds.add(imdbId);
+            }
+          }
+
+          if (imdbIds.isNotEmpty) {
+            return await resolveMovies(imdbIds, mediaType: 'movie');
+          }
+          return [];
+        }
+      } catch (_) {}
+    }
+
+    if (fallbackPath != null) {
+      try {
+        final data = await _get(fallbackPath, fallbackParams);
+        if (data is List) {
+          return data.map((item) => MovieSummary.fromJson(item as Map<String, dynamic>)).toList();
+        } else if (data is Map<String, dynamic> && data['items'] is List) {
+          return (data['items'] as List).map((item) => MovieSummary.fromJson(item as Map<String, dynamic>)).toList();
+        }
+      } catch (_) {}
+    }
+
+    return [];
+  }
+
+  Future<List<MovieSummary>> getTrendingMovies({int page = 1, int limit = 20}) async {
+    final uri = Uri.parse('$traktBaseUrl/movies/trending?page=$page&limit=$limit');
+    return _fetchTraktMovieList(
+      uri,
+      fallbackPath: '/api/v1/movies/trending',
+      fallbackParams: {'page': '$page', 'limit': '$limit'},
+    );
+  }
+
+  Future<List<MovieSummary>> getBoxOfficeMovies() async {
+    final uri = Uri.parse('$traktBaseUrl/movies/boxoffice');
+    return _fetchTraktMovieList(
+      uri,
+      fallbackPath: '/api/v1/movies/boxoffice',
+    );
+  }
+
+  Future<List<MovieSummary>> getAnticipatedMovies({int page = 1, int limit = 20}) async {
+    final uri = Uri.parse('$traktBaseUrl/movies/anticipated?page=$page&limit=$limit');
+    return _fetchTraktMovieList(
+      uri,
+      fallbackPath: '/api/v1/movies/anticipated',
+      fallbackParams: {'page': '$page', 'limit': '$limit'},
+    );
+  }
+
+  Future<List<MovieSummary>> getMostWatchedMovies({String period = 'weekly', int page = 1, int limit = 20}) async {
+    final uri = Uri.parse('$traktBaseUrl/movies/watched/$period?page=$page&limit=$limit');
+    return _fetchTraktMovieList(
+      uri,
+      fallbackPath: '/api/v1/movies/watched/$period',
+      fallbackParams: {'page': '$page', 'limit': '$limit'},
     );
   }
 

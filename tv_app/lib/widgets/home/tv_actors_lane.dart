@@ -327,7 +327,7 @@ class _ActorCircleCardState extends State<_ActorCircleCard> {
                             ...TVTheme.focusShadows,
                             BoxShadow(
                               color: TVTheme.accentGlow.withValues(alpha: 0.35),
-                              blurRadius: 12,
+                              blurRadius: 0,
                               spreadRadius: 1,
                             ),
                           ]
@@ -338,8 +338,10 @@ class _ActorCircleCardState extends State<_ActorCircleCard> {
                         ? CachedNetworkImage(
                             imageUrl: widget.actor.profileUrl,
                             fit: BoxFit.cover,
-                            memCacheWidth: 160,
-                            memCacheHeight: 160,
+                            memCacheWidth: 80,
+                            memCacheHeight: 80,
+                            fadeInDuration: Duration.zero,
+                            fadeOutDuration: Duration.zero,
                             placeholder: (context, url) => Container(
                               color: TVTheme.surface,
                               child: const Icon(

@@ -30,10 +30,15 @@ fetch_stats() {
   adb "${ADB_ARGS[@]}" shell top -n 1 -b | awk '
   /Mem:/ {
     for(i=1;i<=NF;i++) {
-      if($i~/[0-9]+K/) {
+      if($i~/[0-9]+[kK]/) {
         v = substr($i, 1, length($i)-1)
-        if($(i+1)~/total/) tot=v; if($(i+1)~/used/) usd=v; if($(i+1)~/free/) fre=v
+        if($(i+1)~/total/) tot=v; if($(i+1)~/used/) usd=v; if($(i+1)~/free/) fre=v; if($(i+1)~/buffers/) buf=v
       }
+    }
+  }
+  /Swap:/ {
+    for(i=1;i<=NF;i++) {
+      if($i~/[0-9]+[kK]/ && $(i+1)~/cached/) cch=substr($i, 1, length($i)-1)
     }
   }
   /%cpu/ {
@@ -42,7 +47,7 @@ fetch_stats() {
       if($i~/%cpu/)  { match($i,/[0-9]+/); tot_cpu=substr($i,RSTART,RLENGTH) }
     }
   }
-  /^[ ]*[0-9]+/ {
+  $1 ~ /^[0-9]+$/ {
     pid=$1; res=$6; cpu=$9+0; mem=$10+0;
     cmd=""; for(i=12;i<=NF;i++) cmd=(cmd==""?$i:cmd" "$i)
     if(cmd=="") cmd=$NF
@@ -53,7 +58,11 @@ fetch_stats() {
   }
   END {
     if (tot_cpu > 0) printf "=== SYSTEM RESOURCE USAGE ===\nCPU: %.1f%% used, %.1f%% available\n", ((tot_cpu-idl)/tot_cpu)*100, (idl/tot_cpu)*100
-    if (tot > 0)     printf "RAM: %.0f MB used, %.0f MB available (total: %.0f MB)\n\n", usd/1024, fre/1024, tot/1024
+    avail = fre + buf + cch
+    if (tot > 0) {
+      if (avail > 0) printf "RAM: %.0f MB used, %.0f MB available (total: %.0f MB)\n\n", (tot - avail)/1024, avail/1024, tot/1024
+      else printf "RAM: %.0f MB used, %.0f MB available (total: %.0f MB)\n\n", usd/1024, fre/1024, tot/1024
+    }
 
     for(i=0; i<n; i++) {
       for(j=i+1; j<n; j++) {

@@ -6,11 +6,11 @@ import 'package:flutter/painting.dart';
 /// Without strict image cache caps, scrolling across multiple lanes of
 /// posters triggers the Android Low Memory Killer (LMK).
 class TvMemory {
-  /// 75MB maximum image cache size in bytes.
-  static const int maxCacheSizeBytes = 75 * 1024 * 1024;
+  /// 25MB maximum image cache size in bytes (safe for 1GB RAM devices).
+  static const int maxCacheSizeBytes = 25 * 1024 * 1024;
 
   /// Maximum number of image objects retained in memory.
-  static const int maxCacheCount = 100;
+  static const int maxCacheCount = 35;
 
   /// Initializes image cache caps on app launch.
   static void init() {
