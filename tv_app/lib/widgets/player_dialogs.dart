@@ -259,6 +259,7 @@ class _SourcesPickerDialogState extends State<SourcesPickerDialog> {
 
   @override
   void dispose() {
+    _orchestrator.cancel();
     _autoSwitchFocusNode.dispose();
     _streamsTabFocusNode.dispose();
     _failedTabFocusNode.dispose();

@@ -28,4 +28,16 @@ A self-hosted media scrapping / streaming project with a Python backend and Flut
 - **Mobile App**: Work in progress.
 - **Shared Core**: Reusable models, API logic, and watch progress tracking between both clients.
 
+---
+
+## Documentation
+
+Comprehensive architecture, API contracts, and implementation guides are located in the [`docs/`](docs/) directory:
+
+- [API Documentation](docs/api_docs.md): Cloudflare Workers Hono API endpoints and schemas.
+- [TV App Architecture](docs/tv_app.md): 10-foot UI architecture, hardware optimizations, and screen guides.
+- [Shared Core Guide](docs/shared_core.md): Reusable models, QuickJS scraper runtime, and storage services.
+- [Rating Architecture Analysis](docs/rating-architecture-analysis.md): Rating calculation and Bayesian weighting analysis.
+- [Todo](docs/todo.md): Active development task list.
+
 Just use stremio with penguplay or hdhub addon

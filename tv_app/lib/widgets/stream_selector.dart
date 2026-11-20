@@ -100,6 +100,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
   final FocusNode _retryFocus = FocusNode();
   final FocusNode _cancelFocus = FocusNode();
   String? _fatalError;
+  SourceOrchestrator? _orchestrator;
 
   @override
   void initState() {
@@ -125,6 +126,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
     });
 
     final orchestrator = await SourceOrchestrator.createRemoteOrchestrator();
+    _orchestrator = orchestrator;
     final target = MediaScrapeTarget(
       imdbId: widget.imdbId ?? '',
       title: widget.title,
@@ -222,6 +224,7 @@ class _StreamSelectorDialogState extends State<_StreamSelectorDialog> {
 
   @override
   void dispose() {
+    _orchestrator?.cancel();
     _retryFocus.dispose();
     _cancelFocus.dispose();
     super.dispose();

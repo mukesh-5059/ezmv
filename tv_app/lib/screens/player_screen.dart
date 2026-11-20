@@ -145,6 +145,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final Map<String, ({StreamProgressStatus status, int count})> _drawerProviderStatuses = {};
   final Set<String> _failedStreamUrls = {};
   bool _isSwitchingStream = false;
+  SourceOrchestrator? _drawerOrchestrator;
 
   // Subtitles & Audio
   List<SubtitleTrackInfo> _subtitles = [];
@@ -985,7 +986,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     _hudController.triggerInfo('Loading S${seasonNum}E${episode.episodeNumber}...');
 
+    _drawerOrchestrator?.cancel();
     final orchestrator = await SourceOrchestrator.createRemoteOrchestrator();
+    _drawerOrchestrator = orchestrator;
     final target = MediaScrapeTarget(
       imdbId: widget.imdbId,
       title: widget.movieTitle,
@@ -1051,6 +1054,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _subscriptions.clear();
     _drawerSseSubscription?.cancel();
+    _drawerOrchestrator?.cancel();
 
     _saveProgress();
 
